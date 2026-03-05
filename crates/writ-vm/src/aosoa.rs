@@ -234,7 +234,6 @@ impl PartialEq for AoSoAContainer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     fn make_point_struct(x: i32, y: i32) -> WritStruct {
         let mut fields = HashMap::new();
@@ -308,24 +307,10 @@ mod tests {
         c.push(&make_point_struct(50, 60)).unwrap();
 
         let xs: Vec<_> = c.iter_field("x").unwrap().cloned().collect();
-        assert_eq!(
-            xs,
-            vec![
-                Value::I32(10),
-                Value::I32(30),
-                Value::I32(50),
-            ]
-        );
+        assert_eq!(xs, vec![Value::I32(10), Value::I32(30), Value::I32(50),]);
 
         let ys: Vec<_> = c.iter_field("y").unwrap().cloned().collect();
-        assert_eq!(
-            ys,
-            vec![
-                Value::I32(20),
-                Value::I32(40),
-                Value::I32(60),
-            ]
-        );
+        assert_eq!(ys, vec![Value::I32(20), Value::I32(40), Value::I32(60),]);
 
         assert!(c.iter_field("z").is_none());
     }

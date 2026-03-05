@@ -121,9 +121,22 @@ impl Chunk {
         let offset = (self.instructions.len() as i32) - (jump_index as i32) - 1;
         match &mut self.instructions[jump_index] {
             Instruction::Jump(o)
-            | Instruction::JumpIfFalse(o)
-            | Instruction::JumpIfTrue(o)
-            | Instruction::JumpIfFalsePop(o) => *o = offset,
+            | Instruction::JumpIfFalsy(_, o)
+            | Instruction::JumpIfTruthy(_, o)
+            | Instruction::TestLtInt(_, _, o)
+            | Instruction::TestLeInt(_, _, o)
+            | Instruction::TestGtInt(_, _, o)
+            | Instruction::TestGeInt(_, _, o)
+            | Instruction::TestEqInt(_, _, o)
+            | Instruction::TestNeInt(_, _, o)
+            | Instruction::TestLtIntImm(_, _, o)
+            | Instruction::TestLeIntImm(_, _, o)
+            | Instruction::TestGtIntImm(_, _, o)
+            | Instruction::TestGeIntImm(_, _, o)
+            | Instruction::TestLtFloat(_, _, o)
+            | Instruction::TestLeFloat(_, _, o)
+            | Instruction::TestGtFloat(_, _, o)
+            | Instruction::TestGeFloat(_, _, o) => *o = offset,
             _ => panic!("patch_jump called on non-jump instruction"),
         }
     }
@@ -179,10 +192,10 @@ mod tests {
     #[test]
     fn test_line_tracking() {
         let mut chunk = Chunk::new();
-        chunk.write(Instruction::LoadInt(1), 1);
-        chunk.write(Instruction::LoadInt(2), 1);
-        chunk.write(Instruction::Add, 1);
-        chunk.write(Instruction::LoadInt(3), 2);
+        chunk.write(Instruction::LoadInt(0, 1), 1);
+        chunk.write(Instruction::LoadInt(1, 2), 1);
+        chunk.write(Instruction::Add(2, 0, 1), 1);
+        chunk.write(Instruction::LoadInt(3, 3), 2);
         assert_eq!(chunk.line(0), 1);
         assert_eq!(chunk.line(1), 1);
         assert_eq!(chunk.line(2), 1);

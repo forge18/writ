@@ -55,7 +55,6 @@ impl WritObject for WritClassInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     fn make_entity(x: f32, y: f32) -> WritClassInstance {
         let mut fields = HashMap::new();
@@ -72,10 +71,7 @@ mod tests {
     #[test]
     fn get_field() {
         let e = make_entity(1.0, 2.0);
-        assert_eq!(
-            e.get_field("x").unwrap(),
-            Value::F32(1.0)
-        );
+        assert_eq!(e.get_field("x").unwrap(), Value::F32(1.0));
         assert!(e.get_field("z").is_err());
     }
 
@@ -83,10 +79,7 @@ mod tests {
     fn set_field() {
         let mut e = make_entity(1.0, 2.0);
         assert!(e.set_field("x", Value::F32(5.0)).is_ok());
-        assert_eq!(
-            e.get_field("x").unwrap(),
-            Value::F32(5.0)
-        );
+        assert_eq!(e.get_field("x").unwrap(), Value::F32(5.0));
         assert!(e.set_field("z", Value::I32(0)).is_err());
     }
 
@@ -108,14 +101,8 @@ mod tests {
             field_order: vec!["x".to_string(), "y".to_string(), "health".to_string()],
             parent_class: Some("Entity".to_string()),
         };
-        assert_eq!(
-            player.get_field("x").unwrap(),
-            Value::F32(0.0)
-        );
-        assert_eq!(
-            player.get_field("health").unwrap(),
-            Value::F32(100.0)
-        );
+        assert_eq!(player.get_field("x").unwrap(), Value::F32(0.0));
+        assert_eq!(player.get_field("health").unwrap(), Value::F32(100.0));
         assert_eq!(player.parent_class.as_deref(), Some("Entity"));
     }
 }

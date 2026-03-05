@@ -16,7 +16,9 @@ fn eval_expr(source: &str) -> Value {
     let mut parser = Parser::new(tokens);
     let expr = parser.parse_expr().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_expr(&expr).expect("compile failed");
+    compiler
+        .compile_expr(&expr, Some(0))
+        .expect("compile failed");
     let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
     let mut vm = VM::new();
     vm.execute_program(&chunk, &functions, &struct_metas, &class_metas)
@@ -30,7 +32,9 @@ fn eval(source: &str) -> Value {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
     let mut vm = VM::new();
     vm.execute_program(&chunk, &functions, &struct_metas, &class_metas)
@@ -44,7 +48,9 @@ fn eval_error(source: &str) -> RuntimeError {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
     let mut vm = VM::new();
     vm.execute_program(&chunk, &functions, &struct_metas, &class_metas)
@@ -58,7 +64,9 @@ fn compile_with_file(source: &str, file: &str) -> (Chunk, Vec<CompiledFunction>)
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (mut chunk, functions, _struct_metas, _class_metas) = compiler.into_parts();
     chunk.set_file(file);
     let functions: Vec<_> = functions
@@ -338,7 +346,9 @@ fn eval_with_vm(source: &str, vm: &mut VM) -> Value {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, _struct_metas, _class_metas) = compiler.into_parts();
     vm.execute_program(&chunk, &functions, &[], &[])
         .expect("vm failed")
@@ -351,7 +361,9 @@ fn eval_error_with_vm(source: &str, vm: &mut VM) -> RuntimeError {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, _struct_metas, _class_metas) = compiler.into_parts();
     vm.execute_program(&chunk, &functions, &[], &[])
         .expect_err("expected RuntimeError")
@@ -407,9 +419,7 @@ impl WritObject for MockPlayer {
 fn test_register_fn_callable() {
     let mut vm = VM::new();
     vm.register_fn("add_native", 2, |args| match (&args[0], &args[1]) {
-        (Value::I32(a), Value::I32(b)) => {
-            Ok(Value::I32(a + b))
-        }
+        (Value::I32(a), Value::I32(b)) => Ok(Value::I32(a + b)),
         _ => Err("expected two ints".to_string()),
     });
     let result = eval_with_vm("return add_native(3, 4)", &mut vm);
@@ -549,7 +559,9 @@ fn compile_and_run(source: &str, vm: &mut VM) -> Value {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, _struct_metas, _class_metas) = compiler.into_parts();
     vm.execute_program(&chunk, &functions, &[], &[])
         .expect("vm failed")
@@ -1285,29 +1297,17 @@ fn test_hot_reload_preserves_state() {
         .expect("initial run failed");
 
     // Verify both functions work
-    assert_eq!(
-        vm.call_function("get", &[]).unwrap(),
-        Value::I32(1)
-    );
-    assert_eq!(
-        vm.call_function("other", &[]).unwrap(),
-        Value::I32(100)
-    );
+    assert_eq!(vm.call_function("get", &[]).unwrap(), Value::I32(1));
+    assert_eq!(vm.call_function("other", &[]).unwrap(), Value::I32(100));
 
     // Reload only changes "get", "other" should be preserved
     vm.reload("state.writ", "func get() -> int { return 99 }")
         .expect("reload failed");
 
     // Reloaded function returns new value
-    assert_eq!(
-        vm.call_function("get", &[]).unwrap(),
-        Value::I32(99)
-    );
+    assert_eq!(vm.call_function("get", &[]).unwrap(), Value::I32(99));
     // Unreloaded function still returns original value
-    assert_eq!(
-        vm.call_function("other", &[]).unwrap(),
-        Value::I32(100)
-    );
+    assert_eq!(vm.call_function("other", &[]).unwrap(), Value::I32(100));
 }
 
 #[test]
@@ -1398,4 +1398,45 @@ fn test_int_comparison_across_widths() {
     // Comparing i32 with i64 should work correctly.
     let result = eval("return 1 < 9999999999999");
     assert_eq!(result, Value::Bool(true));
+}
+
+/// Regression test for nested closures calling each other (queens pattern).
+/// Exercises: closures capturing shared mutable state, cross-closure calls,
+/// and recursive closure invocation. Uses pre-allocated array to avoid stdlib.
+#[test]
+fn test_queens_nested_closures() {
+    let source = r#"func queens(n: int) -> int {
+    var solutions = 0
+    var cols = [0, 0, 0, 0, 0, 0, 0, 0]
+    func valid(row: int, col: int) -> bool {
+        var r = 0
+        while r < row {
+            let c = cols[r]
+            if c == col { return false }
+            if c - r == col - row { return false }
+            if c + r == col + row { return false }
+            r += 1
+        }
+        return true
+    }
+    func solve(row: int) -> int {
+        if row == n {
+            solutions += 1
+            return 0
+        }
+        var c = 0
+        while c < n {
+            if valid(row, c) {
+                cols[row] = c
+                solve(row + 1)
+            }
+            c += 1
+        }
+        return 0
+    }
+    solve(0)
+    return solutions
+}
+return queens(8)"#;
+    assert_eq!(eval(source), Value::I32(92));
 }

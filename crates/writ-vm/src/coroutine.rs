@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::frame::CallFrame;
@@ -33,7 +32,11 @@ pub enum WaitCondition {
     /// Suspend until a predicate function returns true.
     Until { predicate: Value },
     /// Suspend until a child coroutine completes.
-    Coroutine { child_id: CoroutineId },
+    /// `result_reg` is the frame-relative register to write the child's return value into.
+    Coroutine {
+        child_id: CoroutineId,
+        result_reg: u8,
+    },
 }
 
 /// A coroutine — an independent execution context with its own stack.
@@ -54,7 +57,7 @@ pub struct Coroutine {
     /// The ID of the owning object (for structured concurrency).
     pub owner_id: Option<u64>,
     /// Open upvalues for this coroutine's execution context.
-    pub(crate) open_upvalues: HashMap<usize, Rc<RefCell<Value>>>,
+    pub(crate) open_upvalues: Vec<Option<Rc<RefCell<Value>>>>,
     /// Child coroutine IDs (for cancellation propagation).
     pub(crate) children: Vec<CoroutineId>,
 }
@@ -73,7 +76,7 @@ mod tests {
             wait: None,
             return_value: None,
             owner_id: None,
-            open_upvalues: HashMap::new(),
+            open_upvalues: Vec::new(),
             children: Vec::new(),
         };
         assert_eq!(coro.state, CoroutineState::Running);
@@ -91,7 +94,7 @@ mod tests {
             wait: None,
             return_value: None,
             owner_id: None,
-            open_upvalues: HashMap::new(),
+            open_upvalues: Vec::new(),
             children: Vec::new(),
         };
         coro.state = CoroutineState::Suspended;

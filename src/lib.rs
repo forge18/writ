@@ -157,7 +157,9 @@ impl Writ {
         }
 
         let mut compiler = Compiler::new();
-        compiler.compile_program(&stmts)?;
+        for stmt in &stmts {
+            compiler.compile_stmt(stmt)?;
+        }
         let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
 
         Ok(self
@@ -185,7 +187,9 @@ impl Writ {
         }
 
         let mut compiler = Compiler::new();
-        compiler.compile_program(&stmts)?;
+        for stmt in &stmts {
+            compiler.compile_stmt(stmt)?;
+        }
         let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
 
         self.vm

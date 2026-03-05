@@ -26,7 +26,9 @@ fn eval_with_vm(source: &str, vm: &mut VM) -> Value {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
     vm.execute_program(&chunk, &functions, &struct_metas, &class_metas)
         .expect("vm failed")
@@ -38,7 +40,9 @@ fn eval_error_with_vm(source: &str, vm: &mut VM) -> RuntimeError {
     let mut parser = Parser::new(tokens);
     let stmts = parser.parse_program().expect("parser failed");
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).expect("compile failed");
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).expect("compile failed");
+    }
     let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
     vm.execute_program(&chunk, &functions, &struct_metas, &class_metas)
         .expect_err("expected RuntimeError")
@@ -90,30 +94,15 @@ fn test_type_returns_name() {
 
 #[test]
 fn test_math_abs() {
-    assert_eq!(
-        eval_with_stdlib("return abs(-5)"),
-        Value::I32(5)
-    );
-    assert_eq!(
-        eval_with_stdlib("return abs(3)"),
-        Value::I32(3)
-    );
+    assert_eq!(eval_with_stdlib("return abs(-5)"), Value::I32(5));
+    assert_eq!(eval_with_stdlib("return abs(3)"), Value::I32(3));
 }
 
 #[test]
 fn test_math_clamp() {
-    assert_eq!(
-        eval_with_stdlib("return clamp(10, 0, 5)"),
-        Value::I32(5)
-    );
-    assert_eq!(
-        eval_with_stdlib("return clamp(-3, 0, 5)"),
-        Value::I32(0)
-    );
-    assert_eq!(
-        eval_with_stdlib("return clamp(3, 0, 5)"),
-        Value::I32(3)
-    );
+    assert_eq!(eval_with_stdlib("return clamp(10, 0, 5)"), Value::I32(5));
+    assert_eq!(eval_with_stdlib("return clamp(-3, 0, 5)"), Value::I32(0));
+    assert_eq!(eval_with_stdlib("return clamp(3, 0, 5)"), Value::I32(3));
 }
 
 #[test]
@@ -156,10 +145,7 @@ fn test_math_pi() {
 
 #[test]
 fn test_string_len() {
-    assert_eq!(
-        eval_with_stdlib(r#"return "hello".len()"#),
-        Value::I32(5)
-    );
+    assert_eq!(eval_with_stdlib(r#"return "hello".len()"#), Value::I32(5));
 }
 
 #[test]

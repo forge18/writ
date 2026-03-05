@@ -199,9 +199,7 @@ fn test_module_import() {
     writ.load(module_path.to_str().unwrap()).unwrap();
 
     // Call the loaded function
-    let result = writ
-        .call("double", &[Value::I32(21)])
-        .unwrap();
+    let result = writ.call("double", &[Value::I32(21)]).unwrap();
     assert_eq!(result, Value::I32(42));
 
     // Cleanup
@@ -930,11 +928,7 @@ fn test_type_cast() {
     // After cast, x as float should produce a float or stay as int
     // (the VM auto-promotes at operation time, so cast is a no-op)
     // The value may still be int since cast compiles to nothing — test it doesn't error
-    assert!(
-        result == Value::I32(42)
-            || result == Value::F32(42.0)
-            || result == Value::F64(42.0)
-    );
+    assert!(result == Value::I32(42) || result == Value::F32(42.0) || result == Value::F64(42.0));
 }
 
 // ── Test 34: Closure — basic capture ─────────────────────────────────

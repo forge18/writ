@@ -65,7 +65,6 @@ impl PartialEq for WritStruct {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     fn make_point(x: i32, y: i32) -> WritStruct {
         let mut fields = HashMap::new();

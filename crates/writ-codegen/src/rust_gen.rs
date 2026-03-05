@@ -480,9 +480,7 @@ mod tests {
         assert!(output.contains("pub fn new(x: f32, y: f32) -> Self"));
 
         // Player constructor takes parent fields + own fields
-        assert!(
-            output.contains("pub fn new(x: f32, y: f32, health: f32) -> Self")
-        );
+        assert!(output.contains("pub fn new(x: f32, y: f32, health: f32) -> Self"));
         assert!(output.contains("base: Entity::new(x, y)"));
     }
 

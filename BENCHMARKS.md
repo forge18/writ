@@ -23,15 +23,15 @@ cargo bench --bench pipeline  # Full pipeline (lex + parse + compile + execute)
 
 ## Results (Apple M-series, single-threaded)
 
-| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | Total Improvement |
-|-----------|----------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|
-| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | -81% |
-| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | -35% |
-| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | -80% |
-| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | -56% |
-| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | -61% |
-| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | -60% |
-| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | -61% |
+| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | Total Improvement |
+|-----------|----------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|
+| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | -79% |
+| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | -36% |
+| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | -78% |
+| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | -76% |
+| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | -73% |
+| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | -75% |
+| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | -81% |
 
 ## Cross-Language Comparison
 
@@ -44,12 +44,12 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 | Ruby 3.0 | ~23 ms | YARV bytecode VM |
 | Wren 0.4 | ~30 ms | NaN-boxed single-pass compiler |
 | Python 3.11 | ~31 ms | Specializing adaptive interpreter |
-| **Writ** | **29 ms** | Optimized VM (no NaN-boxing) |
+| **Writ** | **32 ms** | Register-based VM (no NaN-boxing) |
 | Rhai | ~225 ms | Rust-embeddable, AST-walking (estimated) |
 
 ### Key Observations
 
-- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~29ms vs ~30ms), down from ~5x slower after six rounds of optimization.
+- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~32ms vs ~30ms), down from ~5x slower after eight rounds of optimization. Round 8 recovered most of the fib/permute regression from the Round 7 register conversion via fast return paths and upvalue optimization.
 - **Writ is faster than Rhai**, the most comparable Rust-embeddable scripting language. Rhai documents itself as "roughly 2x slower than Python 3" and uses AST-walking rather than bytecode compilation.
 - **Different hardware** between our results (Apple M-series) and the Muxup results (AMD Ryzen 9 5950X). Ratios are more meaningful than absolute numbers.
 - **Binary trees are not directly comparable** — Wren uses depth=12 with the CLBG structure; we use depth=8 with 100 iterations.
@@ -109,6 +109,24 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 **Analysis:** The dominant win comes from items 3-5: recursive functions like `fib` and `permute` previously used `LoadGlobal + Call` (string-based lookup) and generic arithmetic (Add/Sub/Le). After this round, `fib(28)` compiles to 11 instructions (down from 17) using `CallDirect`, `LeInt`, `AddInt`, `LoadLocalSubInt`, and `ReturnLocal`. The combination of eliminating global lookup, typed dispatch, and superinstructions produced a 3.3x speedup on call-heavy benchmarks. Mandelbrot and loop_sum show slight regressions from added branches in the larger instruction dispatch table.
 
+**Round 7** (16ms mandelbrot, -45%; 0.15ms loop_sum, -50%; 4.6ms queens, -35%):
+
+1. **Register-based VM (Lua 5.x model)** — Complete rewrite from stack-based to register-based execution. Registers are frame-relative slots in the existing `Vec<Value>`. Each function frame owns `[base..base+max_registers)`. Instructions use three-address format: `AddInt(dst, src_a, src_b)` where all operands are `u8` register indices. Eliminates all `push`/`pop`/`cheap_clone`/`drop_in_place` from arithmetic hot paths.
+2. **Register allocator in compiler** — Linear stack-based allocator with destination propagation. `compile_expr` returns the register containing the result and accepts an optional destination hint. Locals resolve directly to their register — no `LoadLocal`/`StoreLocal` emission needed.
+3. **Three-address instruction set** — Replaced entire `Instruction` enum. Old stack instructions (`Push`, `Pop`, `LoadLocal`, `StoreLocal`, `AddLocals`, `ReturnLocal`, etc.) replaced by register variants (`Move`, `AddInt(d,a,b)`, `Return(src)`, `CallDirect(base_reg, func_idx, arity)`). Round 6 superinstructions absorbed into native three-address format.
+4. **Quickening preserved** — Generic `Add(d,a,b)` rewrites to `QAddInt(d,a,b)` or `QAddFloat(d,a,b)` at runtime. Deopt path reverts to generic and falls through to type dispatch.
+5. **Fused test-and-branch** — `TestLtInt(a, b, offset)`, `TestLtIntImm(a, imm, offset)`, and float variants fuse comparison + conditional jump into single instructions. Eliminates temporary register and separate `JumpIfFalsy`.
+6. **Open upvalue write-through** — `StoreUpvalue` syncs values back to parent stack slots via `open_upvalues` HashMap, so parent functions see mutations to captured variables through direct register reads. `MakeClosure` syncs self-referential captures for recursive closures.
+
+**Analysis:** The register conversion directly addressed the #1 profiling bottleneck (`drop_in_place<Value>` at 10-38%). Arithmetic instructions now read source registers by reference and write results in-place — no `push`/`pop`/`clone`/`drop` cycle. The biggest wins are on tight arithmetic loops: mandelbrot (-45%), loop_sum (-50%), sieve (-28%), queens (-35%). Fibonacci and permute show slight regressions (+19%, +19%) because the register calling convention has higher per-call overhead than the old stack model (extend stack to `max_registers`, write result to `result_reg`, truncate). These benchmarks are dominated by call overhead rather than arithmetic. Binary trees shows a small improvement (-3%) as expected — it's dominated by object allocation, not stack ops.
+
+**Round 8** (32ms fib, -7%; 35ms permute, -8%; 4.3ms queens, -6%):
+
+1. **Fast return path** — Added `has_rc_values: bool` to `CompiledFunction` and `CallFrame`. Compiler determines at compile time whether any register could hold an Rc-bearing value (Str, Array, Dict, Object, Closure). Return handler uses `unsafe { set_len }` instead of `truncate` for scalar-only frames, skipping `drop_in_place` on every value in the frame window.
+2. **Upvalue Vec replacement** — Replaced `open_upvalues: HashMap<usize, Rc<RefCell<Value>>>` with `Vec<Option<Rc<RefCell<Value>>>>` indexed by absolute stack slot. Eliminates SipHash overhead on every `capture_local`, `close_upvalues_above`, and upvalue write-through operation. `close_upvalues_above` now iterates a contiguous slice instead of calling `HashMap::retain`.
+
+**Analysis:** The fast return path directly addresses the remaining `drop_in_place` overhead from Round 7. Functions like `fib` and `permute` use only Int registers, so every return now skips all drop glue via `set_len` — a single pointer write instead of per-element destructor calls. The upvalue Vec replacement eliminates hashing overhead that was 12% of queens execution time. Together these recover most of the fib/permute regression (+19% → +10% from Round 6 baseline) while further improving queens (-6%) and keeping arithmetic benchmarks stable.
+
 ## Profiling Analysis (Post-Round 6)
 
 Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the dominant cost centers. Flamegraph SVGs are in `flamegraphs/`.
@@ -141,19 +159,15 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the domina
 
 Ordered by profiling-informed expected impact:
 
-1. **Upvalue Vec replacement** (est. -10-15% queens, -3-5% closure benchmarks) — Replace `open_upvalues: HashMap<usize, Rc<RefCell<Value>>>` with a direct-indexed `Vec<Option<Rc<RefCell<Value>>>>`. Eliminates SipHash overhead on every upvalue access. Surgical change, low risk.
+1. **Compact object representation** (est. -30-40% binary_trees) — Replace per-instance `HashMap<String, Value>` with fixed-layout field arrays. Field offsets resolved at compile time. Eliminates HashMap alloc/dealloc/hashing for struct/class instances.
 
-2. **Call/Return frame optimization** (est. -5-10% fib/permute) — Inline frame stack (`[CallFrame; 64]`), split cold upvalue fields to side-table, frame reuse for CallDirect. Profiling shows `CallFrame::truncate_to` at 3% of fibonacci and `drop_in_place<Option<Vec<Rc<RefCell<Value>>>>>` at 2.5% from frame drops.
+2. **Call/Return frame optimization** (est. -5-15% fib/permute) — Inline frame stack (`[CallFrame; 64]`), split cold upvalue fields to side-table, frame reuse for CallDirect. Remaining bottleneck for call-heavy benchmarks after fast return path eliminated most drop glue.
 
-3. **Register-based VM** (est. -15-25% across board) — Replaces stack push/pop/clone/drop with register-indexed operations. Subsumes top-of-stack caching. Directly addresses the #1 bottleneck (stack drop glue, 10-38% of all benchmarks) and #5 (value extraction/cloning). Davis et al. found register VMs execute ~47% fewer instructions.
+3. **Float type propagation** (est. -5-10% mandelbrot) — Extend compiler type tracking to propagate float types through sub-expressions (`a * b` where both are float → emit `MulFloat` directly). Currently only locals and function returns carry type info.
 
-4. **Compact object representation** (est. -30-40% binary_trees) — Replace per-instance `HashMap<String, Value>` with fixed-layout field arrays. Field offsets resolved at compile time. Eliminates HashMap alloc/dealloc/hashing for struct/class instances.
+4. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~16 bytes). 4x better instruction cache density.
 
-5. **Float type propagation** (est. -5-10% mandelbrot) — Extend compiler type tracking to propagate float types through sub-expressions (`a * b` where both are float → emit `MulFloat` directly). Currently only locals and function returns carry type info.
-
-6. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~16 bytes). 4x better instruction cache density.
-
-7. **Tail call optimization** — `CallDirect + Return` → `TailCallDirect` that reuses the current frame. Prevents stack overflow on tail-recursive code but does not help current benchmarks (fib/permute are not tail-recursive).
+5. **Tail call optimization** — `CallDirect + Return` → `TailCallDirect` that reuses the current frame. Prevents stack overflow on tail-recursive code but does not help current benchmarks (fib/permute are not tail-recursive).
 
 ## Design Constraints
 

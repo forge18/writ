@@ -2,9 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use writ_compiler::{
-    Chunk, ClassMeta, CmpOp, CompiledFunction, Instruction, StructMeta, string_hash,
-};
+use writ_compiler::{Chunk, ClassMeta, CompiledFunction, Instruction, StructMeta, string_hash};
 
 use crate::coroutine::{Coroutine, CoroutineId, CoroutineState, WaitCondition};
 use crate::debug::{
@@ -84,12 +82,11 @@ pub struct VM {
     last_file: String,
     /// Fast-path guard: true when any debug hook or breakpoint is active.
     has_debug_hooks: bool,
-    /// Open upvalues: absolute stack slot → shared cell.
-    /// While the enclosing frame is alive, reads/writes go through the cell.
-    /// When the frame returns, the cell is "closed" (self-contained on heap).
-    open_upvalues: HashMap<usize, Rc<RefCell<Value>>>,
-    /// Cached flag: true when `open_upvalues` is non-empty. Avoids HashMap
-    /// method call overhead on every LoadLocal/StoreLocal.
+    /// Open upvalues: indexed by absolute stack slot. `Some(cell)` when a
+    /// local has been captured. Direct indexing eliminates HashMap hashing.
+    open_upvalues: Vec<Option<Rc<RefCell<Value>>>>,
+    /// Cached flag: true when any open upvalue exists. Avoids scanning the
+    /// vec on every LoadLocal/StoreLocal.
     has_open_upvalues: bool,
     /// Pre-computed instruction pointer + length for each function chunk.
     /// Index 0 = main chunk, index 1..N = function chunks.
@@ -127,7 +124,7 @@ impl VM {
             last_line: 0,
             last_file: String::new(),
             has_debug_hooks: false,
-            open_upvalues: HashMap::new(),
+            open_upvalues: Vec::new(),
             has_open_upvalues: false,
             func_ip_cache: Vec::new(),
         }
@@ -342,9 +339,9 @@ impl VM {
 
         // 3. Compile
         let mut compiler = writ_compiler::Compiler::new();
-        compiler
-            .compile_program(&stmts)
-            .map_err(|e| format!("{e}"))?;
+        for stmt in &stmts {
+            compiler.compile_stmt(stmt).map_err(|e| format!("{e}"))?;
+        }
         let (_new_main, new_functions, new_struct_metas, new_class_metas) = compiler.into_parts();
 
         // 4. Load struct metadata
@@ -427,11 +424,15 @@ impl VM {
         // Rebuild instruction pointer cache with all functions
         self.rebuild_ip_cache();
 
+        let main_max = self.main_chunk.instructions().len().min(255) as u8;
+        self.ensure_registers(0, main_max.max(16));
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Main,
             pc: 0,
             base: 0,
-            has_callee_slot: false,
+            result_reg: 0,
+            max_registers: main_max.max(16),
+            has_rc_values: true,
             upvalues: None,
         });
 
@@ -464,15 +465,21 @@ impl VM {
         let saved_instruction_count = self.instruction_count;
         let return_depth = self.frames.len();
         let base = self.stack.len();
+        let max_regs = self.functions[func_idx].max_registers;
         for arg in args {
             self.stack.push(arg.clone());
         }
+        self.ensure_registers(base, max_regs);
 
+        // Result goes into a temporary slot after the frame
+        let result_slot = base; // We'll read it from R(0) after return
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base,
-            has_callee_slot: false,
+            result_reg: result_slot,
+            max_registers: max_regs,
+            has_rc_values: self.functions[func_idx].has_rc_values,
             upvalues: None,
         });
 
@@ -496,15 +503,19 @@ impl VM {
         let saved_instruction_count = self.instruction_count;
         let return_depth = self.frames.len();
         let base = self.stack.len();
+        let max_regs = self.functions[func_idx].max_registers;
         for arg in args {
             self.stack.push(arg.clone());
         }
+        self.ensure_registers(base, max_regs);
 
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base,
-            has_callee_slot: false,
+            result_reg: base,
+            max_registers: max_regs,
+            has_rc_values: self.functions[func_idx].has_rc_values,
             upvalues: None,
         });
 
@@ -570,11 +581,17 @@ impl VM {
         self.rebuild_ip_cache();
 
         // Push the top-level frame
+        // For the main chunk, we use a generous register count since the compiler
+        // doesn't track max_registers for the main chunk (it's always the script body).
+        let main_max = 128u8; // generous default for top-level scripts
+        self.ensure_registers(0, main_max);
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Main,
             pc: 0,
             base: 0,
-            has_callee_slot: false,
+            result_reg: 0,
+            max_registers: main_max,
+            has_rc_values: true,
             upvalues: None,
         });
 
@@ -638,20 +655,13 @@ impl VM {
         self.frames.last().expect("call stack is empty")
     }
 
-    /// Pops a value from the operand stack.
+    /// Ensures the stack is large enough for the given frame.
     #[inline(always)]
-    fn pop(&mut self) -> Result<Value, RuntimeError> {
-        self.stack
-            .pop()
-            .ok_or_else(|| self.make_error("stack underflow".to_string()))
-    }
-
-    /// Peeks at the top value on the operand stack without removing it.
-    #[inline(always)]
-    fn peek(&self) -> Result<&Value, RuntimeError> {
-        self.stack
-            .last()
-            .ok_or_else(|| self.make_error("stack underflow".to_string()))
+    fn ensure_registers(&mut self, base: usize, max_regs: u8) {
+        let needed = base + max_regs as usize;
+        if self.stack.len() < needed {
+            self.stack.resize(needed, Value::Null);
+        }
     }
 
     /// Constructs a RuntimeError with a stack trace from the current call stack.
@@ -730,23 +740,44 @@ impl VM {
                 }
             }
 
-            // End of chunk: implicit return
+            // End of chunk: implicit return null
             if ip >= ip_end {
                 if self.has_debug_hooks {
                     self.fire_return_hook();
                 }
-                let return_value = self.stack.pop().unwrap_or(Value::Null);
                 let frame = unsafe { self.frames.pop().unwrap_unchecked() };
-                self.stack.truncate(frame.truncate_to());
-                if self.frames.len() <= return_depth {
-                    return Ok(RunResult::Return(return_value));
+                if self.has_open_upvalues {
+                    self.close_upvalues_above(frame.base);
                 }
-                self.stack.push(return_value);
-                // Reload from new top frame
-                let f = unsafe { self.frames.last().unwrap_unchecked() };
-                base = f.base;
-                chunk_id = f.chunk_id;
-                reload_ip!(self, chunk_id, f.pc);
+                let result_reg = frame.result_reg;
+                if self.frames.len() <= return_depth {
+                    // Top-level frame: return value in register 0
+                    let result = if frame.base < self.stack.len() {
+                        std::mem::replace(&mut self.stack[frame.base], Value::Null)
+                    } else {
+                        Value::Null
+                    };
+                    if frame.has_rc_values {
+                        self.stack.truncate(frame.base);
+                    } else {
+                        unsafe { self.stack.set_len(frame.base) };
+                    }
+                    return Ok(RunResult::Return(result));
+                }
+                // Write null to caller's result register, truncate frame
+                if result_reg < self.stack.len() {
+                    self.stack[result_reg] = Value::Null;
+                }
+                let caller = unsafe { self.frames.last().unwrap_unchecked() };
+                let caller_top = caller.base + caller.max_registers as usize;
+                if frame.has_rc_values {
+                    self.stack.truncate(caller_top);
+                } else {
+                    unsafe { self.stack.set_len(caller_top) };
+                }
+                base = caller.base;
+                chunk_id = caller.chunk_id;
+                reload_ip!(self, chunk_id, caller.pc);
                 continue;
             }
 
@@ -763,162 +794,166 @@ impl VM {
 
             match instruction {
                 // ── Literals ──────────────────────────────────────────
-                Instruction::LoadInt(v) => {
-                    self.stack.push(Value::I32(v));
+                Instruction::LoadInt(dst, v) => {
+                    self.stack[base + dst as usize] = Value::I32(v);
                 }
-                Instruction::LoadConstInt(idx) => {
+                Instruction::LoadConstInt(dst, idx) => {
                     let chunk = self.chunk_for(chunk_id);
                     let v = chunk.int64_constants()[idx as usize];
-                    self.stack.push(Value::I64(v));
+                    self.stack[base + dst as usize] = Value::I64(v);
                 }
-                Instruction::LoadFloat(v) => {
-                    self.stack.push(Value::F32(v));
+                Instruction::LoadFloat(dst, v) => {
+                    self.stack[base + dst as usize] = Value::F32(v);
                 }
-                Instruction::LoadConstFloat(idx) => {
+                Instruction::LoadConstFloat(dst, idx) => {
                     let chunk = self.chunk_for(chunk_id);
                     let v = chunk.float64_constants()[idx as usize];
-                    self.stack.push(Value::F64(v));
+                    self.stack[base + dst as usize] = Value::F64(v);
                 }
-                Instruction::LoadBool(v) => self.stack.push(Value::Bool(v)),
-                Instruction::LoadStr(idx) => {
+                Instruction::LoadBool(dst, v) => {
+                    self.stack[base + dst as usize] = Value::Bool(v);
+                }
+                Instruction::LoadStr(dst, idx) => {
                     let chunk = self.chunk_for(chunk_id);
                     let s = Rc::clone(&chunk.rc_strings()[idx as usize]);
-                    self.stack.push(Value::Str(s));
+                    self.stack[base + dst as usize] = Value::Str(s);
                 }
-                Instruction::LoadNull => self.stack.push(Value::Null),
-
-                // ── Local variables ──────────────────────────────────
-                Instruction::LoadLocal(slot) => {
-                    let abs = base + slot as usize;
-                    let val = if self.has_open_upvalues {
-                        if let Some(cell) = self.open_upvalues.get(&abs) {
-                            cell.borrow().cheap_clone()
-                        } else {
-                            self.stack[abs].cheap_clone()
-                        }
-                    } else {
-                        // SAFETY: compiler guarantees slot is valid
-                        unsafe { self.stack.get_unchecked(abs).cheap_clone() }
-                    };
-                    self.stack.push(val);
+                Instruction::LoadNull(dst) => {
+                    self.stack[base + dst as usize] = Value::Null;
                 }
-                Instruction::StoreLocal(slot) => {
-                    let val = self.pop()?;
-                    let target = base + slot as usize;
-                    // Extend the stack if the slot doesn't exist yet
-                    while self.stack.len() <= target {
-                        self.stack.push(Value::Null);
-                    }
-                    // Sync to open upvalue cell if this local is captured
+                Instruction::Move(dst, src) => {
+                    let val = self.stack[base + src as usize].cheap_clone();
+                    let abs_dst = base + dst as usize;
+                    // Sync to open upvalue cell if destination is captured
                     if self.has_open_upvalues
-                        && let Some(cell) = self.open_upvalues.get(&target)
+                        && abs_dst < self.open_upvalues.len()
+                        && let Some(cell) = &self.open_upvalues[abs_dst]
                     {
                         *cell.borrow_mut() = val.cheap_clone();
                     }
-                    self.stack[target] = val; // move, not clone
+                    self.stack[abs_dst] = val;
+                }
+                Instruction::LoadGlobal(dst, name_hash) => {
+                    let val = if let Some((_, value)) = self.globals.get(&name_hash) {
+                        value.clone()
+                    } else {
+                        let name = self
+                            .field_names
+                            .get(&name_hash)
+                            .cloned()
+                            .or_else(|| {
+                                let chunk = self.chunk_for(chunk_id);
+                                chunk
+                                    .rc_strings()
+                                    .iter()
+                                    .find(|s| string_hash(s) == name_hash)
+                                    .map(|s| s.as_str().to_string())
+                            })
+                            .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
+                        Value::Str(Rc::new(name))
+                    };
+                    self.stack[base + dst as usize] = val;
                 }
 
-                // ── Arithmetic ───────────────────────────────────────
-                Instruction::Add => {
+                // ── Arithmetic (generic, quickenable) ────────────────
+                Instruction::Add(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     // Quicken based on observed operand types
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QAddInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QAddFloat;
-                            },
-                            _ => {}
-                        }
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QAddInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QAddFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_add()?;
+                    self.exec_add_reg(base, dst, a, b)?;
                 }
-                Instruction::Sub => {
+                Instruction::Sub(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QSubInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QSubFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QSubInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QSubFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_binary_arith(
+                    self.exec_binary_arith_reg(
+                        base + dst as usize,
+                        base + a as usize,
+                        base + b as usize,
                         i32::checked_sub,
                         i64::checked_sub,
-                        |a, b| a - b,
-                        "subtract",
+                        |x, y| x - y,
                     )?;
                 }
-                Instruction::Mul => {
+                Instruction::Mul(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QMulInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QMulFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QMulInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QMulFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_binary_arith(
+                    self.exec_binary_arith_reg(
+                        base + dst as usize,
+                        base + a as usize,
+                        base + b as usize,
                         i32::checked_mul,
                         i64::checked_mul,
-                        |a, b| a * b,
-                        "multiply",
+                        |x, y| x * y,
                     )?;
                 }
-                Instruction::Div => {
+                Instruction::Div(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QDivInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QDivFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QDivInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QDivFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_div()?;
+                    self.exec_div_reg(base, dst, a, b)?;
                 }
-                Instruction::Mod => {
+                Instruction::Mod(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_mod()?;
+                    self.exec_mod_reg(base, dst, a, b)?;
                 }
 
                 // ── Unary ────────────────────────────────────────────
-                Instruction::Neg => {
+                Instruction::Neg(dst, src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let val = self.pop()?;
+                    let val = &self.stack[base + src as usize];
                     let result = match val {
                         Value::I32(v) => match v.checked_neg() {
                             Some(r) => Value::I32(r),
-                            None => Value::I64(-(v as i64)),
+                            None => Value::I64(-(*v as i64)),
                         },
-                        Value::I64(v) => {
-                            Value::I64(v.checked_neg().ok_or_else(|| {
-                                self.make_error("integer overflow on negation".to_string())
-                            })?)
-                        }
+                        Value::I64(v) => Value::I64(v.checked_neg().ok_or_else(|| {
+                            self.make_error("integer overflow on negation".to_string())
+                        })?),
                         Value::F32(v) => Value::F32(-v),
                         Value::F64(v) => Value::F64(-v),
                         _ => {
@@ -927,14 +962,16 @@ impl VM {
                             );
                         }
                     };
-                    self.stack.push(result);
+                    self.stack[base + dst as usize] = result;
                 }
-                Instruction::Not => {
+                Instruction::Not(dst, src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let val = self.pop()?;
+                    let val = &self.stack[base + src as usize];
                     match val {
-                        Value::Bool(v) => self.stack.push(Value::Bool(!v)),
+                        Value::Bool(v) => {
+                            self.stack[base + dst as usize] = Value::Bool(!v);
+                        }
                         _ => {
                             return Err(
                                 self.make_error(format!("cannot apply '!' to {}", val.type_name()))
@@ -943,222 +980,242 @@ impl VM {
                     }
                 }
 
-                // ── Comparison ───────────────────────────────────────
-                Instruction::Eq => {
-                    let len = self.stack.len();
-                    // Quicken based on observed types
-                    match (&self.stack[len - 2], &self.stack[len - 1]) {
+                // ── Comparison (generic, quickenable) ────────────────
+                Instruction::Eq(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QEqInt;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QEqInt(dst, a, b);
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QEqFloat;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QEqFloat(dst, a, b);
                         },
                         _ => {}
                     }
-                    let eq = self.stack[len - 2] == self.stack[len - 1];
-                    self.stack[len - 2] = Value::Bool(eq);
-                    self.stack.truncate(len - 1);
+                    let eq = self.stack[base + a as usize] == self.stack[base + b as usize];
+                    self.stack[base + dst as usize] = Value::Bool(eq);
                 }
-                Instruction::Ne => {
-                    let len = self.stack.len();
-                    match (&self.stack[len - 2], &self.stack[len - 1]) {
+                Instruction::Ne(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QNeInt;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QNeInt(dst, a, b);
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QNeFloat;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QNeFloat(dst, a, b);
                         },
                         _ => {}
                     }
-                    let ne = self.stack[len - 2] != self.stack[len - 1];
-                    self.stack[len - 2] = Value::Bool(ne);
-                    self.stack.truncate(len - 1);
+                    let ne = self.stack[base + a as usize] != self.stack[base + b as usize];
+                    self.stack[base + dst as usize] = Value::Bool(ne);
                 }
-                Instruction::Lt => {
+                Instruction::Lt(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QLtInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QLtFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QLtInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QLtFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_comparison(|a, b| a < b, |a, b| a < b)?;
+                    self.exec_comparison_reg(base, dst, a, b, |x, y| x < y, |x, y| x < y)?;
                 }
-                Instruction::Le => {
+                Instruction::Le(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QLeInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QLeFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QLeInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QLeFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_comparison(|a, b| a <= b, |a, b| a <= b)?;
+                    self.exec_comparison_reg(base, dst, a, b, |x, y| x <= y, |x, y| x <= y)?;
                 }
-                Instruction::Gt => {
+                Instruction::Gt(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QGtInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QGtFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QGtInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QGtFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_comparison(|a, b| a > b, |a, b| a > b)?;
+                    self.exec_comparison_reg(base, dst, a, b, |x, y| x > y, |x, y| x > y)?;
                 }
-                Instruction::Ge => {
+                Instruction::Ge(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        match (&self.stack[len - 2], &self.stack[len - 1]) {
-                            (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QGeInt;
-                            },
-                            (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                                *(ip.sub(1) as *mut Instruction) = Instruction::QGeFloat;
-                            },
-                            _ => {}
-                        }
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
+                    match (a_ref, b_ref) {
+                        (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QGeInt(dst, a, b);
+                        },
+                        (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
+                            *(ip.sub(1) as *mut Instruction) = Instruction::QGeFloat(dst, a, b);
+                        },
+                        _ => {}
                     }
-                    self.exec_comparison(|a, b| a >= b, |a, b| a >= b)?;
+                    self.exec_comparison_reg(base, dst, a, b, |x, y| x >= y, |x, y| x >= y)?;
                 }
 
                 // ── Logical ──────────────────────────────────────────
-                Instruction::And => {
+                Instruction::And(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    match (&self.stack[len - 2], &self.stack[len - 1]) {
-                        (Value::Bool(a), Value::Bool(b)) => {
-                            let r = *a && *b;
-                            self.stack[len - 2] = Value::Bool(r);
-                            self.stack.truncate(len - 1);
+                    match (
+                        &self.stack[base + a as usize],
+                        &self.stack[base + b as usize],
+                    ) {
+                        (Value::Bool(av), Value::Bool(bv)) => {
+                            self.stack[base + dst as usize] = Value::Bool(*av && *bv);
                         }
                         _ => {
                             return Err(self.make_error(format!(
                                 "cannot apply '&&' to {} and {}",
-                                self.stack[len - 2].type_name(),
-                                self.stack[len - 1].type_name()
+                                self.stack[base + a as usize].type_name(),
+                                self.stack[base + b as usize].type_name()
                             )));
                         }
                     }
                 }
-                Instruction::Or => {
+                Instruction::Or(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    match (&self.stack[len - 2], &self.stack[len - 1]) {
-                        (Value::Bool(a), Value::Bool(b)) => {
-                            let r = *a || *b;
-                            self.stack[len - 2] = Value::Bool(r);
-                            self.stack.truncate(len - 1);
+                    match (
+                        &self.stack[base + a as usize],
+                        &self.stack[base + b as usize],
+                    ) {
+                        (Value::Bool(av), Value::Bool(bv)) => {
+                            self.stack[base + dst as usize] = Value::Bool(*av || *bv);
                         }
                         _ => {
                             return Err(self.make_error(format!(
                                 "cannot apply '||' to {} and {}",
-                                self.stack[len - 2].type_name(),
-                                self.stack[len - 1].type_name()
+                                self.stack[base + a as usize].type_name(),
+                                self.stack[base + b as usize].type_name()
                             )));
                         }
                     }
                 }
 
-                // ── Control ──────────────────────────────────────────
-                Instruction::Pop => {
-                    self.pop()?;
-                }
-                Instruction::Return => {
+                // ── Return ───────────────────────────────────────────
+                Instruction::Return(src) => {
                     if self.has_debug_hooks {
                         self.fire_return_hook();
                     }
-                    // SAFETY: stack/frames are non-empty during execution
-                    let return_value = unsafe { self.stack.pop().unwrap_unchecked() };
+                    let return_value = self.stack[base + src as usize].cheap_clone();
                     let frame = unsafe { self.frames.pop().unwrap_unchecked() };
-                    // Close any open upvalues belonging to this frame
                     if self.has_open_upvalues {
                         self.close_upvalues_above(frame.base);
                     }
-                    let truncate_to = frame.truncate_to();
-                    if self.stack.len() > truncate_to {
-                        self.stack.truncate(truncate_to);
-                    }
+                    let result_reg = frame.result_reg;
                     if self.frames.len() <= return_depth {
+                        if frame.has_rc_values {
+                            self.stack.truncate(frame.base);
+                        } else {
+                            unsafe { self.stack.set_len(frame.base) };
+                        }
                         return Ok(RunResult::Return(return_value));
                     }
-                    self.stack.push(return_value);
-                    // Reload from new top frame
-                    let f = unsafe { self.frames.last().unwrap_unchecked() };
-                    base = f.base;
-                    chunk_id = f.chunk_id;
-                    reload_ip!(self, chunk_id, f.pc);
+                    // Write return value to caller's result register
+                    self.stack[result_reg] = return_value;
+                    // Restore caller's stack
+                    let caller = unsafe { self.frames.last().unwrap_unchecked() };
+                    let caller_top = caller.base + caller.max_registers as usize;
+                    if frame.has_rc_values {
+                        self.stack.truncate(caller_top);
+                    } else {
+                        unsafe { self.stack.set_len(caller_top) };
+                    }
+                    base = caller.base;
+                    chunk_id = caller.chunk_id;
+                    reload_ip!(self, chunk_id, caller.pc);
+                }
+                Instruction::ReturnNull => {
+                    if self.has_debug_hooks {
+                        self.fire_return_hook();
+                    }
+                    let frame = unsafe { self.frames.pop().unwrap_unchecked() };
+                    if self.has_open_upvalues {
+                        self.close_upvalues_above(frame.base);
+                    }
+                    let result_reg = frame.result_reg;
+                    if self.frames.len() <= return_depth {
+                        if frame.has_rc_values {
+                            self.stack.truncate(frame.base);
+                        } else {
+                            unsafe { self.stack.set_len(frame.base) };
+                        }
+                        return Ok(RunResult::Return(Value::Null));
+                    }
+                    self.stack[result_reg] = Value::Null;
+                    let caller = unsafe { self.frames.last().unwrap_unchecked() };
+                    let caller_top = caller.base + caller.max_registers as usize;
+                    if frame.has_rc_values {
+                        self.stack.truncate(caller_top);
+                    } else {
+                        unsafe { self.stack.set_len(caller_top) };
+                    }
+                    base = caller.base;
+                    chunk_id = caller.chunk_id;
+                    reload_ip!(self, chunk_id, caller.pc);
                 }
 
                 // ── Jumps ────────────────────────────────────────────
                 Instruction::Jump(offset) => {
                     ip = unsafe { ip.offset(offset as isize) };
                 }
-                Instruction::JumpIfFalse(offset) => {
-                    let val = self.peek()?;
-                    if val.is_falsy() {
+                Instruction::JumpIfFalsy(src, offset) => {
+                    if self.stack[base + src as usize].is_falsy() {
                         ip = unsafe { ip.offset(offset as isize) };
                     }
                 }
-                Instruction::JumpIfTrue(offset) => {
-                    let val = self.peek()?;
-                    if !val.is_falsy() {
-                        ip = unsafe { ip.offset(offset as isize) };
-                    }
-                }
-                Instruction::JumpIfFalsePop(offset) => {
-                    // SAFETY: stack is non-empty when JumpIfFalsePop executes
-                    let val = unsafe { self.stack.pop().unwrap_unchecked() };
-                    if val.is_falsy() {
+                Instruction::JumpIfTruthy(src, offset) => {
+                    if !self.stack[base + src as usize].is_falsy() {
                         ip = unsafe { ip.offset(offset as isize) };
                     }
                 }
 
                 // ── Function calls ───────────────────────────────────
-                Instruction::Call(arg_count) => {
+                Instruction::Call(base_reg, arg_count) => {
                     unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_call(arg_count)?;
+                    self.exec_call_reg(base, base_reg, arg_count)?;
                     if self.has_debug_hooks {
                         self.fire_call_hook();
                     }
-                    // Reload from new top frame
                     let f = unsafe { self.frames.last().unwrap_unchecked() };
                     base = f.base;
                     chunk_id = f.chunk_id;
                     reload_ip!(self, chunk_id, f.pc);
                 }
-                Instruction::CallDirect(func_idx, arg_count) => {
-                    // SAFETY: frames is non-empty during execution
+                Instruction::CallDirect(base_reg, func_idx_u16, arg_count) => {
                     unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let func_idx = func_idx as usize;
+                    let func_idx = func_idx_u16 as usize;
                     let n = arg_count as usize;
                     let func = &self.functions[func_idx];
+                    let max_regs = func.max_registers;
+                    let func_has_rc = func.has_rc_values;
+                    let result_reg = base + base_reg as usize; // caller's result register
 
                     if func.is_variadic {
                         let min_args = func.arity.saturating_sub(1);
@@ -1168,39 +1225,52 @@ impl VM {
                                 func.name, min_args, arg_count
                             )));
                         }
+                        // Pack variadic args into array
                         let fixed_count = min_args as usize;
                         let variadic_count = n - fixed_count;
-                        let variadic_start = self.stack.len() - variadic_count;
-                        let variadic_args: Vec<Value> =
-                            self.stack.drain(variadic_start..).collect();
-                        self.stack
-                            .push(Value::Array(Rc::new(RefCell::new(variadic_args))));
-                        let new_base = self.stack.len() - fixed_count - 1;
+                        let arg_start = base + base_reg as usize;
+                        let variadic_start = arg_start + fixed_count;
+                        let variadic_args: Vec<Value> = (0..variadic_count)
+                            .map(|i| self.stack[variadic_start + i].cheap_clone())
+                            .collect();
+                        // New frame base = arg_start (args already in place)
+                        let new_base = arg_start;
+                        // Put variadic array after fixed args
+                        self.stack[new_base + fixed_count] =
+                            Value::Array(Rc::new(RefCell::new(variadic_args)));
+                        self.ensure_registers(new_base, max_regs);
                         self.frames.push(CallFrame {
                             chunk_id: ChunkId::Function(func_idx),
                             pc: 0,
                             base: new_base,
-                            has_callee_slot: false,
+                            result_reg,
+                            max_registers: max_regs,
+                            has_rc_values: true, // variadic creates Array
                             upvalues: None,
                         });
                     } else {
-                        debug_assert_eq!(
-                            func.arity, arg_count,
-                            "CallDirect arity mismatch for '{}'",
-                            func.name
-                        );
                         if func.arity != arg_count {
                             return Err(self.make_error(format!(
                                 "function '{}' expects {} arguments, got {}",
                                 func.name, func.arity, arg_count
                             )));
                         }
-                        let new_base = self.stack.len() - n;
+                        // new_base must be > result_reg so truncate(frame.base) won't
+                        // destroy the result. With args, base_reg+0..arity-1 hold args,
+                        // but with 0 args new_base == result_reg — so bump by 1.
+                        let new_base = if n == 0 {
+                            result_reg + 1
+                        } else {
+                            base + base_reg as usize
+                        };
+                        self.ensure_registers(new_base, max_regs);
                         self.frames.push(CallFrame {
                             chunk_id: ChunkId::Function(func_idx),
                             pc: 0,
                             base: new_base,
-                            has_callee_slot: false,
+                            result_reg,
+                            max_registers: max_regs,
+                            has_rc_values: func_has_rc,
                             upvalues: None,
                         });
                     }
@@ -1208,102 +1278,98 @@ impl VM {
                     if self.has_debug_hooks {
                         self.fire_call_hook();
                     }
-                    // Reload — new frame always starts at pc=0, so ip = ip_base
                     let f = unsafe { self.frames.last().unwrap_unchecked() };
                     base = f.base;
                     chunk_id = ChunkId::Function(func_idx);
                     reload_ip!(self, chunk_id, 0);
                 }
-                Instruction::CallNative(_id) => {
+                Instruction::CallNative(_base_reg, _id, _arg_count) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
                     return Err(self.make_error("native functions not yet supported".to_string()));
                 }
 
                 // ── Null handling ────────────────────────────────────
-                Instruction::NullCoalesce => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let fallback = self.pop()?;
-                    let value = self.pop()?;
-                    if value.is_null() {
-                        self.stack.push(fallback);
+                Instruction::NullCoalesce(dst, a, b) => {
+                    let val = &self.stack[base + a as usize];
+                    if val.is_null() {
+                        let fallback = self.stack[base + b as usize].cheap_clone();
+                        self.stack[base + dst as usize] = fallback;
                     } else {
-                        self.stack.push(value);
+                        let v = val.cheap_clone();
+                        self.stack[base + dst as usize] = v;
                     }
                 }
 
                 // ── String concatenation ─────────────────────────────
-                Instruction::Concat => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let rhs = self.pop()?;
-                    let lhs = self.pop()?;
+                Instruction::Concat(dst, a, b) => {
+                    let lhs = &self.stack[base + a as usize];
+                    let rhs = &self.stack[base + b as usize];
                     let result = format!("{lhs}{rhs}");
-                    self.stack.push(Value::Str(Rc::new(result)));
+                    self.stack[base + dst as usize] = Value::Str(Rc::new(result));
                 }
 
                 // ── Collections ──────────────────────────────────────
-                Instruction::MakeArray(count) => {
+                Instruction::MakeArray(dst, start, count) => {
                     let n = count as usize;
-                    let start = self.stack.len() - n;
-                    let elements: Vec<Value> = self.stack.drain(start..).collect();
-                    self.stack
-                        .push(Value::Array(Rc::new(RefCell::new(elements))));
+                    let s = base + start as usize;
+                    let elements: Vec<Value> =
+                        (0..n).map(|i| self.stack[s + i].cheap_clone()).collect();
+                    self.stack[base + dst as usize] = Value::Array(Rc::new(RefCell::new(elements)));
                 }
-                Instruction::MakeDict(count) => {
+                Instruction::MakeDict(dst, start, count) => {
                     let n = count as usize;
-                    let start = self.stack.len() - (n * 2);
-                    let pairs: Vec<Value> = self.stack.drain(start..).collect();
+                    let s = base + start as usize;
                     let mut map = HashMap::new();
-                    for pair in pairs.chunks(2) {
-                        let key = match &pair[0] {
-                            Value::Str(s) => (**s).clone(),
+                    for i in 0..n {
+                        let key = match &self.stack[s + i * 2] {
+                            Value::Str(sk) => (**sk).clone(),
                             other => other.to_string(),
                         };
-                        map.insert(key, pair[1].clone());
+                        let val = self.stack[s + i * 2 + 1].cheap_clone();
+                        map.insert(key, val);
                     }
-                    self.stack.push(Value::Dict(Rc::new(RefCell::new(map))));
+                    self.stack[base + dst as usize] = Value::Dict(Rc::new(RefCell::new(map)));
                 }
 
                 // ── Field/Index access ───────────────────────────────
-                Instruction::GetField(name_hash) => {
+                Instruction::GetField(dst, obj_reg, name_hash) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_get_field(name_hash)?;
+                    self.exec_get_field_reg(base, dst, obj_reg, name_hash)?;
                 }
-                Instruction::SetField(name_hash) => {
+                Instruction::SetField(obj_reg, name_hash, val_reg) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_set_field(name_hash)?;
+                    self.exec_set_field_reg(base, obj_reg, name_hash, val_reg)?;
                 }
-                Instruction::GetIndex => {
+                Instruction::GetIndex(dst, obj_reg, idx_reg) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_get_index()?;
+                    self.exec_get_index_reg(base, dst, obj_reg, idx_reg)?;
                 }
-                Instruction::SetIndex => {
+                Instruction::SetIndex(obj_reg, idx_reg, val_reg) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_set_index()?;
+                    self.exec_set_index_reg(base, obj_reg, idx_reg, val_reg)?;
                 }
 
-                // ── Coroutines (Phase 13) ────────────────────────────
-                Instruction::StartCoroutine(arg_count) => {
+                // ── Coroutines ───────────────────────────────────────
+                Instruction::StartCoroutine(base_reg, arg_count) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_start_coroutine(arg_count)?;
+                    self.exec_start_coroutine_reg(base, base_reg, arg_count)?;
                 }
                 Instruction::Yield => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
                     return Ok(RunResult::Yield(WaitCondition::OneFrame));
                 }
-                Instruction::YieldSeconds => {
+                Instruction::YieldSeconds(src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let seconds = self.pop()?;
-                    let secs = match &seconds {
+                    let seconds = &self.stack[base + src as usize];
+                    let secs = match seconds {
                         v @ (Value::F32(_) | Value::F64(_)) => v.as_f64(),
                         v @ (Value::I32(_) | Value::I64(_)) => v.as_i64() as f64,
                         _ => {
@@ -1315,11 +1381,11 @@ impl VM {
                     };
                     return Ok(RunResult::Yield(WaitCondition::Seconds { remaining: secs }));
                 }
-                Instruction::YieldFrames => {
+                Instruction::YieldFrames(src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let frames_val = self.pop()?;
-                    let n = match &frames_val {
+                    let frames_val = &self.stack[base + src as usize];
+                    let n = match frames_val {
                         v @ (Value::I32(_) | Value::I64(_)) if v.as_i64() >= 0 => v.as_i64() as u32,
                         _ => {
                             return Err(self.make_error(format!(
@@ -1330,17 +1396,17 @@ impl VM {
                     };
                     return Ok(RunResult::Yield(WaitCondition::Frames { remaining: n }));
                 }
-                Instruction::YieldUntil => {
+                Instruction::YieldUntil(src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let predicate = self.pop()?;
+                    let predicate = self.stack[base + src as usize].cheap_clone();
                     return Ok(RunResult::Yield(WaitCondition::Until { predicate }));
                 }
-                Instruction::YieldCoroutine => {
+                Instruction::YieldCoroutine(dst, src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let handle = self.pop()?;
-                    let child_id = match &handle {
+                    let handle = &self.stack[base + src as usize];
+                    let child_id = match handle {
                         Value::CoroutineHandle(id) => *id,
                         _ => {
                             return Err(self.make_error(format!(
@@ -1349,14 +1415,17 @@ impl VM {
                             )));
                         }
                     };
-                    return Ok(RunResult::Yield(WaitCondition::Coroutine { child_id }));
+                    return Ok(RunResult::Yield(WaitCondition::Coroutine {
+                        child_id,
+                        result_reg: dst,
+                    }));
                 }
 
                 // ── Spread ───────────────────────────────────────────
-                Instruction::Spread => {
+                Instruction::Spread(src) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let val = self.pop()?;
+                    let val = self.stack[base + src as usize].clone();
                     match val {
                         Value::Array(arr) => {
                             let items = arr.borrow();
@@ -1372,52 +1441,29 @@ impl VM {
                     }
                 }
 
-                // ── Phase 19: Structs ──────────────────────────────
-                Instruction::MakeStruct(name_idx, field_count) => {
+                // ── Structs ──────────────────────────────────────────
+                Instruction::MakeStruct(dst, name_idx, start, field_count) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_make_struct(name_idx, field_count, chunk_id)?;
+                    self.exec_make_struct_reg(base, dst, name_idx, start, field_count, chunk_id)?;
                 }
 
                 // ── Classes ─────────────────────────────────────────
-                Instruction::MakeClass(name_idx, field_count) => {
+                Instruction::MakeClass(dst, name_idx, start, field_count) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_make_class(name_idx, field_count, chunk_id)?;
+                    self.exec_make_class_reg(base, dst, name_idx, start, field_count, chunk_id)?;
                 }
 
-                // ── Phase 15: Method calls ──────────────────────────
-                Instruction::CallMethod(name_hash, arg_count) => {
+                // ── Method calls ─────────────────────────────────────
+                Instruction::CallMethod(base_reg, name_hash, arg_count) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_call_method(name_hash, arg_count)?;
-                }
-
-                // ── Phase 15: Global variables ──────────────────────
-                Instruction::LoadGlobal(name_hash) => {
-                    if let Some((_, value)) = self.globals.get(&name_hash) {
-                        self.stack.push(value.clone());
-                    } else {
-                        // Fall back to pushing the name as a string (for function resolution)
-                        let name = self
-                            .field_names
-                            .get(&name_hash)
-                            .cloned()
-                            .or_else(|| {
-                                let chunk = self.chunk_for(chunk_id);
-                                chunk
-                                    .rc_strings()
-                                    .iter()
-                                    .find(|s| string_hash(s) == name_hash)
-                                    .map(|s| s.as_str().to_string())
-                            })
-                            .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
-                        self.stack.push(Value::Str(Rc::new(name)));
-                    }
+                    self.exec_call_method_reg(base, base_reg, name_hash, arg_count)?;
                 }
 
                 // ── Closures ─────────────────────────────────────────
-                Instruction::LoadUpvalue(idx) => {
+                Instruction::LoadUpvalue(dst, idx) => {
                     let val = self
                         .current_frame()
                         .upvalues
@@ -1425,365 +1471,178 @@ impl VM {
                         .expect("LoadUpvalue in non-closure frame")[idx as usize]
                         .borrow()
                         .clone();
-                    self.stack.push(val);
+                    self.stack[base + dst as usize] = val;
                 }
-                Instruction::StoreUpvalue(idx) => {
+                Instruction::StoreUpvalue(src, idx) => {
+                    let val = self.stack[base + src as usize].cheap_clone();
+                    let cell = Rc::clone(
+                        &self
+                            .current_frame()
+                            .upvalues
+                            .as_ref()
+                            .expect("StoreUpvalue in non-closure frame")[idx as usize],
+                    );
+                    *cell.borrow_mut() = val;
+                    // Write-through: if this upvalue is still open (pointing to a
+                    // parent stack slot), sync the value back to the stack so the
+                    // parent function sees the update when reading the register.
+                    if self.has_open_upvalues {
+                        for (abs_slot, entry) in self.open_upvalues.iter().enumerate() {
+                            if let Some(open_cell) = entry
+                                && Rc::ptr_eq(&cell, open_cell)
+                            {
+                                self.stack[abs_slot] = cell.borrow().cheap_clone();
+                                break;
+                            }
+                        }
+                    }
+                }
+                Instruction::MakeClosure(dst, func_idx) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let val = self.pop()?;
-                    *self
-                        .current_frame()
-                        .upvalues
-                        .as_ref()
-                        .expect("StoreUpvalue in non-closure frame")[idx as usize]
-                        .borrow_mut() = val;
-                }
-                Instruction::MakeClosure(func_idx) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_make_closure(func_idx)?;
+                    self.exec_make_closure_reg(base, dst, func_idx)?;
                 }
                 Instruction::CloseUpvalue(slot) => {
                     let abs = base + slot as usize;
-                    if let Some(cell) = self.open_upvalues.remove(&abs) {
+                    if abs < self.open_upvalues.len()
+                        && let Some(cell) = self.open_upvalues[abs].take()
+                    {
                         *cell.borrow_mut() = self.stack[abs].clone();
-                        self.has_open_upvalues = !self.open_upvalues.is_empty();
+                        self.has_open_upvalues = self.open_upvalues.iter().any(|e| e.is_some());
                     }
-                    self.pop()?;
                 }
 
-                // ── Phase 19: AoSoA conversion (mobile only) ────────────
+                // ── AoSoA conversion (mobile only) ────────────────
                 #[cfg(feature = "mobile-aosoa")]
-                Instruction::ConvertToAoSoA => {
-                    self.exec_convert_to_aosoa()?;
+                Instruction::ConvertToAoSoA(src) => {
+                    self.exec_convert_to_aosoa_reg(base, src)?;
                 }
 
                 // ── Typed arithmetic (compiler-guaranteed types) ────────
-                // Note: PC is NOT synced for typed arithmetic (AddInt, SubInt, etc.)
-                // because errors are extremely rare (only i64 overflow). This keeps
-                // the hot path lean. If overflow does occur, the error line may be
-                // off by one instruction — acceptable tradeoff.
-                Instruction::AddInt => {
-                    let len = self.stack.len();
-                    // SAFETY: typed instruction guarantees >= 2 Int values on stack.
-                    // set_len safe: removed value is Int (no Rc to drop).
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = match (a, b) {
-                            (Value::I32(a), Value::I32(b)) => match a.checked_add(*b) {
-                                Some(r) => Value::I32(r),
-                                None => Value::I64(*a as i64 + *b as i64),
-                            },
-                            _ => {
-                                let r = a
-                                    .as_i64()
-                                    .checked_add(b.as_i64())
+                Instruction::AddInt(dst, a, b) => {
+                    let abs_a = base + a as usize;
+                    let abs_b = base + b as usize;
+                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                        (Value::I32(av), Value::I32(bv)) => match av.checked_add(*bv) {
+                            Some(r) => Value::I32(r),
+                            None => Value::I64(*av as i64 + *bv as i64),
+                        },
+                        _ => {
+                            let r = self.stack[abs_a]
+                                .as_i64()
+                                .checked_add(self.stack[abs_b].as_i64())
+                                .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                            Value::I64(r)
+                        }
+                    };
+                    self.stack[base + dst as usize] = result;
+                }
+                Instruction::AddFloat(dst, a, b) => {
+                    let result = Value::promote_float_pair_op(
+                        &self.stack[base + a as usize],
+                        &self.stack[base + b as usize],
+                        |x, y| x + y,
+                    );
+                    self.stack[base + dst as usize] = result;
+                }
+                Instruction::SubInt(dst, a, b) => {
+                    let abs_a = base + a as usize;
+                    let abs_b = base + b as usize;
+                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                        (Value::I32(av), Value::I32(bv)) => match av.checked_sub(*bv) {
+                            Some(r) => Value::I32(r),
+                            None => Value::I64(*av as i64 - *bv as i64),
+                        },
+                        _ => {
+                            let r = self.stack[abs_a]
+                                .as_i64()
+                                .checked_sub(self.stack[abs_b].as_i64())
+                                .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                            Value::I64(r)
+                        }
+                    };
+                    self.stack[base + dst as usize] = result;
+                }
+                Instruction::SubFloat(dst, a, b) => {
+                    let result = Value::promote_float_pair_op(
+                        &self.stack[base + a as usize],
+                        &self.stack[base + b as usize],
+                        |x, y| x - y,
+                    );
+                    self.stack[base + dst as usize] = result;
+                }
+                Instruction::MulInt(dst, a, b) => {
+                    let abs_a = base + a as usize;
+                    let abs_b = base + b as usize;
+                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                        (Value::I32(av), Value::I32(bv)) => match av.checked_mul(*bv) {
+                            Some(r) => Value::I32(r),
+                            None => {
+                                let r64 = (*av as i64)
+                                    .checked_mul(*bv as i64)
                                     .ok_or_else(|| self.make_error("integer overflow".into()))?;
-                                Value::I64(r)
+                                Value::I64(r64)
                             }
-                        };
-                        self.stack.set_len(len - 1);
-                    }
+                        },
+                        _ => {
+                            let r = self.stack[abs_a]
+                                .as_i64()
+                                .checked_mul(self.stack[abs_b].as_i64())
+                                .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                            Value::I64(r)
+                        }
+                    };
+                    self.stack[base + dst as usize] = result;
                 }
-                Instruction::AddFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) =
-                            Value::promote_float_pair_op(a, b, |x, y| x + y);
-                        self.stack.set_len(len - 1);
-                    }
+                Instruction::MulFloat(dst, a, b) => {
+                    let result = Value::promote_float_pair_op(
+                        &self.stack[base + a as usize],
+                        &self.stack[base + b as usize],
+                        |x, y| x * y,
+                    );
+                    self.stack[base + dst as usize] = result;
                 }
-                Instruction::SubInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = match (a, b) {
-                            (Value::I32(a), Value::I32(b)) => match a.checked_sub(*b) {
-                                Some(r) => Value::I32(r),
-                                None => Value::I64(*a as i64 - *b as i64),
-                            },
-                            _ => {
-                                let r = a
-                                    .as_i64()
-                                    .checked_sub(b.as_i64())
-                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
-                                Value::I64(r)
-                            }
-                        };
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::SubFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) =
-                            Value::promote_float_pair_op(a, b, |x, y| x - y);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::MulInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = match (a, b) {
-                            (Value::I32(a), Value::I32(b)) => match a.checked_mul(*b) {
-                                Some(r) => Value::I32(r),
-                                None => {
-                                    let r64 =
-                                        (*a as i64).checked_mul(*b as i64).ok_or_else(|| {
-                                            self.make_error("integer overflow".into())
-                                        })?;
-                                    Value::I64(r64)
-                                }
-                            },
-                            _ => {
-                                let r = a
-                                    .as_i64()
-                                    .checked_mul(b.as_i64())
-                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
-                                Value::I64(r)
-                            }
-                        };
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::MulFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) =
-                            Value::promote_float_pair_op(a, b, |x, y| x * y);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::DivInt => {
+                Instruction::DivInt(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        if b.as_i64() == 0 {
-                            return Err(self.make_error("division by zero".to_string()));
-                        }
-                        *self.stack.get_unchecked_mut(len - 2) = match (a, b) {
-                            (Value::I32(a), Value::I32(b)) => match a.checked_div(*b) {
-                                Some(r) => Value::I32(r),
-                                None => Value::I64(*a as i64 / *b as i64),
-                            },
-                            _ => {
-                                let r = a
-                                    .as_i64()
-                                    .checked_div(b.as_i64())
-                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
-                                Value::I64(r)
-                            }
-                        };
-                        self.stack.set_len(len - 1);
+                    let abs_a = base + a as usize;
+                    let abs_b = base + b as usize;
+                    if self.stack[abs_b].as_i64() == 0 {
+                        return Err(self.make_error("division by zero".to_string()));
                     }
+                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                        (Value::I32(av), Value::I32(bv)) => match av.checked_div(*bv) {
+                            Some(r) => Value::I32(r),
+                            None => Value::I64(*av as i64 / *bv as i64),
+                        },
+                        _ => {
+                            let r = self.stack[abs_a]
+                                .as_i64()
+                                .checked_div(self.stack[abs_b].as_i64())
+                                .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                            Value::I64(r)
+                        }
+                    };
+                    self.stack[base + dst as usize] = result;
                 }
-                Instruction::DivFloat => {
+                Instruction::DivFloat(dst, a, b) => {
                     self.frames.last_mut().unwrap().pc =
                         unsafe { ip.offset_from(ip_base) as usize };
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self.stack.get_unchecked(len - 2);
-                        let b = self.stack.get_unchecked(len - 1);
-                        if b.as_f64() == 0.0 {
-                            return Err(self.make_error("division by zero".to_string()));
-                        }
-                        *self.stack.get_unchecked_mut(len - 2) =
-                            Value::promote_float_pair_op(a, b, |x, y| x / y);
-                        self.stack.set_len(len - 1);
+                    if self.stack[base + b as usize].as_f64() == 0.0 {
+                        return Err(self.make_error("division by zero".to_string()));
                     }
+                    let result = Value::promote_float_pair_op(
+                        &self.stack[base + a as usize],
+                        &self.stack[base + b as usize],
+                        |x, y| x / y,
+                    );
+                    self.stack[base + dst as usize] = result;
                 }
 
-                // ── Typed comparison ─────────────────────────────────────
-                Instruction::LtInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_i64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_i64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a < b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::LtFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_f64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_f64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a < b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::LeInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_i64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_i64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a <= b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::LeFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_f64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_f64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a <= b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::GtInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_i64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_i64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a > b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::GtFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_f64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_f64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a > b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::GeInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_i64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_i64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a >= b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::GeFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let a = self
-                            .stack
-                            .get_unchecked(len - 2)
-                            .as_f64();
-                        let b = self
-                            .stack
-                            .get_unchecked(len - 1)
-                            .as_f64();
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(a >= b);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::EqInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let eq = self.stack.get_unchecked(len - 2) == self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(eq);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::EqFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let eq = self.stack.get_unchecked(len - 2) == self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(eq);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::NeInt => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let ne = self.stack.get_unchecked(len - 2) != self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(ne);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-                Instruction::NeFloat => {
-                    let len = self.stack.len();
-                    unsafe {
-                        let ne = self.stack.get_unchecked(len - 2) != self.stack.get_unchecked(len - 1);
-                        *self.stack.get_unchecked_mut(len - 2) = Value::Bool(ne);
-                        self.stack.set_len(len - 1);
-                    }
-                }
-
-                // ── Fused instructions ───────────────────────────────────
-                Instruction::IncrLocalInt(slot, imm) => {
-                    let abs = base + slot as usize;
-                    // SAFETY: compiler guarantees slot is valid and holds Int
-                    unsafe {
-                        let v = self.stack.get_unchecked(abs);
-                        *self.stack.get_unchecked_mut(abs) = match v {
-                            Value::I32(v) => match v.checked_add(imm) {
-                                Some(r) => Value::I32(r),
-                                None => Value::I64(*v as i64 + imm as i64),
-                            },
-                            Value::I64(v) => Value::I64(
-                                v.checked_add(imm as i64)
-                                    .ok_or_else(|| self.make_error("integer overflow".into()))?,
-                            ),
-                            _ => unreachable!(),
-                        };
-                    }
-                }
-                Instruction::LoadLocalAddInt(slot, imm) => {
-                    let abs = base + slot as usize;
-                    // SAFETY: compiler guarantees slot is valid and holds Int
-                    let v = unsafe { self.stack.get_unchecked(abs) };
-                    self.stack.push(match v {
+                // ── Immediate arithmetic ────────────────────────────────
+                Instruction::AddIntImm(dst, src, imm) => {
+                    let abs_src = base + src as usize;
+                    let result = match &self.stack[abs_src] {
                         Value::I32(v) => match v.checked_add(imm) {
                             Some(r) => Value::I32(r),
                             None => Value::I64(*v as i64 + imm as i64),
@@ -1793,13 +1652,12 @@ impl VM {
                                 .ok_or_else(|| self.make_error("integer overflow".into()))?,
                         ),
                         _ => unreachable!(),
-                    });
+                    };
+                    self.stack[base + dst as usize] = result;
                 }
-                Instruction::LoadLocalSubInt(slot, imm) => {
-                    let abs = base + slot as usize;
-                    // SAFETY: compiler guarantees slot is valid and holds Int
-                    let v = unsafe { self.stack.get_unchecked(abs) };
-                    self.stack.push(match v {
+                Instruction::SubIntImm(dst, src, imm) => {
+                    let abs_src = base + src as usize;
+                    let result = match &self.stack[abs_src] {
                         Value::I32(v) => match v.checked_sub(imm) {
                             Some(r) => Value::I32(r),
                             None => Value::I64(*v as i64 - imm as i64),
@@ -1809,594 +1667,556 @@ impl VM {
                                 .ok_or_else(|| self.make_error("integer overflow".into()))?,
                         ),
                         _ => unreachable!(),
-                    });
-                }
-                Instruction::CmpLocalIntJump(slot, imm, cmp_op, offset) => {
-                    let abs = base + slot as usize;
-                    // SAFETY: compiler guarantees slot is valid and holds Int
-                    let iv = unsafe { self.stack.get_unchecked(abs).as_i64() };
-                    let imm_val = imm as i64;
-                    let result = match CmpOp::from_u8(cmp_op) {
-                        CmpOp::Lt => iv < imm_val,
-                        CmpOp::Le => iv <= imm_val,
-                        CmpOp::Gt => iv > imm_val,
-                        CmpOp::Ge => iv >= imm_val,
                     };
-                    if !result {
+                    self.stack[base + dst as usize] = result;
+                }
+
+                // ── Typed comparison ─────────────────────────────────────
+                Instruction::LtInt(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_i64()
+                        < self.stack[base + b as usize].as_i64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::LtFloat(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_f64()
+                        < self.stack[base + b as usize].as_f64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::LeInt(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_i64()
+                        <= self.stack[base + b as usize].as_i64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::LeFloat(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_f64()
+                        <= self.stack[base + b as usize].as_f64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::GtInt(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_i64()
+                        > self.stack[base + b as usize].as_i64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::GtFloat(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_f64()
+                        > self.stack[base + b as usize].as_f64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::GeInt(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_i64()
+                        >= self.stack[base + b as usize].as_i64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::GeFloat(dst, a, b) => {
+                    let r = self.stack[base + a as usize].as_f64()
+                        >= self.stack[base + b as usize].as_f64();
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::EqInt(dst, a, b) => {
+                    let r = self.stack[base + a as usize] == self.stack[base + b as usize];
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::EqFloat(dst, a, b) => {
+                    let r = self.stack[base + a as usize] == self.stack[base + b as usize];
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::NeInt(dst, a, b) => {
+                    let r = self.stack[base + a as usize] != self.stack[base + b as usize];
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+                Instruction::NeFloat(dst, a, b) => {
+                    let r = self.stack[base + a as usize] != self.stack[base + b as usize];
+                    self.stack[base + dst as usize] = Value::Bool(r);
+                }
+
+                // ── Fused compare-and-jump (int) ────────────────────────
+                Instruction::TestLtInt(a, b, offset) => {
+                    if self.stack[base + a as usize].as_i64()
+                        >= self.stack[base + b as usize].as_i64()
+                    {
                         ip = unsafe { ip.offset(offset as isize) };
                     }
                 }
-                Instruction::ReturnLocal(slot) => {
-                    if self.has_debug_hooks {
-                        self.fire_return_hook();
-                    }
-                    let abs = base + slot as usize;
-                    // Must check open upvalues — the canonical value may be in
-                    // the heap cell if the local was captured by a closure.
-                    let return_value = if self.has_open_upvalues {
-                        if let Some(cell) = self.open_upvalues.get(&abs) {
-                            cell.borrow().cheap_clone()
-                        } else {
-                            unsafe { self.stack.get_unchecked(abs).cheap_clone() }
-                        }
-                    } else {
-                        unsafe { self.stack.get_unchecked(abs).cheap_clone() }
-                    };
-                    let frame = unsafe { self.frames.pop().unwrap_unchecked() };
-                    if self.has_open_upvalues {
-                        self.close_upvalues_above(frame.base);
-                    }
-                    let truncate_to = frame.truncate_to();
-                    if self.stack.len() > truncate_to {
-                        self.stack.truncate(truncate_to);
-                    }
-                    if self.frames.len() <= return_depth {
-                        return Ok(RunResult::Return(return_value));
-                    }
-                    self.stack.push(return_value);
-                    let f = unsafe { self.frames.last().unwrap_unchecked() };
-                    base = f.base;
-                    chunk_id = f.chunk_id;
-                    reload_ip!(self, chunk_id, f.pc);
-                }
-                Instruction::AddLocals(slot_a, slot_b) => {
-                    let abs_a = base + slot_a as usize;
-                    let abs_b = base + slot_b as usize;
-                    // SAFETY: compiler guarantees slots are valid and hold Int
-                    unsafe {
-                        let a = self.stack.get_unchecked(abs_a);
-                        let b = self.stack.get_unchecked(abs_b);
-                        self.stack.push(match (a, b) {
-                            (Value::I32(a), Value::I32(b)) => match a.checked_add(*b) {
-                                Some(r) => Value::I32(r),
-                                None => Value::I64(*a as i64 + *b as i64),
-                            },
-                            _ => {
-                                let r = a
-                                    .as_i64()
-                                    .checked_add(b.as_i64())
-                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
-                                Value::I64(r)
-                            }
-                        });
+                Instruction::TestLeInt(a, b, offset) => {
+                    if self.stack[base + a as usize].as_i64()
+                        > self.stack[base + b as usize].as_i64()
+                    {
+                        ip = unsafe { ip.offset(offset as isize) };
                     }
                 }
-                Instruction::SubLocals(slot_a, slot_b) => {
-                    let abs_a = base + slot_a as usize;
-                    let abs_b = base + slot_b as usize;
-                    // SAFETY: compiler guarantees slots are valid and hold Int
-                    unsafe {
-                        let a = self.stack.get_unchecked(abs_a);
-                        let b = self.stack.get_unchecked(abs_b);
-                        self.stack.push(match (a, b) {
-                            (Value::I32(a), Value::I32(b)) => match a.checked_sub(*b) {
-                                Some(r) => Value::I32(r),
-                                None => Value::I64(*a as i64 - *b as i64),
-                            },
-                            _ => {
-                                let r = a
-                                    .as_i64()
-                                    .checked_sub(b.as_i64())
-                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
-                                Value::I64(r)
-                            }
-                        });
+                Instruction::TestGtInt(a, b, offset) => {
+                    if self.stack[base + a as usize].as_i64()
+                        <= self.stack[base + b as usize].as_i64()
+                    {
+                        ip = unsafe { ip.offset(offset as isize) };
                     }
                 }
-                Instruction::CmpLocalsJump(slot_a, slot_b, cmp_op, offset) => {
-                    let abs_a = base + slot_a as usize;
-                    let abs_b = base + slot_b as usize;
-                    // SAFETY: compiler guarantees slots are valid and hold Int
-                    let av = unsafe { self.stack.get_unchecked(abs_a).as_i64() };
-                    let bv = unsafe { self.stack.get_unchecked(abs_b).as_i64() };
-                    let result = match CmpOp::from_u8(cmp_op) {
-                        CmpOp::Lt => av < bv,
-                        CmpOp::Le => av <= bv,
-                        CmpOp::Gt => av > bv,
-                        CmpOp::Ge => av >= bv,
-                    };
-                    if !result {
+                Instruction::TestGeInt(a, b, offset) => {
+                    if self.stack[base + a as usize].as_i64()
+                        < self.stack[base + b as usize].as_i64()
+                    {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestEqInt(a, b, offset) => {
+                    if self.stack[base + a as usize] != self.stack[base + b as usize] {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestNeInt(a, b, offset) => {
+                    if self.stack[base + a as usize] == self.stack[base + b as usize] {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+
+                // ── Fused compare-and-jump (int immediate) ──────────────
+                Instruction::TestLtIntImm(a, imm, offset) => {
+                    if self.stack[base + a as usize].as_i64() >= imm as i64 {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestLeIntImm(a, imm, offset) => {
+                    if self.stack[base + a as usize].as_i64() > imm as i64 {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestGtIntImm(a, imm, offset) => {
+                    if self.stack[base + a as usize].as_i64() <= imm as i64 {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestGeIntImm(a, imm, offset) => {
+                    if self.stack[base + a as usize].as_i64() < imm as i64 {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+
+                // ── Fused compare-and-jump (float) ──────────────────────
+                Instruction::TestLtFloat(a, b, offset) => {
+                    let va = self.stack[base + a as usize].as_f64();
+                    let vb = self.stack[base + b as usize].as_f64();
+                    if !matches!(va.partial_cmp(&vb), Some(std::cmp::Ordering::Less)) {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestLeFloat(a, b, offset) => {
+                    let va = self.stack[base + a as usize].as_f64();
+                    let vb = self.stack[base + b as usize].as_f64();
+                    if !matches!(
+                        va.partial_cmp(&vb),
+                        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                    ) {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestGtFloat(a, b, offset) => {
+                    let va = self.stack[base + a as usize].as_f64();
+                    let vb = self.stack[base + b as usize].as_f64();
+                    if !matches!(va.partial_cmp(&vb), Some(std::cmp::Ordering::Greater)) {
+                        ip = unsafe { ip.offset(offset as isize) };
+                    }
+                }
+                Instruction::TestGeFloat(a, b, offset) => {
+                    let va = self.stack[base + a as usize].as_f64();
+                    let vb = self.stack[base + b as usize].as_f64();
+                    if !matches!(
+                        va.partial_cmp(&vb),
+                        Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+                    ) {
                         ip = unsafe { ip.offset(offset as isize) };
                     }
                 }
 
                 // ── Quickened arithmetic (runtime-specialized) ──────────
-                // Each quickened handler tries the typed fast path. On type
-                // mismatch, it deopts (rewrites back to generic) and falls
-                // through to the generic handler.
-                Instruction::QAddInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QAddInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let (a, b) = (a_ref.cheap_clone(), b_ref.cheap_clone());
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = match (&a, &b) {
-                                (Value::I32(a), Value::I32(b)) => match a.checked_add(*b) {
-                                    Some(r) => Value::I32(r),
-                                    None => Value::I64(*a as i64 + *b as i64),
-                                },
-                                _ => {
-                                    let r =
-                                        a.as_i64().checked_add(b.as_i64()).ok_or_else(|| {
-                                            self.make_error("integer overflow".into())
-                                        })?;
-                                    Value::I64(r)
-                                }
-                            };
-                            self.stack.set_len(len - 1);
-                        }
+                        let result = match (a_ref, b_ref) {
+                            (Value::I32(av), Value::I32(bv)) => match av.checked_add(*bv) {
+                                Some(r) => Value::I32(r),
+                                None => Value::I64(*av as i64 + *bv as i64),
+                            },
+                            _ => {
+                                let r = a_ref
+                                    .as_i64()
+                                    .checked_add(b_ref.as_i64())
+                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                                Value::I64(r)
+                            }
+                        };
+                        self.stack[base + dst as usize] = result;
                     } else {
-                        // Deopt: rewrite back to generic Add
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Add;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Add(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_add()?;
+                        self.exec_add_reg(base, dst, a, b)?;
                     }
                 }
-                Instruction::QAddFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QAddFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) =
-                                Value::promote_float_pair_op(a_ref, b_ref, |x, y| x + y);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x + y);
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Add;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Add(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_add()?;
+                        self.exec_add_reg(base, dst, a, b)?;
                     }
                 }
-
-                Instruction::QSubInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QSubInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let (a, b) = (a_ref.cheap_clone(), b_ref.cheap_clone());
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = match (&a, &b) {
-                                (Value::I32(a), Value::I32(b)) => match a.checked_sub(*b) {
-                                    Some(r) => Value::I32(r),
-                                    None => Value::I64(*a as i64 - *b as i64),
-                                },
-                                _ => {
-                                    let r =
-                                        a.as_i64().checked_sub(b.as_i64()).ok_or_else(|| {
-                                            self.make_error("integer overflow".into())
-                                        })?;
-                                    Value::I64(r)
-                                }
-                            };
-                            self.stack.set_len(len - 1);
-                        }
+                        let result = match (a_ref, b_ref) {
+                            (Value::I32(av), Value::I32(bv)) => match av.checked_sub(*bv) {
+                                Some(r) => Value::I32(r),
+                                None => Value::I64(*av as i64 - *bv as i64),
+                            },
+                            _ => {
+                                let r = a_ref
+                                    .as_i64()
+                                    .checked_sub(b_ref.as_i64())
+                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                                Value::I64(r)
+                            }
+                        };
+                        self.stack[base + dst as usize] = result;
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Sub;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Sub(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith(
+                        self.exec_binary_arith_reg(
+                            base + dst as usize,
+                            base + a as usize,
+                            base + b as usize,
                             i32::checked_sub,
                             i64::checked_sub,
-                            |a, b| a - b,
-                            "subtract",
+                            |x, y| x - y,
                         )?;
                     }
                 }
-                Instruction::QSubFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QSubFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) =
-                                Value::promote_float_pair_op(a_ref, b_ref, |x, y| x - y);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x - y);
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Sub;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Sub(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith(
+                        self.exec_binary_arith_reg(
+                            base + dst as usize,
+                            base + a as usize,
+                            base + b as usize,
                             i32::checked_sub,
                             i64::checked_sub,
-                            |a, b| a - b,
-                            "subtract",
+                            |x, y| x - y,
                         )?;
                     }
                 }
 
-                Instruction::QMulInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QMulInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let (a, b) = (a_ref.cheap_clone(), b_ref.cheap_clone());
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = match (&a, &b) {
-                                (Value::I32(a), Value::I32(b)) => match a.checked_mul(*b) {
-                                    Some(r) => Value::I32(r),
-                                    None => {
-                                        let r64 =
-                                            (*a as i64).checked_mul(*b as i64).ok_or_else(|| {
-                                                self.make_error("integer overflow".into())
-                                            })?;
-                                        Value::I64(r64)
-                                    }
-                                },
-                                _ => {
-                                    let r =
-                                        a.as_i64().checked_mul(b.as_i64()).ok_or_else(|| {
-                                            self.make_error("integer overflow".into())
-                                        })?;
-                                    Value::I64(r)
-                                }
-                            };
-                            self.stack.set_len(len - 1);
-                        }
+                        let result = match (a_ref, b_ref) {
+                            (Value::I32(av), Value::I32(bv)) => match av.checked_mul(*bv) {
+                                Some(r) => Value::I32(r),
+                                None => Value::I64(*av as i64 * *bv as i64),
+                            },
+                            _ => {
+                                let r = a_ref
+                                    .as_i64()
+                                    .checked_mul(b_ref.as_i64())
+                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                                Value::I64(r)
+                            }
+                        };
+                        self.stack[base + dst as usize] = result;
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Mul;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Mul(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith(
+                        self.exec_binary_arith_reg(
+                            base + dst as usize,
+                            base + a as usize,
+                            base + b as usize,
                             i32::checked_mul,
                             i64::checked_mul,
-                            |a, b| a * b,
-                            "multiply",
+                            |x, y| x * y,
                         )?;
                     }
                 }
-                Instruction::QMulFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QMulFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) =
-                                Value::promote_float_pair_op(a_ref, b_ref, |x, y| x * y);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x * y);
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Mul;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Mul(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith(
+                        self.exec_binary_arith_reg(
+                            base + dst as usize,
+                            base + a as usize,
+                            base + b as usize,
                             i32::checked_mul,
                             i64::checked_mul,
-                            |a, b| a * b,
-                            "multiply",
+                            |x, y| x * y,
                         )?;
                     }
                 }
 
-                Instruction::QDivInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QDivInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let (a, b) = (a_ref.cheap_clone(), b_ref.cheap_clone());
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        if b.as_i64() == 0 {
+                        if b_ref.as_i64() == 0 {
                             return Err(self.make_error("division by zero".to_string()));
                         }
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = match (&a, &b) {
-                                (Value::I32(a), Value::I32(b)) => match a.checked_div(*b) {
-                                    Some(r) => Value::I32(r),
-                                    None => Value::I64(*a as i64 / *b as i64),
-                                },
-                                _ => {
-                                    let r =
-                                        a.as_i64().checked_div(b.as_i64()).ok_or_else(|| {
-                                            self.make_error("integer overflow".into())
-                                        })?;
-                                    Value::I64(r)
-                                }
-                            };
-                            self.stack.set_len(len - 1);
-                        }
+                        let result = match (a_ref, b_ref) {
+                            (Value::I32(av), Value::I32(bv)) => match av.checked_div(*bv) {
+                                Some(r) => Value::I32(r),
+                                None => Value::I64(*av as i64 / *bv as i64),
+                            },
+                            _ => {
+                                let r = a_ref
+                                    .as_i64()
+                                    .checked_div(b_ref.as_i64())
+                                    .ok_or_else(|| self.make_error("integer overflow".into()))?;
+                                Value::I64(r)
+                            }
+                        };
+                        self.stack[base + dst as usize] = result;
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Div;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Div(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_div()?;
+                        self.exec_div_reg(base, dst, a, b)?;
                     }
                 }
-                Instruction::QDivFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QDivFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
                         if b_ref.as_f64() == 0.0 {
                             return Err(self.make_error("division by zero".to_string()));
                         }
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) =
-                                Value::promote_float_pair_op(a_ref, b_ref, |x, y| x / y);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x / y);
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Div;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Div(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_div()?;
+                        self.exec_div_reg(base, dst, a, b)?;
                     }
                 }
 
                 // ── Quickened comparison ─────────────────────────────────
-                Instruction::QLtInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QLtInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let r = a_ref.as_i64() < b_ref.as_i64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_i64() < b_ref.as_i64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Lt;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Lt(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a < b, |a, b| a < b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x < y, |x, y| x < y)?;
                     }
                 }
-                Instruction::QLtFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QLtFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        let r = a_ref.as_f64() < b_ref.as_f64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_f64() < b_ref.as_f64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Lt;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Lt(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a < b, |a, b| a < b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x < y, |x, y| x < y)?;
                     }
                 }
 
-                Instruction::QLeInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QLeInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let r = a_ref.as_i64() <= b_ref.as_i64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_i64() <= b_ref.as_i64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Le;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Le(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a <= b, |a, b| a <= b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x <= y, |x, y| x <= y)?;
                     }
                 }
-                Instruction::QLeFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QLeFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        let r = a_ref.as_f64() <= b_ref.as_f64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_f64() <= b_ref.as_f64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Le;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Le(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a <= b, |a, b| a <= b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x <= y, |x, y| x <= y)?;
                     }
                 }
 
-                Instruction::QGtInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QGtInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let r = a_ref.as_i64() > b_ref.as_i64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_i64() > b_ref.as_i64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Gt;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Gt(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a > b, |a, b| a > b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x > y, |x, y| x > y)?;
                     }
                 }
-                Instruction::QGtFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QGtFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        let r = a_ref.as_f64() > b_ref.as_f64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_f64() > b_ref.as_f64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Gt;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Gt(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a > b, |a, b| a > b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x > y, |x, y| x > y)?;
                     }
                 }
 
-                Instruction::QGeInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QGeInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let r = a_ref.as_i64() >= b_ref.as_i64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_i64() >= b_ref.as_i64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ge;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Ge(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a >= b, |a, b| a >= b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x >= y, |x, y| x >= y)?;
                     }
                 }
-                Instruction::QGeFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QGeFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        let r = a_ref.as_f64() >= b_ref.as_f64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_f64() >= b_ref.as_f64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ge;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Ge(dst, a, b);
                         }
                         self.frames.last_mut().unwrap().pc =
                             unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison(|a, b| a >= b, |a, b| a >= b)?;
+                        self.exec_comparison_reg(base, dst, a, b, |x, y| x >= y, |x, y| x >= y)?;
                     }
                 }
 
-                Instruction::QEqInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QEqInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let r = a_ref.as_i64() == b_ref.as_i64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_i64() == b_ref.as_i64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Eq;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Eq(dst, a, b);
                         }
-                        let eq = self.stack[len - 2] == self.stack[len - 1];
-                        self.stack[len - 2] = Value::Bool(eq);
-                        self.stack.truncate(len - 1);
+                        let eq = self.stack[base + a as usize] == self.stack[base + b as usize];
+                        self.stack[base + dst as usize] = Value::Bool(eq);
                     }
                 }
-                Instruction::QEqFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QEqFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        let r = a_ref.as_f64() == b_ref.as_f64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_f64() == b_ref.as_f64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Eq;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Eq(dst, a, b);
                         }
-                        let eq = self.stack[len - 2] == self.stack[len - 1];
-                        self.stack[len - 2] = Value::Bool(eq);
-                        self.stack.truncate(len - 1);
+                        let eq = self.stack[base + a as usize] == self.stack[base + b as usize];
+                        self.stack[base + dst as usize] = Value::Bool(eq);
                     }
                 }
 
-                Instruction::QNeInt => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QNeInt(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_int() && b_ref.is_int() {
-                        let r = a_ref.as_i64() != b_ref.as_i64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_i64() != b_ref.as_i64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ne;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Ne(dst, a, b);
                         }
-                        let ne = self.stack[len - 2] != self.stack[len - 1];
-                        self.stack[len - 2] = Value::Bool(ne);
-                        self.stack.truncate(len - 1);
+                        let ne = self.stack[base + a as usize] != self.stack[base + b as usize];
+                        self.stack[base + dst as usize] = Value::Bool(ne);
                     }
                 }
-                Instruction::QNeFloat => {
-                    let len = self.stack.len();
-                    let a_ref = unsafe { self.stack.get_unchecked(len - 2) };
-                    let b_ref = unsafe { self.stack.get_unchecked(len - 1) };
+                Instruction::QNeFloat(dst, a, b) => {
+                    let a_ref = &self.stack[base + a as usize];
+                    let b_ref = &self.stack[base + b as usize];
                     if a_ref.is_float() && b_ref.is_float() {
-                        let r = a_ref.as_f64() != b_ref.as_f64();
-                        unsafe {
-                            *self.stack.get_unchecked_mut(len - 2) = Value::Bool(r);
-                            self.stack.set_len(len - 1);
-                        }
+                        self.stack[base + dst as usize] =
+                            Value::Bool(a_ref.as_f64() != b_ref.as_f64());
                     } else {
                         unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ne;
+                            *(ip.sub(1) as *mut Instruction) = Instruction::Ne(dst, a, b);
                         }
-                        let ne = self.stack[len - 2] != self.stack[len - 1];
-                        self.stack[len - 2] = Value::Bool(ne);
-                        self.stack.truncate(len - 1);
+                        let ne = self.stack[base + a as usize] != self.stack[base + b as usize];
+                        self.stack[base + dst as usize] = Value::Bool(ne);
                     }
                 }
             }
@@ -2433,9 +2253,7 @@ impl VM {
         op: fn(i64, i64) -> Option<i64>,
         err_msg: &str,
     ) -> Result<Value, String> {
-        op(a, b)
-            .map(Value::I64)
-            .ok_or_else(|| err_msg.to_string())
+        op(a, b).map(Value::I64).ok_or_else(|| err_msg.to_string())
     }
 
     /// Executes integer arithmetic with automatic width promotion.
@@ -2456,13 +2274,56 @@ impl VM {
         result.map_err(|msg| self.make_error(msg))
     }
 
-    /// Executes the Add instruction, handling both numeric and string addition.
-    fn exec_add(&mut self) -> Result<(), RuntimeError> {
-        let len = self.stack.len();
-        if len < 2 {
-            return Err(self.make_error("stack underflow".to_string()));
+    // ── Upvalue helpers ──────────────────────────────────────────
+
+    fn capture_local(&mut self, abs_slot: usize) -> Rc<RefCell<Value>> {
+        if abs_slot < self.open_upvalues.len()
+            && let Some(existing) = &self.open_upvalues[abs_slot]
+        {
+            return Rc::clone(existing);
         }
-        let result = match (&self.stack[len - 2], &self.stack[len - 1]) {
+        let cell = Rc::new(RefCell::new(self.stack[abs_slot].clone()));
+        if abs_slot >= self.open_upvalues.len() {
+            self.open_upvalues.resize(abs_slot + 1, None);
+        }
+        self.open_upvalues[abs_slot] = Some(Rc::clone(&cell));
+        self.has_open_upvalues = true;
+        cell
+    }
+
+    /// Closes all open upvalues at or above `min_slot` by syncing the
+    /// current stack value into their heap cells, then removing them
+    /// from the open set.
+    fn close_upvalues_above(&mut self, min_slot: usize) {
+        let end = self.open_upvalues.len();
+        if min_slot >= end {
+            return;
+        }
+        let mut any_remaining = false;
+        for slot in min_slot..end {
+            if let Some(cell) = self.open_upvalues[slot].take()
+                && slot < self.stack.len()
+            {
+                *cell.borrow_mut() = self.stack[slot].clone();
+            }
+        }
+        // Check if any open upvalues remain below min_slot
+        for slot in 0..min_slot.min(end) {
+            if self.open_upvalues[slot].is_some() {
+                any_remaining = true;
+                break;
+            }
+        }
+        self.has_open_upvalues = any_remaining;
+    }
+
+    // ── Register-based instruction helpers ───────────────────────
+
+    /// Register-based Add: handles int, float, mixed, and string concat.
+    fn exec_add_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
+        let a_ref = &self.stack[base + a as usize];
+        let b_ref = &self.stack[base + b as usize];
+        let result = match (a_ref, b_ref) {
             (a @ (Value::I32(_) | Value::I64(_)), b @ (Value::I32(_) | Value::I64(_))) => {
                 self.exec_int_arith(a, b, i32::checked_add, i64::checked_add)?
             }
@@ -2479,29 +2340,29 @@ impl VM {
             _ => {
                 return Err(self.make_error(format!(
                     "cannot add {} and {}",
-                    self.stack[len - 2].type_name(),
-                    self.stack[len - 1].type_name()
+                    self.stack[base + a as usize].type_name(),
+                    self.stack[base + b as usize].type_name()
                 )));
             }
         };
-        self.stack[len - 2] = result;
-        self.stack.truncate(len - 1);
+        self.stack[base + dst as usize] = result;
         Ok(())
     }
 
-    /// Executes a binary arithmetic instruction (Sub, Mul).
-    fn exec_binary_arith(
+    /// Register-based binary arithmetic (Sub, Mul).
+    /// `dst_abs`, `a_abs`, `b_abs` are absolute stack indices (base + reg).
+    fn exec_binary_arith_reg(
         &mut self,
+        dst_abs: usize,
+        a_abs: usize,
+        b_abs: usize,
         i32_op: fn(i32, i32) -> Option<i32>,
         i64_op: fn(i64, i64) -> Option<i64>,
         f64_op: fn(f64, f64) -> f64,
-        op_name: &str,
     ) -> Result<(), RuntimeError> {
-        let len = self.stack.len();
-        if len < 2 {
-            return Err(self.make_error("stack underflow".to_string()));
-        }
-        let result = match (&self.stack[len - 2], &self.stack[len - 1]) {
+        let a_ref = &self.stack[a_abs];
+        let b_ref = &self.stack[b_abs];
+        let result = match (a_ref, b_ref) {
             (a @ (Value::I32(_) | Value::I64(_)), b @ (Value::I32(_) | Value::I64(_))) => {
                 self.exec_int_arith(a, b, i32_op, i64_op)?
             }
@@ -2516,27 +2377,25 @@ impl VM {
             }
             _ => {
                 return Err(self.make_error(format!(
-                    "cannot {op_name} {} and {}",
-                    self.stack[len - 2].type_name(),
-                    self.stack[len - 1].type_name()
+                    "cannot perform arithmetic on {} and {}",
+                    self.stack[a_abs].type_name(),
+                    self.stack[b_abs].type_name()
                 )));
             }
         };
-        self.stack[len - 2] = result;
-        self.stack.truncate(len - 1);
+        self.stack[dst_abs] = result;
         Ok(())
     }
 
-    /// Executes the Div instruction with zero-check.
-    fn exec_div(&mut self) -> Result<(), RuntimeError> {
-        let len = self.stack.len();
-        if len < 2 {
-            return Err(self.make_error("stack underflow".to_string()));
-        }
-        let result = match (&self.stack[len - 2], &self.stack[len - 1]) {
-            (Value::I32(_) | Value::I64(_) | Value::F32(_) | Value::F64(_), b @ (Value::I32(_) | Value::I64(_)))
-                if b.as_i64() == 0 =>
-            {
+    /// Register-based Div with zero-check.
+    fn exec_div_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
+        let a_ref = &self.stack[base + a as usize];
+        let b_ref = &self.stack[base + b as usize];
+        let result = match (a_ref, b_ref) {
+            (
+                Value::I32(_) | Value::I64(_) | Value::F32(_) | Value::F64(_),
+                b @ (Value::I32(_) | Value::I64(_)),
+            ) if b.as_i64() == 0 => {
                 return Err(self.make_error("division by zero".to_string()));
             }
             (a @ (Value::I32(_) | Value::I64(_)), b @ (Value::I32(_) | Value::I64(_))) => {
@@ -2557,23 +2416,20 @@ impl VM {
             _ => {
                 return Err(self.make_error(format!(
                     "cannot divide {} by {}",
-                    self.stack[len - 2].type_name(),
-                    self.stack[len - 1].type_name()
+                    self.stack[base + a as usize].type_name(),
+                    self.stack[base + b as usize].type_name()
                 )));
             }
         };
-        self.stack[len - 2] = result;
-        self.stack.truncate(len - 1);
+        self.stack[base + dst as usize] = result;
         Ok(())
     }
 
-    /// Executes the Mod instruction with zero-check.
-    fn exec_mod(&mut self) -> Result<(), RuntimeError> {
-        let len = self.stack.len();
-        if len < 2 {
-            return Err(self.make_error("stack underflow".to_string()));
-        }
-        let result = match (&self.stack[len - 2], &self.stack[len - 1]) {
+    /// Register-based Mod with zero-check.
+    fn exec_mod_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
+        let a_ref = &self.stack[base + a as usize];
+        let b_ref = &self.stack[base + b as usize];
+        let result = match (a_ref, b_ref) {
             (Value::I32(_) | Value::I64(_), b @ (Value::I32(_) | Value::I64(_)))
                 if b.as_i64() == 0 =>
             {
@@ -2594,27 +2450,28 @@ impl VM {
             _ => {
                 return Err(self.make_error(format!(
                     "cannot modulo {} by {}",
-                    self.stack[len - 2].type_name(),
-                    self.stack[len - 1].type_name()
+                    self.stack[base + a as usize].type_name(),
+                    self.stack[base + b as usize].type_name()
                 )));
             }
         };
-        self.stack[len - 2] = result;
-        self.stack.truncate(len - 1);
+        self.stack[base + dst as usize] = result;
         Ok(())
     }
 
-    /// Executes a comparison instruction.
-    fn exec_comparison(
+    /// Register-based comparison.
+    fn exec_comparison_reg(
         &mut self,
+        base: usize,
+        dst: u8,
+        a: u8,
+        b: u8,
         i64_cmp: fn(&i64, &i64) -> bool,
         f64_cmp: fn(&f64, &f64) -> bool,
     ) -> Result<(), RuntimeError> {
-        let len = self.stack.len();
-        if len < 2 {
-            return Err(self.make_error("stack underflow".to_string()));
-        }
-        let result = match (&self.stack[len - 2], &self.stack[len - 1]) {
+        let a_ref = &self.stack[base + a as usize];
+        let b_ref = &self.stack[base + b as usize];
+        let result = match (a_ref, b_ref) {
             (a @ (Value::I32(_) | Value::I64(_)), b @ (Value::I32(_) | Value::I64(_))) => {
                 i64_cmp(&a.as_i64(), &b.as_i64())
             }
@@ -2630,29 +2487,37 @@ impl VM {
             _ => {
                 return Err(self.make_error(format!(
                     "cannot compare {} and {}",
-                    self.stack[len - 2].type_name(),
-                    self.stack[len - 1].type_name()
+                    self.stack[base + a as usize].type_name(),
+                    self.stack[base + b as usize].type_name()
                 )));
             }
         };
-        self.stack[len - 2] = Value::Bool(result);
-        self.stack.truncate(len - 1);
+        self.stack[base + dst as usize] = Value::Bool(result);
         Ok(())
     }
 
-    /// Executes a function call.
+    /// Register-based Call instruction.
     ///
-    /// Resolves the callee by name: first checks compiled functions,
-    /// then falls back to host-registered native functions.
-    fn exec_call(&mut self, arg_count: u8) -> Result<(), RuntimeError> {
+    /// In the register model: `Call(base_reg, arg_count)` means the callee
+    /// value is in `stack[base + base_reg]`, args are in consecutive registers
+    /// starting at `base + base_reg + 1`. The result will be written to
+    /// `stack[base + base_reg]` (the caller's result register).
+    fn exec_call_reg(
+        &mut self,
+        base: usize,
+        base_reg: u8,
+        arg_count: u8,
+    ) -> Result<(), RuntimeError> {
+        let callee_abs = base + base_reg as usize;
         let n = arg_count as usize;
-        let callee_pos = self.stack.len() - n - 1;
 
-        // Handle closure calls — extract data by reference, then remove callee
-        if let Value::Closure(data) = &self.stack[callee_pos] {
+        // Handle closure calls
+        if let Value::Closure(data) = &self.stack[callee_abs] {
             let func_idx = data.func_idx;
             let upvalues = data.upvalues.clone();
-            let expected_arity = self.functions[func_idx].arity;
+            let func = &self.functions[func_idx];
+            let expected_arity = func.arity;
+            let max_regs = func.max_registers;
 
             if expected_arity != arg_count {
                 return Err(self.make_error(format!(
@@ -2661,26 +2526,30 @@ impl VM {
                 )));
             }
 
-            // Overwrite callee slot instead of O(n) remove
-            self.stack[callee_pos] = Value::Null;
-            let new_base = callee_pos + 1;
+            let new_base = callee_abs + 1;
+            // Ensure stack has room for the callee frame's registers
+            let needed = new_base + max_regs as usize;
+            if self.stack.len() < needed {
+                self.stack.resize(needed, Value::Null);
+            }
 
             self.frames.push(CallFrame {
                 chunk_id: ChunkId::Function(func_idx),
                 pc: 0,
                 base: new_base,
-                has_callee_slot: true,
+                result_reg: callee_abs,
+                max_registers: max_regs,
+                has_rc_values: true, // closure has upvalue Rc's
                 upvalues: Some(upvalues),
             });
 
             return Ok(());
         }
 
-        // Extract function name by reference — avoid cloning the string
-        let func_idx = match &self.stack[callee_pos] {
+        // Named function call
+        let func_idx = match &self.stack[callee_abs] {
             Value::Str(s) => {
                 let name: &str = s;
-                // Try compiled functions first
                 if let Some(&idx) = self.function_map.get(name) {
                     Some(idx)
                 } else {
@@ -2690,17 +2559,19 @@ impl VM {
             _ => {
                 return Err(self.make_error(format!(
                     "callee is not a function: {}",
-                    self.stack[callee_pos].type_name()
+                    self.stack[callee_abs].type_name()
                 )));
             }
         };
 
         if let Some(func_idx) = func_idx {
-            let expected_arity = self.functions[func_idx].arity;
-            let is_variadic = self.functions[func_idx].is_variadic;
+            let func = &self.functions[func_idx];
+            let expected_arity = func.arity;
+            let is_variadic = func.is_variadic;
+            let max_regs = func.max_registers;
+            let func_has_rc = func.has_rc_values;
 
             if is_variadic {
-                // Variadic: need at least (arity - 1) fixed args
                 let min_args = expected_arity.saturating_sub(1);
                 if arg_count < min_args {
                     return Err(self.make_error(format!(
@@ -2708,22 +2579,30 @@ impl VM {
                         self.functions[func_idx].name, min_args, arg_count
                     )));
                 }
-                // Overwrite callee slot instead of O(n) remove
-                self.stack[callee_pos] = Value::Null;
-                // Pack variadic args into an array
-                let fixed_count = min_args as usize;
-                let variadic_count = (arg_count as usize) - fixed_count;
-                let variadic_start = self.stack.len() - variadic_count;
-                let variadic_args: Vec<Value> = self.stack.drain(variadic_start..).collect();
-                self.stack
-                    .push(Value::Array(Rc::new(RefCell::new(variadic_args))));
 
-                let new_base = callee_pos + 1;
+                // Pack variadic args into an array in the last fixed-arg register
+                let fixed_count = min_args as usize;
+                let variadic_count = n - fixed_count;
+                let variadic_start = callee_abs + 1 + fixed_count;
+                let variadic_args: Vec<Value> = (0..variadic_count)
+                    .map(|i| std::mem::replace(&mut self.stack[variadic_start + i], Value::Null))
+                    .collect();
+                // Place the array in the variadic register slot
+                self.stack[variadic_start] = Value::Array(Rc::new(RefCell::new(variadic_args)));
+
+                let new_base = callee_abs + 1;
+                let needed = new_base + max_regs as usize;
+                if self.stack.len() < needed {
+                    self.stack.resize(needed, Value::Null);
+                }
+
                 self.frames.push(CallFrame {
                     chunk_id: ChunkId::Function(func_idx),
                     pc: 0,
                     base: new_base,
-                    has_callee_slot: true,
+                    result_reg: callee_abs,
+                    max_registers: max_regs,
+                    has_rc_values: true, // variadic creates Array
                     upvalues: None,
                 });
             } else {
@@ -2734,15 +2613,19 @@ impl VM {
                     )));
                 }
 
-                // Overwrite callee slot instead of O(n) remove
-                self.stack[callee_pos] = Value::Null;
-                let new_base = callee_pos + 1;
+                let new_base = callee_abs + 1;
+                let needed = new_base + max_regs as usize;
+                if self.stack.len() < needed {
+                    self.stack.resize(needed, Value::Null);
+                }
 
                 self.frames.push(CallFrame {
                     chunk_id: ChunkId::Function(func_idx),
                     pc: 0,
                     base: new_base,
-                    has_callee_slot: true,
+                    result_reg: callee_abs,
+                    max_registers: max_regs,
+                    has_rc_values: func_has_rc,
                     upvalues: None,
                 });
             }
@@ -2750,37 +2633,37 @@ impl VM {
             return Ok(());
         }
 
-        // Fall back: need the actual string for native/invoke lookup
-        let func_name = match &self.stack[callee_pos] {
+        // Fall back to native functions
+        let func_name = match &self.stack[callee_abs] {
             Value::Str(s) => (**s).clone(),
             _ => unreachable!(),
         };
 
         // Built-in: invoke(obj, methodName, ...args)
         if func_name == "invoke" && arg_count >= 2 {
-            return self.exec_invoke(arg_count, callee_pos);
+            return self.exec_invoke_reg(base, base_reg, arg_count);
         }
 
-        // Fall back to native functions
-        self.exec_native_call(&func_name, arg_count, callee_pos)
+        // Native function call
+        self.exec_native_call_reg(&func_name, base, base_reg, arg_count)
     }
 
-    /// Dispatches a call to a host-registered native function.
-    fn exec_native_call(
+    /// Register-based native function call.
+    fn exec_native_call_reg(
         &mut self,
         func_name: &str,
+        base: usize,
+        base_reg: u8,
         arg_count: u8,
-        callee_pos: usize,
     ) -> Result<(), RuntimeError> {
+        let callee_abs = base + base_reg as usize;
         let n = arg_count as usize;
 
-        // Look up and clone the body Rc to release the borrow on self
         let native = self
             .native_functions
             .get(func_name)
             .ok_or_else(|| self.make_error(format!("undefined function '{func_name}'")))?;
 
-        // Check if the function's module is disabled
         if let Some(ref module) = native.module
             && self.disabled_modules.contains(module)
         {
@@ -2790,7 +2673,6 @@ impl VM {
             )));
         }
 
-        // Validate arity
         if let Some(expected) = native.arity
             && expected != arg_count
         {
@@ -2802,33 +2684,90 @@ impl VM {
 
         let body = Rc::clone(&native.body);
 
-        // Remove callee string, then drain arguments
-        self.stack.remove(callee_pos);
-        let args: Vec<Value> = self.stack.drain(callee_pos..callee_pos + n).collect();
+        // Collect args from consecutive registers
+        let args: Vec<Value> = (0..n)
+            .map(|i| self.stack[callee_abs + 1 + i].clone())
+            .collect();
 
-        // Call the native function
         let result = (body)(&args).map_err(|msg| self.make_error(msg))?;
-        self.stack.push(result);
-
+        self.stack[callee_abs] = result;
         Ok(())
     }
 
-    /// Dispatches a method call on a value.
-    ///
-    /// Stack layout: [receiver, arg0, ..., argN]
-    /// Result: pops receiver + args, pushes method return value.
-    fn exec_call_method(&mut self, name_hash: u32, arg_count: u8) -> Result<(), RuntimeError> {
+    /// Register-based invoke(obj, methodName, ...args).
+    fn exec_invoke_reg(
+        &mut self,
+        base: usize,
+        base_reg: u8,
+        arg_count: u8,
+    ) -> Result<(), RuntimeError> {
+        let callee_abs = base + base_reg as usize;
         let n = arg_count as usize;
 
-        // Peek at receiver (below the args on the stack)
-        let receiver_pos = self.stack.len() - n - 1;
-        let receiver = self.stack[receiver_pos].clone();
+        // Args are at callee_abs+1..callee_abs+1+n
+        let obj = self.stack[callee_abs + 1].clone();
+        let method_name_val = self.stack[callee_abs + 2].clone();
+        let method_name = match &method_name_val {
+            Value::Str(s) => (**s).clone(),
+            _ => return Err(self.make_error("invoke: method name must be a string".to_string())),
+        };
 
-        // Look up method by (value tag, name hash)
+        let remaining_args: Vec<Value> = (3..=n)
+            .map(|i| self.stack[callee_abs + i].clone())
+            .collect();
+
+        // Struct method dispatch
+        if let Value::Struct(ref s) = obj {
+            let qualified = format!("{}::{}", s.type_name, method_name);
+            if let Some(&func_idx) = self.function_map.get(&qualified) {
+                let mut all_args = Vec::with_capacity(1 + remaining_args.len());
+                all_args.push(obj.clone());
+                all_args.extend_from_slice(&remaining_args);
+                let result = self.call_compiled_function(func_idx, &all_args)?;
+                self.stack[callee_abs] = result;
+                return Ok(());
+            }
+            return Err(self.make_error(format!(
+                "no method '{}' on type '{}'",
+                method_name, s.type_name
+            )));
+        }
+
+        // Object method dispatch
+        if let Value::Object(ref obj_rc) = obj {
+            let result = obj_rc
+                .borrow_mut()
+                .call_method(&method_name, &remaining_args)
+                .map_err(|e| self.make_error(e))?;
+            self.stack[callee_abs] = result;
+            return Ok(());
+        }
+
+        Err(self.make_error(format!(
+            "invoke not supported on type '{}'",
+            obj.type_name()
+        )))
+    }
+
+    /// Register-based CallMethod.
+    ///
+    /// `CallMethod(base_reg, name_hash, arg_count)`: receiver is at `stack[base + base_reg]`,
+    /// args at consecutive registers after it. Result written to `stack[base + base_reg]`.
+    fn exec_call_method_reg(
+        &mut self,
+        base: usize,
+        base_reg: u8,
+        name_hash: u32,
+        arg_count: u8,
+    ) -> Result<(), RuntimeError> {
+        let receiver_abs = base + base_reg as usize;
+        let n = arg_count as usize;
+        let receiver = self.stack[receiver_abs].clone();
+
+        // Native method dispatch
         if let Some(tag) = receiver.tag()
             && let Some(method) = self.methods.get(&(tag, name_hash))
         {
-            // Check if the method's module is disabled
             if let Some(ref module) = method.module
                 && self.disabled_modules.contains(module)
             {
@@ -2838,7 +2777,6 @@ impl VM {
                 )));
             }
 
-            // Validate arity
             if let Some(expected) = method.arity
                 && expected != arg_count
             {
@@ -2849,61 +2787,41 @@ impl VM {
             }
 
             let body = Rc::clone(&method.body);
-
-            // Pop args, then pop receiver
-            let args: Vec<Value> = self
-                .stack
-                .drain(receiver_pos + 1..receiver_pos + 1 + n)
+            let args: Vec<Value> = (0..n)
+                .map(|i| self.stack[receiver_abs + 1 + i].clone())
                 .collect();
-            self.stack.remove(receiver_pos);
 
-            // Call the method
             let result = (body)(&receiver, &args).map_err(|msg| self.make_error(msg))?;
-            self.stack.push(result);
-
+            self.stack[receiver_abs] = result;
             return Ok(());
         }
 
-        // Built-in callback methods that need VM access (map, filter, reduce)
+        // Built-in callback methods (map, filter, reduce) on arrays
         if let Value::Array(ref arr) = receiver {
             let map_hash = string_hash("map");
             let filter_hash = string_hash("filter");
             let reduce_hash = string_hash("reduce");
 
             if name_hash == map_hash && arg_count == 1 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 2)
-                    .collect();
-                self.stack.remove(receiver_pos);
-
-                let fn_name = match &args[0] {
+                let fn_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("map expects a function".to_string())),
                 };
-
                 let items = arr.borrow().clone();
                 let mut result = Vec::with_capacity(items.len());
                 for item in &items {
                     let val = self.call_function(&fn_name, std::slice::from_ref(item))?;
                     result.push(val);
                 }
-                self.stack.push(Value::Array(Rc::new(RefCell::new(result))));
+                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
                 return Ok(());
             }
 
             if name_hash == filter_hash && arg_count == 1 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 2)
-                    .collect();
-                self.stack.remove(receiver_pos);
-
-                let fn_name = match &args[0] {
+                let fn_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("filter expects a function".to_string())),
                 };
-
                 let items = arr.borrow().clone();
                 let mut result = Vec::new();
                 for item in &items {
@@ -2912,33 +2830,26 @@ impl VM {
                         result.push(item.clone());
                     }
                 }
-                self.stack.push(Value::Array(Rc::new(RefCell::new(result))));
+                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
                 return Ok(());
             }
 
             if name_hash == reduce_hash && arg_count == 2 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 3)
-                    .collect();
-                self.stack.remove(receiver_pos);
-
-                let fn_name = match &args[0] {
+                let fn_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("reduce expects a function".to_string())),
                 };
-
                 let items = arr.borrow().clone();
-                let mut acc = args[1].clone();
+                let mut acc = self.stack[receiver_abs + 2].clone();
                 for item in &items {
                     acc = self.call_function(&fn_name, &[acc, item.clone()])?;
                 }
-                self.stack.push(acc);
+                self.stack[receiver_abs] = acc;
                 return Ok(());
             }
         }
 
-        // AoSoA method dispatch: map, filter, for_each, iter_field
+        // AoSoA method dispatch
         #[cfg(feature = "mobile-aosoa")]
         if let Value::AoSoA(ref container) = receiver {
             let map_hash = string_hash("map");
@@ -2947,12 +2858,7 @@ impl VM {
             let iter_field_hash = string_hash("iter_field");
 
             if name_hash == map_hash && arg_count == 1 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 2)
-                    .collect();
-                self.stack.remove(receiver_pos);
-                let fn_name = match &args[0] {
+                let fn_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("map expects a function".to_string())),
                 };
@@ -2964,17 +2870,12 @@ impl VM {
                     let val = self.call_function(&fn_name, std::slice::from_ref(&item))?;
                     result.push(val);
                 }
-                self.stack.push(Value::Array(Rc::new(RefCell::new(result))));
+                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
                 return Ok(());
             }
 
             if name_hash == filter_hash && arg_count == 1 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 2)
-                    .collect();
-                self.stack.remove(receiver_pos);
-                let fn_name = match &args[0] {
+                let fn_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("filter expects a function".to_string())),
                 };
@@ -2988,17 +2889,12 @@ impl VM {
                         result.push(item);
                     }
                 }
-                self.stack.push(Value::Array(Rc::new(RefCell::new(result))));
+                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
                 return Ok(());
             }
 
             if name_hash == for_each_hash && arg_count == 1 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 2)
-                    .collect();
-                self.stack.remove(receiver_pos);
-                let fn_name = match &args[0] {
+                let fn_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("for_each expects a function".to_string())),
                 };
@@ -3008,17 +2904,12 @@ impl VM {
                     let item = Value::Struct(Box::new(elem));
                     self.call_function(&fn_name, std::slice::from_ref(&item))?;
                 }
-                self.stack.push(Value::Null);
+                self.stack[receiver_abs] = Value::Null;
                 return Ok(());
             }
 
             if name_hash == iter_field_hash && arg_count == 1 {
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 2)
-                    .collect();
-                self.stack.remove(receiver_pos);
-                let field_name = match &args[0] {
+                let field_name = match &self.stack[receiver_abs + 1] {
                     Value::Str(s) => (**s).clone(),
                     _ => {
                         return Err(
@@ -3037,12 +2928,12 @@ impl VM {
                     }
                 };
                 drop(container);
-                self.stack.push(Value::Array(Rc::new(RefCell::new(values))));
+                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(values)));
                 return Ok(());
             }
         }
 
-        // Object method dispatch: try compiled class methods first, then WritObject::call_method
+        // Object method dispatch
         if let Value::Object(ref obj) = receiver {
             let method_name = self
                 .field_names
@@ -3050,8 +2941,7 @@ impl VM {
                 .cloned()
                 .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
 
-            // Check if this is a WritClassInstance — try compiled method dispatch
-            // Walk the inheritance chain: ClassName::method, then ParentName::method, etc.
+            // Walk inheritance chain for compiled methods
             let class_name = obj.borrow().type_name().to_string();
             let mut search_class = Some(class_name.clone());
             let mut found_func = None;
@@ -3061,44 +2951,34 @@ impl VM {
                     found_func = Some(func_idx);
                     break;
                 }
-                // Walk up the inheritance chain
                 search_class = self.class_metas.get(cls).and_then(|m| m.parent.clone());
             }
 
             if let Some(func_idx) = found_func {
-                // Pop args and receiver
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 1 + n)
+                let args: Vec<Value> = (0..n)
+                    .map(|i| self.stack[receiver_abs + 1 + i].clone())
                     .collect();
-                self.stack.remove(receiver_pos);
-
-                // Call with self + args
                 let mut all_args = Vec::with_capacity(1 + args.len());
                 all_args.push(receiver);
                 all_args.extend(args);
-
                 let result = self.call_compiled_function(func_idx, &all_args)?;
-                self.stack.push(result);
+                self.stack[receiver_abs] = result;
                 return Ok(());
             }
 
-            // Fall back to WritObject::call_method for host-registered objects
-            let args: Vec<Value> = self
-                .stack
-                .drain(receiver_pos + 1..receiver_pos + 1 + n)
+            // Fall back to WritObject::call_method
+            let args: Vec<Value> = (0..n)
+                .map(|i| self.stack[receiver_abs + 1 + i].clone())
                 .collect();
-            self.stack.remove(receiver_pos);
-
             let result = obj
                 .borrow_mut()
                 .call_method(&method_name, &args)
                 .map_err(|e| self.make_error(e))?;
-            self.stack.push(result);
+            self.stack[receiver_abs] = result;
             return Ok(());
         }
 
-        // Struct method dispatch: look up `TypeName::method_name` function
+        // Struct method dispatch
         if let Value::Struct(ref s) = receiver {
             let method_name = self
                 .field_names
@@ -3108,20 +2988,14 @@ impl VM {
 
             let qualified = format!("{}::{}", s.type_name, method_name);
             if let Some(&func_idx) = self.function_map.get(&qualified) {
-                // Pop args and receiver
-                let args: Vec<Value> = self
-                    .stack
-                    .drain(receiver_pos + 1..receiver_pos + 1 + n)
+                let args: Vec<Value> = (0..n)
+                    .map(|i| self.stack[receiver_abs + 1 + i].clone())
                     .collect();
-                self.stack.remove(receiver_pos);
-
-                // Call with self + args
                 let mut all_args = Vec::with_capacity(1 + args.len());
                 all_args.push(receiver);
                 all_args.extend(args);
-
                 let result = self.call_compiled_function(func_idx, &all_args)?;
-                self.stack.push(result);
+                self.stack[receiver_abs] = result;
                 return Ok(());
             }
         }
@@ -3131,185 +3005,37 @@ impl VM {
             .get(&name_hash)
             .cloned()
             .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
-
         Err(self.make_error(format!(
-            "no method '{}' on type '{}'",
+            "no method '{}' on {}",
             method_name,
             receiver.type_name()
         )))
     }
 
-    /// Executes GetField on an object.
-    /// Executes the `invoke(obj, methodName, ...args)` reflection function.
-    fn exec_invoke(&mut self, arg_count: u8, callee_pos: usize) -> Result<(), RuntimeError> {
-        let n = arg_count as usize;
-
-        // Remove callee string ("invoke"), then collect all args
-        self.stack.remove(callee_pos);
-        let args: Vec<Value> = self.stack.drain(callee_pos..callee_pos + n).collect();
-
-        if args.len() < 2 {
-            return Err(self.make_error(
-                "invoke requires at least 2 arguments: (obj, methodName)".to_string(),
-            ));
-        }
-
-        let obj = &args[0];
-        let method_name = match &args[1] {
-            Value::Str(s) => (**s).clone(),
-            _ => return Err(self.make_error("invoke expects a string method name".to_string())),
-        };
-        let method_args = &args[2..];
-
-        // Struct method dispatch
-        if let Value::Struct(s) = obj {
-            let qualified = format!("{}::{}", s.type_name, method_name);
-            if let Some(&func_idx) = self.function_map.get(&qualified) {
-                let mut all_args = Vec::with_capacity(1 + method_args.len());
-                all_args.push(obj.clone());
-                all_args.extend_from_slice(method_args);
-                let result = self.call_compiled_function(func_idx, &all_args)?;
-                self.stack.push(result);
-                return Ok(());
-            }
-            return Err(self.make_error(format!(
-                "no method '{}' on type '{}'",
-                method_name, s.type_name
-            )));
-        }
-
-        // Object method dispatch
-        if let Value::Object(o) = obj {
-            let result = o
-                .borrow_mut()
-                .call_method(&method_name, method_args)
-                .map_err(|e| self.make_error(e))?;
-            self.stack.push(result);
-            return Ok(());
-        }
-
-        Err(self.make_error(format!(
-            "invoke not supported on type '{}'",
-            obj.type_name()
-        )))
-    }
-
-    /// Constructs a struct instance from values on the stack.
-    fn exec_make_struct(
+    /// Register-based GetField.
+    fn exec_get_field_reg(
         &mut self,
-        name_idx: u32,
-        field_count: u16,
-        chunk_id: ChunkId,
+        base: usize,
+        dst: u8,
+        obj_reg: u8,
+        name_hash: u32,
     ) -> Result<(), RuntimeError> {
-        // Resolve struct name from the chunk's string pool
-        let chunk = self.chunk_for(chunk_id);
-        let struct_name = chunk
-            .rc_strings()
-            .get(name_idx as usize)
-            .map(|s| s.as_str().to_string())
-            .ok_or_else(|| self.make_error(format!("invalid struct name index {name_idx}")))?;
-
-        // Get struct metadata
-        let meta = self
-            .struct_metas
-            .get(&struct_name)
-            .cloned()
-            .ok_or_else(|| self.make_error(format!("unknown struct type '{struct_name}'")))?;
-
-        // Pop field values from stack (in declaration order)
-        let n = field_count as usize;
-        if self.stack.len() < n {
-            return Err(self.make_error("stack underflow in MakeStruct".to_string()));
-        }
-        let values: Vec<Value> = self.stack.drain(self.stack.len() - n..).collect();
-
-        // Build field map
-        let mut fields = HashMap::new();
-        for (i, name) in meta.field_names.iter().enumerate() {
-            if i < values.len() {
-                fields.insert(name.clone(), values[i].clone());
-            }
-        }
-
-        let writ_struct = crate::writ_struct::WritStruct {
-            type_name: struct_name,
-            fields,
-            field_order: meta.field_names.clone(),
-            public_fields: meta.public_fields.clone(),
-            public_methods: meta.public_methods.clone(),
-        };
-
-        self.stack.push(Value::Struct(Box::new(writ_struct)));
-        Ok(())
-    }
-
-    fn exec_make_class(
-        &mut self,
-        name_idx: u32,
-        field_count: u16,
-        chunk_id: ChunkId,
-    ) -> Result<(), RuntimeError> {
-        // Resolve class name from the chunk's string pool
-        let chunk = self.chunk_for(chunk_id);
-        let class_name = chunk
-            .rc_strings()
-            .get(name_idx as usize)
-            .map(|s| s.as_str().to_string())
-            .ok_or_else(|| self.make_error(format!("invalid class name index {name_idx}")))?;
-
-        // Get class metadata
-        let meta = self
-            .class_metas
-            .get(&class_name)
-            .cloned()
-            .ok_or_else(|| self.make_error(format!("unknown class type '{class_name}'")))?;
-
-        // Pop field values from stack (in declaration order, parent fields first)
-        let n = field_count as usize;
-        if self.stack.len() < n {
-            return Err(self.make_error("stack underflow in MakeClass".to_string()));
-        }
-        let values: Vec<Value> = self.stack.drain(self.stack.len() - n..).collect();
-
-        // Build field map
-        let mut fields = HashMap::new();
-        for (i, name) in meta.field_names.iter().enumerate() {
-            if i < values.len() {
-                fields.insert(name.clone(), values[i].clone());
-            }
-        }
-
-        let instance = crate::class_instance::WritClassInstance {
-            class_name,
-            fields,
-            field_order: meta.field_names.clone(),
-            parent_class: meta.parent.clone(),
-        };
-
-        self.stack
-            .push(Value::Object(Rc::new(RefCell::new(instance))));
-        Ok(())
-    }
-
-    fn exec_get_field(&mut self, name_hash: u32) -> Result<(), RuntimeError> {
-        let object = self.pop()?;
-        match &object {
+        let object = &self.stack[base + obj_reg as usize];
+        let result = match object {
             Value::Array(arr) => {
                 let length_hash = string_hash("length");
                 if name_hash == length_hash {
-                    let len = arr.borrow().len() as i32;
-                    self.stack.push(Value::I32(len));
+                    Value::I32(arr.borrow().len() as i32)
                 } else {
                     return Err(self.make_error(format!("unknown array field (hash {name_hash})")));
                 }
             }
             Value::Dict(dict) => {
                 let dict = dict.borrow();
-                let val = dict
-                    .iter()
+                dict.iter()
                     .find(|(key, _)| string_hash(key) == name_hash)
-                    .map(|(_, v)| v.clone());
-                self.stack.push(val.unwrap_or(Value::Null));
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or(Value::Null)
             }
             Value::Object(obj) => {
                 let field_name = self
@@ -3317,11 +3043,9 @@ impl VM {
                     .get(&name_hash)
                     .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?
                     .clone();
-                let val = obj
-                    .borrow()
+                obj.borrow()
                     .get_field(&field_name)
-                    .map_err(|e| self.make_error(e))?;
-                self.stack.push(val);
+                    .map_err(|e| self.make_error(e))?
             }
             Value::Struct(s) => {
                 let field_name = self
@@ -3329,17 +3053,15 @@ impl VM {
                     .get(&name_hash)
                     .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?
                     .clone();
-                let val = s.get_field(&field_name).cloned().ok_or_else(|| {
+                s.get_field(&field_name).cloned().ok_or_else(|| {
                     self.make_error(format!("'{}' has no field '{}'", s.type_name, field_name))
-                })?;
-                self.stack.push(val);
+                })?
             }
             #[cfg(feature = "mobile-aosoa")]
             Value::AoSoA(container) => {
                 let length_hash = string_hash("length");
                 if name_hash == length_hash {
-                    let len = container.borrow().len() as i32;
-                    self.stack.push(Value::I32(len));
+                    Value::I32(container.borrow().len() as i32)
                 } else {
                     return Err(self.make_error(format!("unknown AoSoA field (hash {name_hash})")));
                 }
@@ -3347,23 +3069,28 @@ impl VM {
             _ => {
                 return Err(self.make_error(format!("field access on {}", object.type_name())));
             }
-        }
+        };
+        self.stack[base + dst as usize] = result;
         Ok(())
     }
 
-    /// Executes SetField on an object.
-    fn exec_set_field(&mut self, name_hash: u32) -> Result<(), RuntimeError> {
-        let value = self.pop()?;
-        let object = self.pop()?;
+    /// Register-based SetField.
+    fn exec_set_field_reg(
+        &mut self,
+        base: usize,
+        obj_reg: u8,
+        name_hash: u32,
+        val_reg: u8,
+    ) -> Result<(), RuntimeError> {
+        let value = self.stack[base + val_reg as usize].clone();
+        let object = &self.stack[base + obj_reg as usize];
         match object {
-            Value::Dict(ref dict) => {
+            Value::Dict(dict) => {
                 let mut dict = dict.borrow_mut();
-                // Find existing key by matching hash
                 let existing_key = dict
                     .keys()
                     .find(|key| string_hash(key) == name_hash)
                     .cloned();
-
                 if let Some(key) = existing_key {
                     dict.insert(key, value);
                 } else if let Some(name) = self.field_names.get(&name_hash) {
@@ -3374,7 +3101,7 @@ impl VM {
                     );
                 }
             }
-            Value::Object(ref obj) => {
+            Value::Object(obj) => {
                 let field_name = self
                     .field_names
                     .get(&name_hash)
@@ -3384,7 +3111,15 @@ impl VM {
                     .set_field(&field_name, value)
                     .map_err(|e| self.make_error(e))?;
             }
-            Value::Struct(mut s) => {
+            Value::Struct(_) => {
+                // For structs, we need to take ownership to mutate
+                let mut s = match std::mem::replace(
+                    &mut self.stack[base + obj_reg as usize],
+                    Value::Null,
+                ) {
+                    Value::Struct(s) => s,
+                    _ => unreachable!(),
+                };
                 let field_name = self
                     .field_names
                     .get(&name_hash)
@@ -3392,8 +3127,7 @@ impl VM {
                     .clone();
                 s.set_field(&field_name, value)
                     .map_err(|e| self.make_error(e))?;
-                // Push modified struct back (caller emits StoreLocal to save)
-                self.stack.push(Value::Struct(s));
+                self.stack[base + obj_reg as usize] = Value::Struct(s);
             }
             _ => {
                 return Err(self.make_error(format!("field assignment on {}", object.type_name())));
@@ -3402,34 +3136,31 @@ impl VM {
         Ok(())
     }
 
-    /// Executes GetIndex on a collection.
-    fn exec_get_index(&mut self) -> Result<(), RuntimeError> {
-        let index = self.pop()?;
-        let collection = self.pop()?;
-        match (&collection, &index) {
+    /// Register-based GetIndex.
+    fn exec_get_index_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        obj_reg: u8,
+        idx_reg: u8,
+    ) -> Result<(), RuntimeError> {
+        let collection = &self.stack[base + obj_reg as usize];
+        let index = &self.stack[base + idx_reg as usize];
+        let result = match (collection, index) {
             (Value::Array(arr), idx_val @ (Value::I32(_) | Value::I64(_))) => {
                 let arr = arr.borrow();
                 let i = idx_val.as_i64();
-                let idx = if i < 0 {
-                    return Err(self.make_error(format!(
-                        "array index {i} out of bounds (length {})",
-                        arr.len()
-                    )));
-                } else {
-                    i as usize
-                };
-                if idx >= arr.len() {
+                if i < 0 || i as usize >= arr.len() {
                     return Err(self.make_error(format!(
                         "array index {i} out of bounds (length {})",
                         arr.len()
                     )));
                 }
-                self.stack.push(arr[idx].clone());
+                arr[i as usize].clone()
             }
             (Value::Dict(dict), Value::Str(key)) => {
                 let dict = dict.borrow();
-                let val = dict.get(key.as_str()).cloned().unwrap_or(Value::Null);
-                self.stack.push(val);
+                dict.get(key.as_str()).cloned().unwrap_or(Value::Null)
             }
             #[cfg(feature = "mobile-aosoa")]
             (Value::AoSoA(container), idx_val @ (Value::I32(_) | Value::I64(_))) => {
@@ -3443,7 +3174,7 @@ impl VM {
                     )));
                 }
                 let writ_struct = container.get(i as usize).unwrap();
-                self.stack.push(Value::Struct(Box::new(writ_struct)));
+                Value::Struct(Box::new(writ_struct))
             }
             _ => {
                 return Err(self.make_error(format!(
@@ -3452,34 +3183,33 @@ impl VM {
                     index.type_name()
                 )));
             }
-        }
+        };
+        self.stack[base + dst as usize] = result;
         Ok(())
     }
 
-    /// Executes SetIndex on a collection.
-    fn exec_set_index(&mut self) -> Result<(), RuntimeError> {
-        let value = self.pop()?;
-        let index = self.pop()?;
-        let collection = self.pop()?;
-        match (&collection, &index) {
+    /// Register-based SetIndex.
+    fn exec_set_index_reg(
+        &mut self,
+        base: usize,
+        obj_reg: u8,
+        idx_reg: u8,
+        val_reg: u8,
+    ) -> Result<(), RuntimeError> {
+        let value = self.stack[base + val_reg as usize].clone();
+        let collection = &self.stack[base + obj_reg as usize];
+        let index = &self.stack[base + idx_reg as usize];
+        match (collection, index) {
             (Value::Array(arr), idx_val @ (Value::I32(_) | Value::I64(_))) => {
                 let mut arr = arr.borrow_mut();
                 let i = idx_val.as_i64();
-                let idx = if i < 0 {
-                    return Err(self.make_error(format!(
-                        "array index {i} out of bounds (length {})",
-                        arr.len()
-                    )));
-                } else {
-                    i as usize
-                };
-                if idx >= arr.len() {
+                if i < 0 || i as usize >= arr.len() {
                     return Err(self.make_error(format!(
                         "array index {i} out of bounds (length {})",
                         arr.len()
                     )));
                 }
-                arr[idx] = value;
+                arr[i as usize] = value;
             }
             (Value::Dict(dict), Value::Str(key)) => {
                 let mut dict = dict.borrow_mut();
@@ -3518,96 +3248,108 @@ impl VM {
         Ok(())
     }
 
-    // ── AoSoA helpers (mobile only) ─────────────────────────────────
+    /// Register-based MakeStruct.
+    fn exec_make_struct_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        name_idx: u32,
+        start: u8,
+        field_count: u16,
+        chunk_id: ChunkId,
+    ) -> Result<(), RuntimeError> {
+        let chunk = self.chunk_for(chunk_id);
+        let struct_name = chunk
+            .rc_strings()
+            .get(name_idx as usize)
+            .map(|s| s.as_str().to_string())
+            .ok_or_else(|| self.make_error(format!("invalid struct name index {name_idx}")))?;
 
-    /// Converts the top-of-stack Array into an AoSoA container if all elements
-    /// are structs of the same type. Falls back to keeping the regular Array
-    /// if the elements are not homogeneous structs.
-    #[cfg(feature = "mobile-aosoa")]
-    fn exec_convert_to_aosoa(&mut self) -> Result<(), RuntimeError> {
-        use crate::aosoa::AoSoAContainer;
+        let meta = self
+            .struct_metas
+            .get(&struct_name)
+            .cloned()
+            .ok_or_else(|| self.make_error(format!("unknown struct type '{struct_name}'")))?;
 
-        let top = self.pop()?;
-        match top {
-            Value::Array(ref arr) => {
-                let elements = arr.borrow();
-
-                // Check if all elements are structs of the same type.
-                let first_type = match elements.first() {
-                    Some(Value::Struct(s)) => Some(s.type_name.clone()),
-                    _ => None,
-                };
-
-                let type_name = match first_type {
-                    Some(name)
-                        if elements
-                            .iter()
-                            .all(|v| matches!(v, Value::Struct(s) if s.type_name == name)) =>
-                    {
-                        name
-                    }
-                    _ => {
-                        // Not homogeneous structs — keep as regular array.
-                        drop(elements);
-                        self.stack.push(top);
-                        return Ok(());
-                    }
-                };
-
-                // Look up struct metadata.
-                let meta = match self.struct_metas.get(&type_name) {
-                    Some(meta) => meta.clone(),
-                    None => {
-                        // No metadata — keep as regular array.
-                        drop(elements);
-                        self.stack.push(top);
-                        return Ok(());
-                    }
-                };
-
-                // Build the AoSoA container.
-                let mut container = AoSoAContainer::new(
-                    type_name,
-                    meta.field_names.clone(),
-                    meta.public_fields.clone(),
-                    meta.public_methods.clone(),
-                    elements.len(),
-                );
-                for elem in elements.iter() {
-                    if let Value::Struct(s) = elem {
-                        container.push(s).map_err(|e| self.make_error(e))?;
-                    }
-                }
-                drop(elements);
-                self.stack
-                    .push(Value::AoSoA(Rc::new(RefCell::new(container))));
-            }
-            other => {
-                // Not an array — push back unchanged.
-                self.stack.push(other);
+        let n = field_count as usize;
+        let mut fields = HashMap::new();
+        for (i, name) in meta.field_names.iter().enumerate() {
+            if i < n {
+                fields.insert(name.clone(), self.stack[base + start as usize + i].clone());
             }
         }
+
+        let writ_struct = crate::writ_struct::WritStruct {
+            type_name: struct_name,
+            fields,
+            field_order: meta.field_names.clone(),
+            public_fields: meta.public_fields.clone(),
+            public_methods: meta.public_methods.clone(),
+        };
+
+        self.stack[base + dst as usize] = Value::Struct(Box::new(writ_struct));
         Ok(())
     }
 
-    // ── Closure helpers ──────────────────────────────────────────
+    /// Register-based MakeClass.
+    fn exec_make_class_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        name_idx: u32,
+        start: u8,
+        field_count: u16,
+        chunk_id: ChunkId,
+    ) -> Result<(), RuntimeError> {
+        let chunk = self.chunk_for(chunk_id);
+        let class_name = chunk
+            .rc_strings()
+            .get(name_idx as usize)
+            .map(|s| s.as_str().to_string())
+            .ok_or_else(|| self.make_error(format!("invalid class name index {name_idx}")))?;
 
-    /// Executes a `MakeClosure` instruction: creates a `Value::Closure`
-    /// from the function at `func_idx` and captures upvalues per the
-    /// function's upvalue descriptors.
-    fn exec_make_closure(&mut self, func_idx: u16) -> Result<(), RuntimeError> {
+        let meta = self
+            .class_metas
+            .get(&class_name)
+            .cloned()
+            .ok_or_else(|| self.make_error(format!("unknown class type '{class_name}'")))?;
+
+        let n = field_count as usize;
+        let mut fields = HashMap::new();
+        for (i, name) in meta.field_names.iter().enumerate() {
+            if i < n {
+                fields.insert(name.clone(), self.stack[base + start as usize + i].clone());
+            }
+        }
+
+        let instance = crate::class_instance::WritClassInstance {
+            class_name,
+            fields,
+            field_order: meta.field_names.clone(),
+            parent_class: meta.parent.clone(),
+        };
+
+        self.stack[base + dst as usize] = Value::Object(Rc::new(RefCell::new(instance)));
+        Ok(())
+    }
+
+    /// Register-based MakeClosure.
+    fn exec_make_closure_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        func_idx: u16,
+    ) -> Result<(), RuntimeError> {
         let func_idx = func_idx as usize;
         let descriptors = self.functions[func_idx].upvalues.clone();
         let mut upvalues = Vec::with_capacity(descriptors.len());
 
         for desc in &descriptors {
             if desc.is_local {
-                // Capture a local from the current frame
                 let abs_slot = self.current_frame().base + desc.index as usize;
                 let cell = self.capture_local(abs_slot);
                 upvalues.push(cell);
             } else {
-                // Transitive capture: clone Rc from parent frame's upvalue array
                 let parent_uv = self
                     .current_frame()
                     .upvalues
@@ -3617,48 +3359,29 @@ impl VM {
             }
         }
 
-        self.stack
-            .push(Value::Closure(Box::new(ClosureData { func_idx, upvalues })));
+        let abs_dst = base + dst as usize;
+        self.stack[abs_dst] = Value::Closure(Box::new(ClosureData { func_idx, upvalues }));
+        // If this closure captured its own slot (self-recursion), the upvalue
+        // cell was created before the closure was stored. Sync it now.
+        if self.has_open_upvalues
+            && abs_dst < self.open_upvalues.len()
+            && let Some(cell) = &self.open_upvalues[abs_dst]
+        {
+            *cell.borrow_mut() = self.stack[abs_dst].cheap_clone();
+        }
         Ok(())
     }
 
-    /// Returns a shared cell for the local at the given absolute stack slot.
-    /// If an open upvalue already exists for this slot, reuses it. Otherwise
-    /// creates a new one initialized with the current stack value.
-    fn capture_local(&mut self, abs_slot: usize) -> Rc<RefCell<Value>> {
-        if let Some(existing) = self.open_upvalues.get(&abs_slot) {
-            return Rc::clone(existing);
-        }
-        let cell = Rc::new(RefCell::new(self.stack[abs_slot].clone()));
-        self.open_upvalues.insert(abs_slot, Rc::clone(&cell));
-        self.has_open_upvalues = true;
-        cell
-    }
-
-    /// Closes all open upvalues at or above `min_slot` by syncing the
-    /// current stack value into their heap cells, then removing them
-    /// from the open set.
-    fn close_upvalues_above(&mut self, min_slot: usize) {
-        self.open_upvalues.retain(|&slot, cell| {
-            if slot >= min_slot {
-                if slot < self.stack.len() {
-                    *cell.borrow_mut() = self.stack[slot].clone();
-                }
-                false
-            } else {
-                true
-            }
-        });
-        self.has_open_upvalues = !self.open_upvalues.is_empty();
-    }
-
-    // ── Coroutine helpers ─────────────────────────────────────────
-
-    /// Creates a new coroutine from a function call on the stack.
-    fn exec_start_coroutine(&mut self, arg_count: u8) -> Result<(), RuntimeError> {
+    /// Register-based StartCoroutine.
+    fn exec_start_coroutine_reg(
+        &mut self,
+        base: usize,
+        base_reg: u8,
+        arg_count: u8,
+    ) -> Result<(), RuntimeError> {
+        let callee_abs = base + base_reg as usize;
         let n = arg_count as usize;
-        let callee_pos = self.stack.len() - n - 1;
-        let callee = self.stack[callee_pos].clone();
+        let callee = self.stack[callee_abs].clone();
 
         let (func_idx, closure_upvalues) = match &callee {
             Value::Str(s) => {
@@ -3687,11 +3410,15 @@ impl VM {
             )));
         }
 
-        // Remove callee, drain args
-        self.stack.remove(callee_pos);
-        let args: Vec<Value> = self.stack.drain(callee_pos..callee_pos + n).collect();
+        // Build the coroutine's register window
+        let func = &self.functions[func_idx];
+        let max_regs = func.max_registers as usize;
+        let mut coro_stack = vec![Value::Null; max_regs];
+        // Copy args into the first registers
+        for (i, slot) in coro_stack.iter_mut().enumerate().take(n) {
+            *slot = self.stack[callee_abs + 1 + i].clone();
+        }
 
-        // Create the coroutine
         let id = self.next_coroutine_id;
         self.next_coroutine_id += 1;
 
@@ -3699,31 +3426,87 @@ impl VM {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base: 0,
-            has_callee_slot: false,
+            result_reg: 0,
+            max_registers: func.max_registers,
+            has_rc_values: func.has_rc_values || closure_upvalues.is_some(),
             upvalues: closure_upvalues,
         };
 
         let coro = Coroutine {
             id,
             state: CoroutineState::Running,
-            stack: args,
+            stack: coro_stack,
             frames: vec![frame],
             wait: None,
             return_value: None,
             owner_id: None,
-            open_upvalues: HashMap::new(),
+            open_upvalues: Vec::new(),
             children: Vec::new(),
         };
 
         self.coroutines.push(coro);
 
-        // Register as child of parent
         if let Some(parent_idx) = self.active_coroutine {
             self.coroutines[parent_idx].children.push(id);
         }
 
-        // Push coroutine handle onto current stack
-        self.stack.push(Value::CoroutineHandle(id));
+        self.stack[callee_abs] = Value::CoroutineHandle(id);
+        Ok(())
+    }
+
+    /// Register-based ConvertToAoSoA.
+    #[cfg(feature = "mobile-aosoa")]
+    fn exec_convert_to_aosoa_reg(&mut self, base: usize, src: u8) -> Result<(), RuntimeError> {
+        use crate::aosoa::AoSoAContainer;
+
+        let abs = base + src as usize;
+        let val = &self.stack[abs];
+        match val {
+            Value::Array(ref arr) => {
+                let elements = arr.borrow();
+
+                let first_type = match elements.first() {
+                    Some(Value::Struct(s)) => Some(s.type_name.clone()),
+                    _ => None,
+                };
+
+                let type_name = match first_type {
+                    Some(name)
+                        if elements
+                            .iter()
+                            .all(|v| matches!(v, Value::Struct(s) if s.type_name == name)) =>
+                    {
+                        name
+                    }
+                    _ => {
+                        return Ok(());
+                    }
+                };
+
+                let meta = match self.struct_metas.get(&type_name) {
+                    Some(meta) => meta.clone(),
+                    None => {
+                        return Ok(());
+                    }
+                };
+
+                let mut container = AoSoAContainer::new(
+                    type_name,
+                    meta.field_names.clone(),
+                    meta.public_fields.clone(),
+                    meta.public_methods.clone(),
+                    elements.len(),
+                );
+                for elem in elements.iter() {
+                    if let Value::Struct(s) = elem {
+                        container.push(s).map_err(|e| self.make_error(e))?;
+                    }
+                }
+                drop(elements);
+                self.stack[abs] = Value::AoSoA(Rc::new(RefCell::new(container)));
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -3790,7 +3573,7 @@ impl VM {
                             // Will be evaluated during resume
                             true
                         }
-                        Some(WaitCondition::Coroutine { child_id }) => {
+                        Some(WaitCondition::Coroutine { child_id, .. }) => {
                             let child_id = *child_id;
                             // Inline check: is the child done?
                             self.coroutines
@@ -3824,7 +3607,7 @@ impl VM {
             .coroutines
             .iter()
             .filter_map(|c| match &c.wait {
-                Some(WaitCondition::Coroutine { child_id }) => Some(*child_id),
+                Some(WaitCondition::Coroutine { child_id, .. }) => Some(*child_id),
                 _ => None,
             })
             .collect();
@@ -3863,25 +3646,28 @@ impl VM {
             }
         }
 
-        // Push the resume value onto the coroutine's stack.
-        // Yield is an expression, so when the coroutine resumes, the yield
-        // evaluates to a value (Null for most yields, child's return value
-        // for YieldCoroutine). First-run coroutines (wait == None) skip this.
-        match &self.coroutines[idx].wait {
-            Some(WaitCondition::Coroutine { child_id }) => {
-                let child_id = *child_id;
-                let return_value = self
-                    .coroutines
-                    .iter()
-                    .find(|c| c.id == child_id)
-                    .and_then(|c| c.return_value.clone())
-                    .unwrap_or(Value::Null);
-                self.coroutines[idx].stack.push(return_value);
+        // Write the resume value into the correct register.
+        // Only YieldCoroutine produces a resume value (the child's return value).
+        // Other yields don't produce values in registers. First-run coroutines skip this.
+        if let Some(WaitCondition::Coroutine {
+            child_id,
+            result_reg,
+        }) = &self.coroutines[idx].wait
+        {
+            let child_id = *child_id;
+            let result_reg = *result_reg;
+            let return_value = self
+                .coroutines
+                .iter()
+                .find(|c| c.id == child_id)
+                .and_then(|c| c.return_value.clone())
+                .unwrap_or(Value::Null);
+            // Write to the destination register in the coroutine's current frame
+            let coro = &mut self.coroutines[idx];
+            if let Some(frame) = coro.frames.last() {
+                let abs = frame.base + result_reg as usize;
+                coro.stack[abs] = return_value;
             }
-            Some(_) => {
-                self.coroutines[idx].stack.push(Value::Null);
-            }
-            None => {} // First run, no resume value needed
         }
 
         // Swap coroutine state into VM
@@ -3964,11 +3750,15 @@ impl VM {
         self.active_coroutine = None;
 
         // Set up a call frame for the predicate
+        let max_regs = self.functions[func_idx].max_registers;
+        self.stack.resize(max_regs as usize, Value::Null);
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base: 0,
-            has_callee_slot: false,
+            result_reg: 0,
+            max_registers: max_regs,
+            has_rc_values: self.functions[func_idx].has_rc_values || closure_upvalues.is_some(),
             upvalues: closure_upvalues,
         });
 

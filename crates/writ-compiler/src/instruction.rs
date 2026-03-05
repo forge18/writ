@@ -22,296 +22,253 @@ impl CmpOp {
     }
 }
 
-/// A single bytecode instruction for the Writ VM.
+/// A single bytecode instruction for the Writ register-based VM.
 ///
-/// Instructions operate on a stack-based virtual machine. Operands are
-/// pushed onto the operand stack, operations pop their inputs and push
-/// their results.
+/// Instructions use a three-address format: operands are register indices
+/// (`u8`, frame-relative offsets from `CallFrame::base`). Values are read
+/// from and written to registers in-place, eliminating the push/pop/clone/drop
+/// overhead of a stack-based architecture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
-    /// Push a 32-bit integer onto the stack.
-    LoadInt(i32),
-    /// Push a 64-bit integer from the constant pool onto the stack.
-    /// `u16` is the index into the chunk's i64 constant pool.
-    LoadConstInt(u16),
-    /// Push a 32-bit float onto the stack.
-    LoadFloat(f32),
-    /// Push a 64-bit float from the constant pool onto the stack.
-    /// `u16` is the index into the chunk's f64 constant pool.
-    LoadConstFloat(u16),
-    /// Push a boolean onto the stack.
-    LoadBool(bool),
-    /// Push a string from the constant pool onto the stack.
-    LoadStr(u32),
-    /// Push null onto the stack.
-    LoadNull,
+    // ── Load/Store ──────────────────────────────────────────────────
+    /// `R(dst) = I32(imm)`
+    LoadInt(u8, i32),
+    /// `R(dst) = I64(pool[idx])`
+    LoadConstInt(u8, u16),
+    /// `R(dst) = F32(imm)`
+    LoadFloat(u8, f32),
+    /// `R(dst) = F64(pool[idx])`
+    LoadConstFloat(u8, u16),
+    /// `R(dst) = Bool(imm)`
+    LoadBool(u8, bool),
+    /// `R(dst) = Str(Rc::clone(pool[idx]))`
+    LoadStr(u8, u32),
+    /// `R(dst) = Null`
+    LoadNull(u8),
+    /// `R(dst) = R(src).cheap_clone()`
+    Move(u8, u8),
+    /// `R(dst) = globals[hash]`
+    LoadGlobal(u8, u32),
 
-    /// Push the value of a local variable onto the stack.
-    LoadLocal(u8),
-    /// Pop the top of stack and store into a local variable slot.
-    StoreLocal(u8),
+    // ── Arithmetic (generic, quickenable) ───────────────────────────
+    /// `R(dst) = R(a) + R(b)` — generic, quickened on first execution
+    Add(u8, u8, u8),
+    /// `R(dst) = R(a) - R(b)` — generic, quickened on first execution
+    Sub(u8, u8, u8),
+    /// `R(dst) = R(a) * R(b)` — generic, quickened on first execution
+    Mul(u8, u8, u8),
+    /// `R(dst) = R(a) / R(b)` — generic, quickened on first execution
+    Div(u8, u8, u8),
+    /// `R(dst) = R(a) % R(b)`
+    Mod(u8, u8, u8),
 
-    // Arithmetic
-    /// Pop two values, push their sum.
-    Add,
-    /// Pop two values, push lhs - rhs.
-    Sub,
-    /// Pop two values, push their product.
-    Mul,
-    /// Pop two values, push lhs / rhs.
-    Div,
-    /// Pop two values, push lhs % rhs.
-    Mod,
+    // ── Arithmetic (typed, compiler-guaranteed) ─────────────────────
+    /// `R(dst) = R(a) +_int R(b)` — both operands known int
+    AddInt(u8, u8, u8),
+    /// `R(dst) = R(a) +_float R(b)` — both operands known float
+    AddFloat(u8, u8, u8),
+    /// `R(dst) = R(a) -_int R(b)`
+    SubInt(u8, u8, u8),
+    /// `R(dst) = R(a) -_float R(b)`
+    SubFloat(u8, u8, u8),
+    /// `R(dst) = R(a) *_int R(b)`
+    MulInt(u8, u8, u8),
+    /// `R(dst) = R(a) *_float R(b)`
+    MulFloat(u8, u8, u8),
+    /// `R(dst) = R(a) /_int R(b)`
+    DivInt(u8, u8, u8),
+    /// `R(dst) = R(a) /_float R(b)`
+    DivFloat(u8, u8, u8),
 
-    // Unary
-    /// Pop one value, push its negation.
-    Neg,
-    /// Pop one boolean, push its logical complement.
-    Not,
+    // ── Arithmetic (immediate forms) ────────────────────────────────
+    /// `R(dst) = R(src) + I32(imm)` — fused load+add for increments
+    AddIntImm(u8, u8, i32),
+    /// `R(dst) = R(src) - I32(imm)` — fused load+sub
+    SubIntImm(u8, u8, i32),
 
-    // Comparison
-    /// Pop two values, push true if equal.
-    Eq,
-    /// Pop two values, push true if not equal.
-    Ne,
-    /// Pop two values, push true if lhs < rhs.
-    Lt,
-    /// Pop two values, push true if lhs <= rhs.
-    Le,
-    /// Pop two values, push true if lhs > rhs.
-    Gt,
-    /// Pop two values, push true if lhs >= rhs.
-    Ge,
+    // ── Unary ───────────────────────────────────────────────────────
+    /// `R(dst) = -R(src)`
+    Neg(u8, u8),
+    /// `R(dst) = !R(src)`
+    Not(u8, u8),
 
-    // Logical (non-short-circuit in Phase 9)
-    /// Pop two booleans, push logical AND.
-    And,
-    /// Pop two booleans, push logical OR.
-    Or,
+    // ── Comparison (generic, quickenable) ───────────────────────────
+    /// `R(dst) = R(a) == R(b)` — generic, quickened on first execution
+    Eq(u8, u8, u8),
+    /// `R(dst) = R(a) != R(b)` — generic
+    Ne(u8, u8, u8),
+    /// `R(dst) = R(a) < R(b)` — generic
+    Lt(u8, u8, u8),
+    /// `R(dst) = R(a) <= R(b)` — generic
+    Le(u8, u8, u8),
+    /// `R(dst) = R(a) > R(b)` — generic
+    Gt(u8, u8, u8),
+    /// `R(dst) = R(a) >= R(b)` — generic
+    Ge(u8, u8, u8),
 
-    // Control
-    /// Return from the current function.
-    Return,
-    /// Pop and discard the top of stack.
-    Pop,
+    // ── Comparison (typed, compiler-guaranteed) ─────────────────────
+    EqInt(u8, u8, u8),
+    EqFloat(u8, u8, u8),
+    NeInt(u8, u8, u8),
+    NeFloat(u8, u8, u8),
+    LtInt(u8, u8, u8),
+    LtFloat(u8, u8, u8),
+    LeInt(u8, u8, u8),
+    LeFloat(u8, u8, u8),
+    GtInt(u8, u8, u8),
+    GtFloat(u8, u8, u8),
+    GeInt(u8, u8, u8),
+    GeFloat(u8, u8, u8),
 
-    // ── Phase 10: Control flow ─────────────────────────────────────
+    // ── Logical ─────────────────────────────────────────────────────
+    /// `R(dst) = R(a) && R(b)` — non-short-circuit
+    And(u8, u8, u8),
+    /// `R(dst) = R(a) || R(b)` — non-short-circuit
+    Or(u8, u8, u8),
+
+    // ── Control flow ────────────────────────────────────────────────
     /// Unconditional relative jump. Offset from the NEXT instruction.
     Jump(i32),
-    /// Jump if top-of-stack is falsy. Does NOT pop the value.
-    JumpIfFalse(i32),
-    /// Jump if top-of-stack is truthy. Does NOT pop the value.
-    JumpIfTrue(i32),
-    /// Jump if top-of-stack is falsy AND pop the value. Fused JumpIfFalse+Pop.
-    JumpIfFalsePop(i32),
+    /// Jump if `R(src)` is falsy. Offset from the NEXT instruction.
+    JumpIfFalsy(u8, i32),
+    /// Jump if `R(src)` is truthy. Offset from the NEXT instruction.
+    JumpIfTruthy(u8, i32),
 
-    // ── Phase 10: Function calls ───────────────────────────────────
-    /// Call function. u8 is the argument count. Callee is below args on stack.
-    Call(u8),
-    /// Direct function call by index — skips LoadGlobal and string-based lookup.
-    /// `u16` is the function index, `u8` is the argument count. No callee
-    /// value is placed on the stack.
-    CallDirect(u16, u8),
-    /// Call host-registered native function by ID.
-    CallNative(u32),
+    // ── Fused compare-and-jump (int) ────────────────────────────────
+    // These test a condition and jump if the condition is FALSE (fall through = true).
+    /// Jump if NOT `R(a) < R(b)` (int)
+    TestLtInt(u8, u8, i32),
+    /// Jump if NOT `R(a) <= R(b)` (int)
+    TestLeInt(u8, u8, i32),
+    /// Jump if NOT `R(a) > R(b)` (int)
+    TestGtInt(u8, u8, i32),
+    /// Jump if NOT `R(a) >= R(b)` (int)
+    TestGeInt(u8, u8, i32),
+    /// Jump if NOT `R(a) == R(b)` (int)
+    TestEqInt(u8, u8, i32),
+    /// Jump if NOT `R(a) != R(b)` (int)
+    TestNeInt(u8, u8, i32),
 
-    // ── Phase 10: Null handling ────────────────────────────────────
-    /// Pop [fallback, value]; push value if non-null, else push fallback.
-    NullCoalesce,
+    // ── Fused compare-and-jump (int immediate) ──────────────────────
+    /// Jump if NOT `R(a) < imm` (int)
+    TestLtIntImm(u8, i32, i32),
+    /// Jump if NOT `R(a) <= imm` (int)
+    TestLeIntImm(u8, i32, i32),
+    /// Jump if NOT `R(a) > imm` (int)
+    TestGtIntImm(u8, i32, i32),
+    /// Jump if NOT `R(a) >= imm` (int)
+    TestGeIntImm(u8, i32, i32),
 
-    // ── Phase 10: String ───────────────────────────────────────────
-    /// Pop two values, push their string concatenation.
-    Concat,
+    // ── Fused compare-and-jump (float) ──────────────────────────────
+    /// Jump if NOT `R(a) < R(b)` (float)
+    TestLtFloat(u8, u8, i32),
+    /// Jump if NOT `R(a) <= R(b)` (float)
+    TestLeFloat(u8, u8, i32),
+    /// Jump if NOT `R(a) > R(b)` (float)
+    TestGtFloat(u8, u8, i32),
+    /// Jump if NOT `R(a) >= R(b)` (float)
+    TestGeFloat(u8, u8, i32),
 
-    // ── Phase 10: Collections ──────────────────────────────────────
-    /// Pop N items from stack, create an Array.
-    MakeArray(u16),
-    /// Pop N key/value pairs from stack, create a Dictionary.
-    MakeDict(u16),
+    // ── Return ──────────────────────────────────────────────────────
+    /// Return `R(src)` to the caller's result register.
+    Return(u8),
+    /// Return Null to the caller's result register.
+    ReturnNull,
 
-    // ── Phase 10: Field/Index access ───────────────────────────────
-    /// Get field by name-hash from the object on top of stack.
-    GetField(u32),
-    /// Set field by name-hash. Stack: [object, value] → [].
-    SetField(u32),
-    /// Get element at index. Stack: [collection, index] → [value].
-    GetIndex,
-    /// Set element at index. Stack: [collection, index, value] → [].
-    SetIndex,
+    // ── Function calls ──────────────────────────────────────────────
+    /// Dynamic call. `R(base)` is the callee value, args in `R(base+1)..R(base+1+arity)`.
+    /// Result written to `R(base)`.
+    Call(u8, u8),
+    /// Direct call by function index. Args in `R(base)..R(base+arity)`.
+    /// Result written to `R(base)`.
+    CallDirect(u8, u16, u8),
+    /// Call host-registered native function. Reserved for future use.
+    CallNative(u8, u32, u8),
+    /// Method call. `R(base)` is receiver, args in `R(base+1)..`.
+    /// Result in `R(base)`.
+    CallMethod(u8, u32, u8),
 
-    // ── Phase 10: Spread ───────────────────────────────────────────
-    /// Spread array/dict into enclosing collection literal.
-    Spread,
+    // ── Null handling ───────────────────────────────────────────────
+    /// `R(dst) = R(a) ?? R(b)`
+    NullCoalesce(u8, u8, u8),
 
-    // ── Phase 13: Coroutines ────────────────────────────────────────
-    /// Start a coroutine from a function call. u8 is the argument count.
-    /// Stack: [callee, arg0, ..., argN] → [CoroutineHandle].
-    StartCoroutine(u8),
-    /// Bare yield — suspend for one frame. Pushes Null when resumed.
-    Yield,
-    /// Yield for N seconds. Pops a Float (seconds) from the stack.
-    YieldSeconds,
-    /// Yield for N frames. Pops an Int (frame count) from the stack.
-    YieldFrames,
-    /// Yield until a predicate returns true. Pops a function reference from the stack.
-    YieldUntil,
-    /// Yield until a child coroutine completes. Pops a CoroutineHandle from the stack.
-    /// When the child finishes, pushes the child's return value onto this coroutine's stack.
-    YieldCoroutine,
+    // ── String concatenation ────────────────────────────────────────
+    /// `R(dst) = str(R(a)) ++ str(R(b))`
+    Concat(u8, u8, u8),
 
-    // ── Closures ──────────────────────────────────────────────────
-    /// Push a captured variable (upvalue) onto the stack.
-    /// The `u8` is the index into the current frame's upvalue array.
-    LoadUpvalue(u8),
-    /// Pop the top of stack and store into a captured variable.
-    /// The `u8` is the index into the current frame's upvalue array.
-    StoreUpvalue(u8),
-    /// Create a closure from a compiled function. The `u16` is the function
-    /// index in the function table. The VM reads upvalue descriptors from
-    /// the `CompiledFunction` to build the upvalue array at runtime.
-    MakeClosure(u16),
-    /// Close an upvalue — move the value from the stack slot into its heap
-    /// cell, then pop the value from the stack. Emitted at scope exit for
-    /// locals that have been captured by an inner function.
+    // ── Collections ─────────────────────────────────────────────────
+    /// `R(dst) = Array(R(start)..R(start+count))`
+    MakeArray(u8, u8, u16),
+    /// `R(dst) = Dict` from `R(start)..R(start+2*count)` (key/value pairs)
+    MakeDict(u8, u8, u16),
+    /// `R(dst) = R(obj)[R(idx)]`
+    GetIndex(u8, u8, u8),
+    /// `R(obj)[R(idx)] = R(val)`
+    SetIndex(u8, u8, u8),
+    /// Spread `R(src)` into enclosing collection literal.
+    Spread(u8),
+
+    // ── Fields ──────────────────────────────────────────────────────
+    /// `R(dst) = R(obj).field[hash]`
+    GetField(u8, u8, u32),
+    /// `R(obj).field[hash] = R(val)`. Pushes modified struct back if value type.
+    SetField(u8, u32, u8),
+
+    // ── Structs & Classes ───────────────────────────────────────────
+    /// `R(dst) = Struct(name_hash, R(start)..R(start+count))`
+    MakeStruct(u8, u32, u8, u16),
+    /// `R(dst) = Class(name_hash, R(start)..R(start+count))`
+    MakeClass(u8, u32, u8, u16),
+
+    // ── Closures & Upvalues ─────────────────────────────────────────
+    /// `R(dst) = upvalue_cell[idx].borrow().clone()`
+    LoadUpvalue(u8, u8),
+    /// `*upvalue_cell[idx].borrow_mut() = R(src).cheap_clone()`
+    StoreUpvalue(u8, u8),
+    /// `R(dst) = Closure(func_idx, captured_upvalues)`
+    MakeClosure(u8, u16),
+    /// Close upvalue at register `reg` (move stack value to heap cell).
     CloseUpvalue(u8),
 
-    // ── Phase 19: Structs ───────────────────────────────────────
-    /// Construct a struct instance. `u32` is the type name string index,
-    /// `u16` is the field count. Pops N field values from the stack
-    /// (in declaration order), constructs the struct, and pushes the result.
-    MakeStruct(u32, u16),
+    // ── Coroutines ──────────────────────────────────────────────────
+    /// Start coroutine. `R(base)` is callee, args follow. Result in `R(base)`.
+    StartCoroutine(u8, u8),
+    /// Bare yield — suspend for one frame.
+    Yield,
+    /// Yield for N seconds. Pops `R(src)` as Float.
+    YieldSeconds(u8),
+    /// Yield for N frames. Pops `R(src)` as Int.
+    YieldFrames(u8),
+    /// Yield until predicate. `R(src)` is a function reference.
+    YieldUntil(u8),
+    /// Yield until child coroutine completes. `R(dst) = yield R(src)`.
+    YieldCoroutine(u8, u8),
 
-    // ── Classes ────────────────────────────────────────────────────
-    /// Construct a class instance (reference type). `u32` is the type name
-    /// string index, `u16` is the field count. Pops N field values from the
-    /// stack, creates a `WritClassInstance` wrapped in `Value::Object`, and
-    /// pushes the result.
-    MakeClass(u32, u16),
-
-    // ── Phase 15: Method calls ────────────────────────────────────
-    /// Call a method on a value. `u32` is the method name hash, `u8` is the
-    /// argument count. Stack: [receiver, arg0, ..., argN] → [result].
-    CallMethod(u32, u8),
-
-    // ── Phase 15: Global variables ────────────────────────────────
-    /// Load a global variable by name hash. If not found, falls back to
-    /// pushing the name as a string (for function resolution).
-    LoadGlobal(u32),
-
-    // ── Phase 19: AoSoA memory layout (mobile only) ─────────────
-    /// Convert the top-of-stack Array (of Structs) into an AoSoA container.
-    /// Only meaningful for homogeneous struct arrays. Falls back to regular
-    /// Array if elements are not all the same struct type.
+    // ── AoSoA (mobile only) ─────────────────────────────────────────
     #[cfg(feature = "mobile-aosoa")]
-    ConvertToAoSoA,
+    ConvertToAoSoA(u8),
 
-    // ── Typed arithmetic (compiler-guaranteed types) ────────────
-    /// Pop two ints, push their sum. Type guaranteed by compiler.
-    AddInt,
-    /// Pop two floats, push their sum. Type guaranteed by compiler.
-    AddFloat,
-    /// Pop two ints, push lhs - rhs. Type guaranteed by compiler.
-    SubInt,
-    /// Pop two floats, push lhs - rhs. Type guaranteed by compiler.
-    SubFloat,
-    /// Pop two ints, push their product. Type guaranteed by compiler.
-    MulInt,
-    /// Pop two floats, push their product. Type guaranteed by compiler.
-    MulFloat,
-    /// Pop two ints, push lhs / rhs. Type guaranteed by compiler.
-    DivInt,
-    /// Pop two floats, push lhs / rhs. Type guaranteed by compiler.
-    DivFloat,
-
-    // ── Typed comparison (compiler-guaranteed types) ────────────
-    /// Pop two ints, push true if lhs < rhs.
-    LtInt,
-    /// Pop two floats, push true if lhs < rhs.
-    LtFloat,
-    /// Pop two ints, push true if lhs <= rhs.
-    LeInt,
-    /// Pop two floats, push true if lhs <= rhs.
-    LeFloat,
-    /// Pop two ints, push true if lhs > rhs.
-    GtInt,
-    /// Pop two floats, push true if lhs > rhs.
-    GtFloat,
-    /// Pop two ints, push true if lhs >= rhs.
-    GeInt,
-    /// Pop two floats, push true if lhs >= rhs.
-    GeFloat,
-    /// Pop two ints, push true if equal.
-    EqInt,
-    /// Pop two floats, push true if equal.
-    EqFloat,
-    /// Pop two ints, push true if not equal.
-    NeInt,
-    /// Pop two floats, push true if not equal.
-    NeFloat,
-
-    // ── Instruction fusion (peephole-optimized) ─────────────────
-    /// Increment local by integer immediate: stack[base+slot] += imm.
-    IncrLocalInt(u8, i32),
-    /// Compare local int to immediate and jump if false.
-    /// Encodes: LoadLocal(slot) + LoadInt(imm) + cmp + JumpIfFalse(offset) + Pop.
-    /// `u8` = local slot, `i32` = immediate, `u8` = CmpOp encoding, `i32` = jump offset.
-    CmpLocalIntJump(u8, i32, u8, i32),
-    /// Push stack[base+slot] + imm as Int. Fuses LoadLocal + LoadInt + AddInt.
-    LoadLocalAddInt(u8, i32),
-    /// Push stack[base+slot] - imm as Int. Fuses LoadLocal + LoadInt + SubInt.
-    LoadLocalSubInt(u8, i32),
-    /// Return the value of a local directly. Fuses LoadLocal + Return.
-    ReturnLocal(u8),
-    /// Push stack[base+a] + stack[base+b] as Int. Fuses LoadLocal + LoadLocal + AddInt.
-    AddLocals(u8, u8),
-    /// Push stack[base+a] - stack[base+b] as Int. Fuses LoadLocal + LoadLocal + SubInt.
-    SubLocals(u8, u8),
-    /// Compare two locals and jump if false. Fuses LoadLocal + LoadLocal + cmp + JumpIfFalsePop.
-    /// `u8` = slot a, `u8` = slot b, `u8` = CmpOp encoding, `i32` = jump offset.
-    CmpLocalsJump(u8, u8, u8, i32),
-
-    // ── Quickened instructions (runtime-specialized) ──────────────
-    // These are generic instructions that have been rewritten at runtime
-    // after observing operand types. They try a fast typed path first;
-    // on type mismatch they deopt back to the generic instruction.
-    /// Quickened Add — fast path for Int+Int, deopts to generic Add on mismatch.
-    QAddInt,
-    /// Quickened Add — fast path for Float+Float, deopts to generic Add on mismatch.
-    QAddFloat,
-    /// Quickened Sub — fast path for Int-Int, deopts to generic Sub on mismatch.
-    QSubInt,
-    /// Quickened Sub — fast path for Float-Float, deopts to generic Sub on mismatch.
-    QSubFloat,
-    /// Quickened Mul — fast path for Int*Int, deopts to generic Mul on mismatch.
-    QMulInt,
-    /// Quickened Mul — fast path for Float*Float, deopts to generic Mul on mismatch.
-    QMulFloat,
-    /// Quickened Div — fast path for Int/Int, deopts to generic Div on mismatch.
-    QDivInt,
-    /// Quickened Div — fast path for Float/Float, deopts to generic Div on mismatch.
-    QDivFloat,
-    /// Quickened Lt — fast path for Int<Int, deopts to generic Lt on mismatch.
-    QLtInt,
-    /// Quickened Lt — fast path for Float<Float, deopts to generic Lt on mismatch.
-    QLtFloat,
-    /// Quickened Le — fast path for Int<=Int, deopts to generic Le on mismatch.
-    QLeInt,
-    /// Quickened Le — fast path for Float<=Float, deopts to generic Le on mismatch.
-    QLeFloat,
-    /// Quickened Gt — fast path for Int>Int, deopts to generic Gt on mismatch.
-    QGtInt,
-    /// Quickened Gt — fast path for Float>Float, deopts to generic Gt on mismatch.
-    QGtFloat,
-    /// Quickened Ge — fast path for Int>=Int, deopts to generic Ge on mismatch.
-    QGeInt,
-    /// Quickened Ge — fast path for Float>=Float, deopts to generic Ge on mismatch.
-    QGeFloat,
-    /// Quickened Eq — fast path for Int==Int, deopts to generic Eq on mismatch.
-    QEqInt,
-    /// Quickened Eq — fast path for Float==Float, deopts to generic Eq on mismatch.
-    QEqFloat,
-    /// Quickened Ne — fast path for Int!=Int, deopts to generic Ne on mismatch.
-    QNeInt,
-    /// Quickened Ne — fast path for Float!=Float, deopts to generic Ne on mismatch.
-    QNeFloat,
+    // ── Quickened instructions (runtime-specialized) ────────────────
+    // Generic instructions rewrite to these after type observation.
+    // Fast path tries typed op; mismatch deopts back to generic.
+    QAddInt(u8, u8, u8),
+    QAddFloat(u8, u8, u8),
+    QSubInt(u8, u8, u8),
+    QSubFloat(u8, u8, u8),
+    QMulInt(u8, u8, u8),
+    QMulFloat(u8, u8, u8),
+    QDivInt(u8, u8, u8),
+    QDivFloat(u8, u8, u8),
+    QLtInt(u8, u8, u8),
+    QLtFloat(u8, u8, u8),
+    QLeInt(u8, u8, u8),
+    QLeFloat(u8, u8, u8),
+    QGtInt(u8, u8, u8),
+    QGtFloat(u8, u8, u8),
+    QGeInt(u8, u8, u8),
+    QGeFloat(u8, u8, u8),
+    QEqInt(u8, u8, u8),
+    QEqFloat(u8, u8, u8),
+    QNeInt(u8, u8, u8),
+    QNeFloat(u8, u8, u8),
 }

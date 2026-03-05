@@ -159,11 +159,20 @@ while i < 10000 {
 }
 return sum";
 
-fn compile(source: &str) -> (Chunk, Vec<CompiledFunction>, Vec<StructMeta>, Vec<ClassMeta>) {
+fn compile(
+    source: &str,
+) -> (
+    Chunk,
+    Vec<CompiledFunction>,
+    Vec<StructMeta>,
+    Vec<ClassMeta>,
+) {
     let tokens = Lexer::new(source).tokenize().unwrap();
     let stmts = Parser::new(tokens).parse_program().unwrap();
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).unwrap();
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).unwrap();
+    }
     compiler.into_parts()
 }
 
@@ -174,11 +183,15 @@ fn run_n(source: &str, n: usize) {
         let mut vm = VM::new();
         writ_stdlib::register_all(&mut vm);
         std::hint::black_box(
-            vm.execute_program(&chunk, &fns, &structs, &classes).unwrap()
+            vm.execute_program(&chunk, &fns, &structs, &classes)
+                .unwrap(),
         );
     }
     let elapsed = start.elapsed();
-    eprintln!("  {n} iterations in {elapsed:.3?} ({:.3?}/iter)", elapsed / n as u32);
+    eprintln!(
+        "  {n} iterations in {elapsed:.3?} ({:.3?}/iter)",
+        elapsed / n as u32
+    );
 }
 
 fn main() {
@@ -212,7 +225,9 @@ fn main() {
         }
         _ => {
             eprintln!("Unknown benchmark: {bench}");
-            eprintln!("Available: fibonacci, binary_trees, permute, mandelbrot, sieve, queens, loop_sum, all");
+            eprintln!(
+                "Available: fibonacci, binary_trees, permute, mandelbrot, sieve, queens, loop_sum, all"
+            );
             std::process::exit(1);
         }
     }

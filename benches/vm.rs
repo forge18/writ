@@ -185,7 +185,9 @@ fn compile(
     let tokens = Lexer::new(source).tokenize().unwrap();
     let stmts = Parser::new(tokens).parse_program().unwrap();
     let mut compiler = Compiler::new();
-    compiler.compile_program(&stmts).unwrap();
+    for stmt in &stmts {
+        compiler.compile_stmt(stmt).unwrap();
+    }
     compiler.into_parts()
 }
 
