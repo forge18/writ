@@ -1,0 +1,530 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_artifacts:
+        description: 'Build binaries and extensions (skips tier 2)'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run (skip release creation)'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ============================================================
+  # Tier 1: Fast checks — runs on every push to any branch
+  # ============================================================
+  tier1-checks:
+    name: Tier 1 Fast Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Linting
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --lib
+
+  # ============================================================
+  # Tier 2: Heavy jobs — only on PRs to main or tag pushes
+  # ============================================================
+  integration-tests:
+    name: Tests (${{ matrix.os }})
+    needs: tier1-checks
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Run unit tests
+        run: cargo test --all-features --lib
+
+      - name: Run binary tests
+        run: cargo test --all-features --bin writ
+
+      - name: Run integration tests (writ-lexer)
+        run: cargo test --all-features -p writ-lexer --tests
+
+      - name: Run integration tests (writ-parser)
+        run: cargo test --all-features -p writ-parser --tests
+
+      - name: Run integration tests (writ-types)
+        run: cargo test --all-features -p writ-types --tests
+
+      - name: Run integration tests (writ-compiler)
+        run: cargo test --all-features -p writ-compiler --tests
+
+      - name: Run integration tests (writ-vm)
+        run: cargo test --all-features -p writ-vm --tests
+
+      - name: Run integration tests (writ-stdlib)
+        run: cargo test --all-features -p writ-stdlib --tests
+
+      - name: Run integration tests (writ-codegen)
+        run: cargo test --all-features -p writ-codegen --tests
+
+      - name: Run integration tests (writ-lsp)
+        run: cargo test --all-features -p writ-lsp --tests
+
+      - name: Run root integration tests
+        run: cargo test --all-features --tests
+
+  security-scan:
+    name: Security Scan
+    needs: tier1-checks
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/owasp-top-ten
+            p/r2c-security-audit
+            p/rust
+
+  coverage:
+    name: Code Coverage
+    needs: tier1-checks
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Generate coverage
+        run: cargo tarpaulin --all-features --out xml --out lcov --verbose
+
+      - name: Extract coverage percentage
+        id: coverage
+        run: |
+          COVERAGE=$(grep -o 'line-rate="[0-9.]*"' tarpaulin-report.xml | head -1 | cut -d'"' -f2 || echo "0")
+          COVERAGE_PERCENT=$(echo "$COVERAGE * 100" | bc | xargs printf "%.1f")
+          echo "percentage=$COVERAGE_PERCENT" >> $GITHUB_OUTPUT
+          echo "Coverage: $COVERAGE_PERCENT%"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./tarpaulin-report.xml,./lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            tarpaulin-report.xml
+            lcov.info
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE="${{ steps.coverage.outputs.percentage }}"
+          echo "Line coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 70.0" | bc -l) )); then
+            echo "ERROR: Coverage ${COVERAGE}% is below threshold of 70%"
+            exit 1
+          fi
+          echo "Coverage ${COVERAGE}% meets threshold of 70%"
+
+  benchmarks:
+    name: Benchmarks
+    needs: tier1-checks
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Run benchmarks
+        run: cargo bench --bench lexer --bench parser --bench compiler --bench vm --bench pipeline
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: target/criterion/
+
+  # ============================================================
+  # Tier 3: Build binaries — only after all tier 2 jobs pass
+  # ============================================================
+  build-binaries:
+    name: Build (${{ matrix.platform }}-${{ matrix.arch }})
+    needs: [tier1-checks, integration-tests, security-scan, coverage]
+    if: |
+      always() && (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.build_artifacts == 'true' && needs.tier1-checks.result == 'success') ||
+        (needs.integration-tests.result == 'success' && needs.security-scan.result == 'success' && needs.coverage.result == 'success')
+      )
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            use_cross: false
+          - os: ubuntu-latest
+            platform: linux
+            target: aarch64-unknown-linux-gnu
+            arch: aarch64
+            use_cross: true
+          - os: macos-latest
+            platform: macos
+            target: x86_64-apple-darwin
+            arch: x86_64
+            use_cross: false
+          - os: macos-latest
+            platform: macos
+            target: aarch64-apple-darwin
+            arch: aarch64
+            use_cross: false
+          - os: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+            arch: x86_64
+            use_cross: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross (for ARM builds)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build binaries
+        shell: bash
+        env:
+          USE_CROSS: ${{ matrix.use_cross }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$USE_CROSS" = "true" ]; then
+            cross build --release --target "$BUILD_TARGET"
+          else
+            cargo build --release --target "$BUILD_TARGET"
+          fi
+
+      - name: Package binaries (Unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          mkdir -p release-binaries
+          cp "target/${{ matrix.target }}/release/writ" release-binaries/
+          cp "target/${{ matrix.target }}/release/writ-lsp" release-binaries/
+          tar czf "writ-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" -C release-binaries writ writ-lsp
+
+      - name: Package binaries (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          mkdir -p release-binaries
+          cp "target/${{ matrix.target }}/release/writ.exe" release-binaries/
+          cp "target/${{ matrix.target }}/release/writ-lsp.exe" release-binaries/
+          cd release-binaries
+          7z a -tzip "../writ-${{ matrix.platform }}-${{ matrix.arch }}.zip" writ.exe writ-lsp.exe
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}-${{ matrix.arch }}
+          path: writ-${{ matrix.platform }}-${{ matrix.arch }}.*
+
+  build-vscode-extension:
+    name: VSCode Extension (${{ matrix.platform }})
+    needs: build-binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+            lsp_binary: writ-lsp
+          - os: macos-latest
+            platform: macos
+            arch: aarch64
+            lsp_binary: writ-lsp
+          - os: windows-latest
+            platform: windows
+            arch: x86_64
+            lsp_binary: writ-lsp.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download LSP binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}-${{ matrix.arch }}
+          path: lsp-artifact
+
+      - name: Extract LSP binary
+        shell: bash
+        run: |
+          mkdir -p extensions/vscode-writ/bin
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            cd lsp-artifact && 7z x "writ-${{ matrix.platform }}-${{ matrix.arch }}.zip" -o../lsp-extracted
+          else
+            tar xzf "lsp-artifact/writ-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" -C lsp-extracted || mkdir -p lsp-extracted && tar xzf "lsp-artifact/writ-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" -C lsp-extracted
+          fi
+          cp "lsp-extracted/${{ matrix.lsp_binary }}" "extensions/vscode-writ/bin/"
+          chmod +x "extensions/vscode-writ/bin/${{ matrix.lsp_binary }}" 2>/dev/null || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        working-directory: extensions/vscode-writ
+        run: pnpm install
+
+      - name: Build extension
+        working-directory: extensions/vscode-writ
+        run: pnpm run build
+
+      - name: Package VSIX
+        working-directory: extensions/vscode-writ
+        run: pnpm run package
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.platform }}-${{ matrix.arch }}
+          path: extensions/vscode-writ/*.vsix
+
+  build-jetbrains-extension:
+    name: JetBrains Extension
+    needs: [tier1-checks, integration-tests]
+    if: |
+      always() && (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.build_artifacts == 'true' && needs.tier1-checks.result == 'success') ||
+        needs.integration-tests.result == 'success'
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build plugin
+        working-directory: extensions/jetbrains-writ
+        run: ./gradlew buildPlugin
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetbrains-plugin
+          path: extensions/jetbrains-writ/build/distributions/*.zip
+
+  # ============================================================
+  # Release: Only on version tags or manual dispatch (non-dry-run)
+  # ============================================================
+  create-release:
+    name: Create GitHub Release
+    needs: [build-binaries, build-vscode-extension, build-jetbrains-extension]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts/binary-* -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release-assets/ \;
+          find artifacts/vsix-* -type f -name "*.vsix" -exec mv {} release-assets/ \;
+          find artifacts/jetbrains-plugin -type f -name "*.zip" -exec cp {} release-assets/writ-jetbrains-plugin.zip \; 2>/dev/null || true
+          find artifacts/coverage-report -type f \( -name "*.xml" -o -name "*.info" \) -exec cp {} release-assets/ \; 2>/dev/null || true
+          cd release-assets
+          sha256sum * > SHA256SUMS 2>/dev/null || shasum -a 256 * > SHA256SUMS
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.version.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: true
+          files: |
+            release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

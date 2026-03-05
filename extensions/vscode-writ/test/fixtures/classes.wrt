@@ -1,0 +1,59 @@
+// Classes, traits, enums, and inheritance
+
+trait Damageable {
+    func takeDamage(amount: float)
+
+    func die() {
+        print("Entity died")
+    }
+}
+
+trait Updatable {
+    func update(delta: float)
+}
+
+class Entity {
+    public name: string
+    public health: float = 100.0
+}
+
+class Player extends Entity with Damageable, Updatable {
+    public name: string
+    public health: float = 100.0
+        set(value) { field = clamp(value, 0.0, 100.0) }
+
+    private speed: float = 5.0
+    weapons: Array<Weapon> = []
+
+    public static func create(name: string) -> Player {
+        return Player(name: name)
+    }
+
+    public func takeDamage(amount: float) {
+        health -= amount
+        if health <= 0 {
+            self.die()
+        }
+    }
+
+    public func update(delta: float) {
+        speed *= delta
+    }
+}
+
+enum Direction {
+    North, South, East, West
+}
+
+enum Status {
+    Alive(100), Dead(0), Wounded(50)
+
+    health: int
+
+    func getHealth() -> int {
+        return health
+    }
+}
+
+let player = Player(name: "Hero", health: 80.0)
+let dir = Direction.North

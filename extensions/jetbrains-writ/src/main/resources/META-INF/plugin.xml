@@ -1,0 +1,31 @@
+<idea-plugin>
+    <id>com.writ.plugin</id>
+    <name>Writ</name>
+    <vendor>writ-lang</vendor>
+    <description>Language support for the Writ scripting language — syntax highlighting, LSP, debugging, and hot reload.</description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- File type registration -->
+        <fileType
+            name="Writ"
+            implementationClass="com.writ.plugin.WritFileType"
+            fieldName="INSTANCE"
+            language="Writ"
+            extensions="wrt"/>
+
+        <!-- Language registration -->
+        <lang.parserDefinition
+            language="Writ"
+            implementationClass="com.writ.plugin.WritParserDefinition"/>
+
+        <!-- Syntax highlighting -->
+        <lang.syntaxHighlighterFactory
+            language="Writ"
+            implementationClass="com.writ.plugin.WritSyntaxHighlighterFactory"/>
+
+        <!-- LSP support (requires LSP4IJ or built-in LSP in 2024.2+) -->
+        <!-- TODO: Wire up writ-lsp via LSP4IJ or IntelliJ's built-in LSP support -->
+    </extensions>
+</idea-plugin>

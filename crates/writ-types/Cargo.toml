@@ -1,0 +1,8 @@
+[package]
+name = "writ-types"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+writ-lexer = { path = "../writ-lexer" }
+writ-parser = { path = "../writ-parser" }

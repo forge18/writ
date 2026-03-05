@@ -1,0 +1,44 @@
+# Rust
+/target
+**/*.rs.bk
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+.vscode/
+
+# Claude
+.claude/
+
+# OpenCode
+.opencode/
+
+# Node / TypeScript
+node_modules/
+*.tsbuildinfo
+.eslintcache
+
+# VSCode extension
+extensions/vscode-writ/node_modules/
+extensions/vscode-writ/out/
+*.vsix
+
+# JetBrains extension
+extensions/jetbrains-writ/build/
+extensions/jetbrains-writ/.gradle/
+
+# Docs (Astro Starlight)
+docs/dist/
+docs/.astro/
+
+# Testing / Coverage
+tarpaulin-report.html
+*.profraw
+lcov.info

@@ -1,0 +1,15 @@
+{
+  "name": "writ-docs",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "astro": "^5.0.0",
+    "@astrojs/starlight": "latest"
+  },
+  "scripts": {
+    "dev": "node add-frontmatter.js && astro dev",
+    "build": "node add-frontmatter.js && astro build",
+    "preview": "astro preview"
+  }
+}

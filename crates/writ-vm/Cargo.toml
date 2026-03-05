@@ -1,0 +1,12 @@
+[package]
+name = "writ-vm"
+version.workspace = true
+edition.workspace = true
+
+[features]
+mobile-aosoa = ["writ-compiler/mobile-aosoa"]
+
+[dependencies]
+writ-compiler = { path = "../writ-compiler" }
+writ-lexer = { path = "../writ-lexer" }
+writ-parser = { path = "../writ-parser" }

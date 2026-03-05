@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = ["crates/writ-lexer", "crates/writ-parser", "crates/writ-types", "crates/writ-compiler", "crates/writ-vm", "crates/writ-stdlib", "crates/writ-codegen", "crates/writ-lsp"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[package]
+name = "writ"
+version.workspace = true
+edition.workspace = true
+
+[features]
+mobile-aosoa = ["writ-vm/mobile-aosoa"]
+
+[dependencies]
+writ-lexer = { path = "crates/writ-lexer" }
+writ-parser = { path = "crates/writ-parser" }
+writ-types = { path = "crates/writ-types" }
+writ-compiler = { path = "crates/writ-compiler" }
+writ-vm = { path = "crates/writ-vm" }
+writ-stdlib = { path = "crates/writ-stdlib" }
+writ-codegen = { path = "crates/writ-codegen" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "lexer"
+harness = false
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "compiler"
+harness = false
+
+[[bench]]
+name = "vm"
+harness = false
+
+[[bench]]
+name = "pipeline"
+harness = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1

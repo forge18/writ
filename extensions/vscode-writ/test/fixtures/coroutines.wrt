@@ -1,0 +1,76 @@
+// Coroutines, when matching, lambdas, modules
+
+import { Weapon, createWeapon } from "items/weapon"
+import * as enemy from "entities/enemy"
+
+export class GameManager {
+    private running: bool = true
+
+    func openDoor() {
+        playAnimation("door_open")
+        yield waitForSeconds(2.0)
+        setCollider(false)
+    }
+
+    func gameLoop() {
+        start openDoor()
+        yield
+        yield waitForFrames(10)
+        yield waitUntil(() => isReady)
+    }
+}
+
+/* Multi-line comment
+   spanning several lines */
+
+let double = (x: float) => x * 2
+
+let handler = (amount: float) => {
+    print(amount)
+}
+
+func divide(a: float, b: float) -> Result<float> {
+    if b == 0.0 {
+        return Error("Division by zero")
+    }
+    return Success(a / b)
+}
+
+let result = divide(10.0, 0.0)
+
+when result {
+    is Success(value) => print(value)
+    is Error(msg) => print(msg)
+}
+
+when health {
+    0 => print("Dead")
+    1, 2, 3 => print("Critical")
+    4..25 => print("Low")
+    26..=100 => print("OK")
+    else => print("Unknown")
+}
+
+when {
+    health == 100 => print("Full")
+    health <= 0 => print("Dead")
+    else => print("Damaged")
+}
+
+let safe = player?.health ?? 0
+let value = someResult?
+let casted = health as int
+
+func sum(...numbers: int) -> int {
+    var total = 0
+    for n in numbers {
+        total += n
+        continue
+    }
+    return total
+}
+
+let point: (float, float) = (10.0, 20.0)
+let (x, y) = point
+
+let target: enemy::Enemy = enemy::create("Goblin")

@@ -1,0 +1,23 @@
+// String interpolation and multiline strings
+
+let name = "Hero"
+let health = 100.0
+
+let greeting = "Hello $name"
+let status = "Health: ${health}"
+let calc = "Result: ${10 + 20}"
+let escaped = "Hello \$name"
+let special = "Line\nTab\t"
+
+let message = """
+    Player $name has $health health.
+    Located at ${position.x}, ${position.y}.
+    """
+
+let full = "Hello" .. " " .. name
+
+let items = ["sword", "shield"]
+let combined = [...items, "potion"]
+
+let scores: Dictionary<string, int> = {"alice": 100, "bob": 95}
+let merged = {...scores, "charlie": 90}

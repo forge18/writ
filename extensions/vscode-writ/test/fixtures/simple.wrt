@@ -1,0 +1,36 @@
+// A simple Writ script covering basic constructs
+
+const MAX_HEALTH = 100.0
+let name: string = "Hero"
+let score = 42
+var health: float = 100.0
+var alive = true
+
+func add(a: int, b: int) -> int {
+    return a + b
+}
+
+let result = add(10, 20)
+
+if health <= 0 {
+    alive = false
+} else if health < 25 {
+    health += 10
+} else {
+    health -= 5
+}
+
+while alive {
+    health -= 1
+    if health <= 0 {
+        break
+    }
+}
+
+for i in 0..10 {
+    score += i
+}
+
+for i in 0..=10 {
+    score += i
+}

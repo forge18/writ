@@ -1,0 +1,152 @@
+{
+  "name": "writ-lang",
+  "displayName": "Writ",
+  "description": "Language support for the Writ scripting language — syntax highlighting, LSP, debugging, and hot reload.",
+  "version": "0.1.0",
+  "publisher": "writ-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:writ"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "writ",
+        "aliases": [
+          "Writ",
+          "writ"
+        ],
+        "extensions": [
+          ".writ"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "writ",
+        "scopeName": "source.writ",
+        "path": "./syntaxes/writ.tmLanguage.json"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "writ",
+        "label": "Writ Debug",
+        "languages": ["writ"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .writ file to debug.",
+                "default": "${file}"
+              },
+              "host": {
+                "type": "string",
+                "description": "DAP server host.",
+                "default": "127.0.0.1"
+              },
+              "port": {
+                "type": "number",
+                "description": "DAP server port.",
+                "default": 7778
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Pause on first line.",
+                "default": false
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Writ: Debug Current File",
+            "description": "Debug the currently open .writ file",
+            "body": {
+              "type": "writ",
+              "request": "launch",
+              "name": "Debug Writ Script",
+              "program": "${file}",
+              "host": "127.0.0.1",
+              "port": 7778
+            }
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Writ",
+      "properties": {
+        "writ.lspPath": {
+          "type": "string",
+          "default": "writ-lsp",
+          "description": "Path to the Writ language server binary. Leave as default to use the bundled binary.",
+          "scope": "machine-overridable"
+        },
+        "writ.hotReload.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hot reload on save for .writ files.",
+          "scope": "resource"
+        },
+        "writ.hotReload.mechanism": {
+          "type": "string",
+          "default": "socket",
+          "enum": ["socket", "pipe", "file"],
+          "enumDescriptions": [
+            "Send reload requests via TCP socket",
+            "Send reload requests via named pipe",
+            "Write reload sentinel file"
+          ],
+          "description": "Communication mechanism for hot reload requests.",
+          "scope": "resource"
+        },
+        "writ.hotReload.address": {
+          "type": "string",
+          "default": "127.0.0.1:7777",
+          "description": "Address for socket-based hot reload (host:port).",
+          "scope": "resource"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "build-lsp": "bash scripts/build-lsp.sh",
+    "watch": "node esbuild.js --watch",
+    "lint": "tsc --noEmit",
+    "test": "node out/test/suite/index.js",
+    "prepackage": "npm run build-lsp && npm run build",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.3.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
