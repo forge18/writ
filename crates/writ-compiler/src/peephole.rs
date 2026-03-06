@@ -30,7 +30,14 @@ fn jump_offset_mut(instr: &mut Instruction) -> Option<&mut i32> {
 /// In the register-based VM, most fusion opportunities (AddLocals, CmpLocalsJump,
 /// ReturnLocal, etc.) are absorbed into the native three-address instruction format.
 /// The main remaining optimization is dead move elimination.
-pub fn optimize(instructions: &mut Vec<Instruction>, _lines: &mut Vec<u32>) {
+/// Runs peephole optimization on an instruction stream.
+/// `self_func_idx` is the function index when optimizing a function chunk (used for
+/// self-recursive tail call detection). `None` for the main chunk.
+pub fn optimize(
+    instructions: &mut Vec<Instruction>,
+    _lines: &mut Vec<u32>,
+    self_func_idx: Option<u16>,
+) {
     // Dead move elimination: Move(A, A) is a no-op
     let mut i = 0;
     while i < instructions.len() {
@@ -43,6 +50,27 @@ pub fn optimize(instructions: &mut Vec<Instruction>, _lines: &mut Vec<u32>) {
             continue;
         }
         i += 1;
+    }
+
+    // Self-recursive tail call optimization: CallDirect(base, self_idx, arity) + Return(base) →
+    // TailCallDirect(base, self_idx, arity) + remove Return.
+    // Only applies to self-recursive calls to preserve stack traces for cross-function calls.
+    if let Some(self_idx) = self_func_idx {
+        let mut i = 0;
+        while i + 1 < instructions.len() {
+            if let Instruction::CallDirect(call_base, func_idx, arity) = instructions[i]
+                && func_idx == self_idx
+                && let Instruction::Return(ret_reg) = instructions[i + 1]
+                && call_base == ret_reg
+            {
+                instructions[i] = Instruction::TailCallDirect(call_base, func_idx, arity);
+                instructions.remove(i + 1);
+                _lines.remove(i + 1);
+                fixup_jumps(instructions, i, 1);
+                continue;
+            }
+            i += 1;
+        }
     }
 }
 

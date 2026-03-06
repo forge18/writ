@@ -60,8 +60,9 @@ impl Chunk {
     }
 
     /// Runs the peephole optimizer on this chunk's instructions.
-    pub fn optimize(&mut self) {
-        crate::peephole::optimize(&mut self.instructions, &mut self.lines);
+    /// `self_func_idx` is the function index for self-recursive tail call detection.
+    pub fn optimize(&mut self, self_func_idx: Option<u16>) {
+        crate::peephole::optimize(&mut self.instructions, &mut self.lines, self_func_idx);
     }
 
     /// Returns the string constant pool as `Rc<String>` references.

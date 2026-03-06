@@ -26,15 +26,15 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 
 ## Results (Apple M-series, single-threaded)
 
-| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | Total Improvement |
-| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ----------------- |
-| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | -79% |
-| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | -71% |
-| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | -78% |
-| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | -75% |
-| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | -72% |
-| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | -75% |
-| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | -79% |
+| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | VM Only (Round 11) | VM Only (Round 12) | Total Improvement |
+| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ------------------ | ------------------ | ----------------- |
+| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | -79% |
+| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | -72% |
+| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | -78% |
+| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | -77% |
+| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | -73% |
+| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | -76% |
+| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | -81% |
 
 ## Compilation Pipeline Results (Round 9)
 
@@ -64,7 +64,7 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 ### Key Observations
 
-- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~32ms vs ~30ms), down from ~5x slower after ten rounds of optimization. Round 10's compact object representation brought binary_trees from -38% to -71% total improvement.
+- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~32ms vs ~30ms), down from ~5x slower after twelve rounds of optimization. Round 10's compact object representation brought binary_trees from -38% to -72% total improvement.
 - **Writ is faster than Rhai**, the most comparable Rust-embeddable scripting language. Rhai documents itself as "roughly 2x slower than Python 3" and uses AST-walking rather than bytecode compilation.
 - **Different hardware** between our results (Apple M-series) and the Muxup results (AMD Ryzen 9 5950X). Ratios are more meaningful than absolute numbers.
 - **Binary trees are not directly comparable** — Wren uses depth=12 with the CLBG structure; we use depth=8 with 100 iterations.
@@ -160,6 +160,19 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 **Analysis:** binary_trees was the weakest benchmark at -38% total improvement, with profiling showing ~50% of time in HashMap alloc/dealloc/drop for object instances. The compact representation eliminates all per-instance HashMap operations — construction, field access, and destruction are now Vec-based with shared metadata. The -53% improvement on binary_trees (83.1ms → 38.9ms) exceeds the estimated -30-40%. Other benchmarks show no change (within noise threshold) as expected — they don't use struct/class instances on their hot paths.
 
+**Round 11** (15.8ms mandelbrot, -5%; 0.153ms loop_sum, -4%; 0.546ms sieve, -3%; broad 1-4% improvements):
+
+1. **VM struct hot-field layout** — Added `#[repr(C)]` to pin field order and grouped the dispatch loop's most-accessed fields onto the first two 64-byte cache lines. Cache line 0 (offsets 0–57): `stack`, `frames`, `instruction_count`, `has_debug_hooks`, `has_open_upvalues`. Cache line 1 (offsets 64–127): `func_ip_cache`, `functions`, `instruction_limit`. Cold fields (HashMaps, debug hooks, coroutines) pushed to cache lines 3+.
+
+**Analysis:** Without `#[repr(C)]`, Rust reorders struct fields for alignment optimization, scattering hot fields across distant cache lines. Profiling with `offset_of!` showed the previous auto-layout placed `instruction_count` at offset 984 (cache line 15) and `has_debug_hooks` at offset 1068 (cache line 16), even though both are checked every iteration of the dispatch loop. The `stack` (offset 48) and `frames` (offset 72) headers also straddled a cache line boundary. Pinning all per-instruction fields to CL 0 and call/return fields to CL 1 reduced cache misses uniformly across all benchmarks. A companion attempt to compact `CallFrame` from 72 to 20 bytes (eliminating `ChunkId` enum, moving upvalues to a side table, narrowing fields to `u32`) was reverted — while structurally sound, it perturbed LLVM's code generation for the 52KB `run_until` function, causing uniform 5-9% regressions on non-call benchmarks that outweighed the frame-size benefits.
+
+**Round 12** (15.1ms mandelbrot, -5%; 0.148ms loop_sum, -3%; broad minor improvements):
+
+1. **Float type propagation** — Added `IntToFloat(dst, src)` instruction that widens I32/I64 → F64 at compile time. The compiler now detects mixed int/float binary operations (e.g., `x * 1.0` where `x` is int) and emits an `IntToFloat` coercion followed by typed float instructions (`MulFloat`, `AddFloat`, etc.) instead of falling through to generic dispatch. This eliminates runtime `promote_float_pair_op` overhead for statically-typed expressions.
+2. **Self-recursive tail call optimization** — Added `TailCallDirect(base, func_idx, arity)` instruction. Peephole pass detects `CallDirect(base, self_idx, arity) + Return(base)` patterns where the callee is the same function (self-recursive), and fuses them into a single `TailCallDirect` that reuses the current frame instead of pushing/popping. Restricted to self-recursive calls to preserve cross-function stack traces. Prevents stack overflow for tail-recursive user programs.
+
+**Analysis:** The float type propagation directly addresses the mandelbrot hotspot: `promote_float_pair_op` consumed ~6% of execution time doing runtime float type dispatch for operations the compiler could resolve statically. The mandelbrot benchmark's inner loop has expressions like `2.0 * (x * 1.0) / fsize - 1.5` where `x` is int — previously the `x * 1.0` mixed operation emitted generic `Mul`, losing type info for the entire chain. With `IntToFloat` coercion, the compiler now emits `IntToFloat + MulFloat` and all subsequent operations stay typed. The tail call optimization has no benchmark impact (none of the benchmarks use self-recursive tail calls) but is a correctness improvement for user programs.
+
 ## Profiling Analysis (Post-Round 6)
 
 Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the dominant cost centers. Flamegraph SVGs are in `flamegraphs/`.
@@ -190,15 +203,7 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the domina
 
 ## Remaining Optimization Opportunities
 
-Ordered by profiling-informed expected impact:
-
-1. **Call/Return frame optimization** (est. -5-15% fib/permute) — Inline frame stack (`[CallFrame; 64]`), split cold upvalue fields to side-table, frame reuse for CallDirect. Remaining bottleneck for call-heavy benchmarks after fast return path eliminated most drop glue.
-
-2. **Float type propagation** (est. -5-10% mandelbrot) — Extend compiler type tracking to propagate float types through sub-expressions (`a * b` where both are float → emit `MulFloat` directly). Currently only locals and function returns carry type info.
-
-3. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~16 bytes). 4x better instruction cache density.
-
-4. **Tail call optimization** — `CallDirect + Return` → `TailCallDirect` that reuses the current frame. Prevents stack overflow on tail-recursive code but does not help current benchmarks (fib/permute are not tail-recursive).
+1. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~12 bytes). 3x better instruction cache density. High risk of LLVM codegen regression (as demonstrated by Round 11's compact CallFrame attempt).
 
 ## Design Constraints
 

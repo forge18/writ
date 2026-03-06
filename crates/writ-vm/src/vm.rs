@@ -1018,6 +1018,17 @@ impl VM {
                     }
                 }
 
+                // ── Type coercion ──────────────────────────────────────
+                Instruction::IntToFloat(dst, src) => {
+                    let val = &self.stack[base + src as usize];
+                    let result = match val {
+                        Value::I32(v) => Value::F64(*v as f64),
+                        Value::I64(v) => Value::F64(*v as f64),
+                        _ => unreachable!("IntToFloat: compiler guarantees int operand"),
+                    };
+                    self.stack[base + dst as usize] = result;
+                }
+
                 // ── Comparison (generic, quickenable) ────────────────
                 Instruction::Eq(dst, a, b) => {
                     let a_ref = &self.stack[base + a as usize];
@@ -1318,6 +1329,50 @@ impl VM {
                     }
                     let f = unsafe { self.frames.last().unwrap_unchecked() };
                     base = f.base;
+                    chunk_id = ChunkId::Function(func_idx);
+                    reload_ip!(self, chunk_id, 0);
+                }
+                Instruction::TailCallDirect(base_reg, func_idx_u16, arg_count) => {
+                    let func_idx = func_idx_u16 as usize;
+                    let n = arg_count as usize;
+                    let func = &self.functions[func_idx];
+
+                    if func.arity != arg_count {
+                        self.frames.last_mut().unwrap().pc =
+                            unsafe { ip.offset_from(ip_base) as usize };
+                        return Err(self.make_error(format!(
+                            "function '{}' expects {} arguments, got {}",
+                            func.name, func.arity, arg_count
+                        )));
+                    }
+
+                    let max_regs = func.max_registers;
+                    let func_has_rc = func.has_rc_values;
+
+                    // Close upvalues in the current frame before reusing it
+                    if self.has_open_upvalues {
+                        self.close_upvalues_above(base);
+                    }
+
+                    // Shift arguments down to current frame's base
+                    let arg_src = base + base_reg as usize;
+                    for i in 0..n {
+                        self.stack[base + i] = self.stack[arg_src + i].cheap_clone();
+                    }
+
+                    // Update current frame in-place
+                    let frame = unsafe { self.frames.last_mut().unwrap_unchecked() };
+                    frame.chunk_id = ChunkId::Function(func_idx);
+                    frame.pc = 0;
+                    frame.max_registers = max_regs;
+                    frame.has_rc_values = func_has_rc;
+                    // frame.base and frame.result_reg stay the same
+
+                    self.ensure_registers(base, max_regs);
+
+                    if self.has_debug_hooks {
+                        self.fire_call_hook();
+                    }
                     chunk_id = ChunkId::Function(func_idx);
                     reload_ip!(self, chunk_id, 0);
                 }

@@ -86,6 +86,10 @@ pub enum Instruction {
     /// `R(dst) = R(src) - I32(imm)` — fused load+sub
     SubIntImm(u8, u8, i32),
 
+    // ── Type coercion ────────────────────────────────────────────────
+    /// `R(dst) = R(src) as f64` — widens I32→F64 or I64→F64
+    IntToFloat(u8, u8),
+
     // ── Unary ───────────────────────────────────────────────────────
     /// `R(dst) = -R(src)`
     Neg(u8, u8),
@@ -187,6 +191,9 @@ pub enum Instruction {
     /// Method call. `R(base)` is receiver, args in `R(base+1)..`.
     /// Result in `R(base)`.
     CallMethod(u8, u32, u8),
+    /// Tail call by function index. Reuses the current frame.
+    /// Args in `R(base)..R(base+arity)`, result forwarded to caller's result register.
+    TailCallDirect(u8, u16, u8),
 
     // ── Null handling ───────────────────────────────────────────────
     /// `R(dst) = R(a) ?? R(b)`

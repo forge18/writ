@@ -194,9 +194,9 @@ impl Compiler {
         Vec<ClassMeta>,
     ) {
         // Run peephole optimization on main chunk and all function chunks
-        self.chunk.optimize();
-        for func in &mut self.functions {
-            func.chunk.optimize();
+        self.chunk.optimize(None);
+        for (idx, func) in self.functions.iter_mut().enumerate() {
+            func.chunk.optimize(Some(idx as u16));
         }
         (
             self.chunk,
@@ -646,11 +646,30 @@ impl Compiler {
                 let b = self.compile_expr(rhs, None)?;
                 let a_type = self.reg_type(a);
                 let b_type = self.reg_type(b);
+
+                // Mixed int/float → coerce int operand to float
+                let (a, a_type, b, b_type, coerced_temp) = match (a_type, b_type) {
+                    (ExprType::Int, ExprType::Float) => {
+                        let coerced = self.alloc_temp(&lhs.span)?;
+                        self.emit(Instruction::IntToFloat(coerced, a), line);
+                        (coerced, ExprType::Float, b, ExprType::Float, Some(coerced))
+                    }
+                    (ExprType::Float, ExprType::Int) => {
+                        let coerced = self.alloc_temp(&rhs.span)?;
+                        self.emit(Instruction::IntToFloat(coerced, b), line);
+                        (a, ExprType::Float, coerced, ExprType::Float, Some(coerced))
+                    }
+                    _ => (a, a_type, b, b_type, None),
+                };
+
                 let d = self.dst_or_temp(dst, &lhs.span)?;
                 let (instr, result_type) =
                     Self::typed_binary_instruction(op, a_type, b_type, d, a, b);
                 self.emit(instr, line);
                 self.set_reg_type(d, result_type);
+                if let Some(t) = coerced_temp {
+                    self.maybe_free_temp(t, d);
+                }
                 self.maybe_free_temp(b, d);
                 self.maybe_free_temp(a, d);
                 Ok(d)

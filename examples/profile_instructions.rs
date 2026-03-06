@@ -269,6 +269,8 @@ fn opcode_name(instr: &Instruction) -> &'static str {
         Instruction::QEqFloat(..) => "QEqFloat",
         Instruction::QNeInt(..) => "QNeInt",
         Instruction::QNeFloat(..) => "QNeFloat",
+        Instruction::IntToFloat(..) => "IntToFloat",
+        Instruction::TailCallDirect(..) => "TailCallDirect",
         #[cfg(feature = "mobile-aosoa")]
         Instruction::ConvertToAoSoA(..) => "ConvertToAoSoA",
     }
