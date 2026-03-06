@@ -28,15 +28,47 @@ enum RunResult {
 ///
 /// Executes compiled bytecode chunks produced by the Writ compiler.
 /// Supports function calls, local variables, control flow, and collections.
+// Hot-field layout: `#[repr(C)]` pins field order so the dispatch loop's
+// most-touched fields land on the first two 64-byte cache lines.
+//
+// Cache line 0 (0–63):   stack(24) + frames(24) + instruction_count(8)
+//                         + has_debug_hooks(1) + has_open_upvalues(1) + pad(6) = 64
+// Cache line 1 (64–127): func_ip_cache(24) + functions(24) + instruction_limit(16) = 64
+// Cache line 2 (128–175): open_upvalues(24) + main_chunk (starts here, cold)
+// Cache lines 3+:        cold fields (maps, debug state, coroutines…)
+#[repr(C)]
 pub struct VM {
+    // ── Cache line 0: every-instruction hot fields ───────────────
     /// The operand stack.
     stack: Vec<Value>,
     /// The call stack.
     frames: Vec<CallFrame>,
-    /// The top-level/main chunk being executed.
-    main_chunk: Chunk,
+    /// Current instruction counter, reset per `execute_program` call.
+    instruction_count: u64,
+    /// Fast-path guard: true when any debug hook or breakpoint is active.
+    has_debug_hooks: bool,
+    /// Cached flag: true when any open upvalue exists. Avoids scanning the
+    /// vec on every LoadLocal/StoreLocal.
+    has_open_upvalues: bool,
+
+    // ── Cache line 1: call/return hot fields ─────────────────────
+    /// Pre-computed instruction pointer + length for each function chunk.
+    /// Index 0 = main chunk, index 1..N = function chunks.
+    /// Avoids `chunk_for().instructions()` chain on every Call/Return.
+    func_ip_cache: Vec<(*const Instruction, usize)>,
     /// Function table: compiled functions indexed by position.
     functions: Vec<CompiledFunction>,
+    /// Maximum number of instructions before termination. `None` = unlimited.
+    instruction_limit: Option<u64>,
+
+    // ── Cache line 2: warm fields (closures) ─────────────────────
+    /// Open upvalues: indexed by absolute stack slot. `Some(cell)` when a
+    /// local has been captured. Direct indexing eliminates HashMap hashing.
+    open_upvalues: Vec<Option<Rc<RefCell<Value>>>>,
+
+    // ── Cold fields: setup, metadata, debug ──────────────────────
+    /// The top-level/main chunk being executed.
+    main_chunk: Chunk,
     /// Fast lookup: function name → index in `functions`.
     function_map: HashMap<String, usize>,
     /// Reverse lookup: field name hash → original string name.
@@ -58,10 +90,6 @@ pub struct VM {
     class_layouts: HashMap<String, Rc<crate::field_layout::FieldLayout>>,
     /// Set of disabled module names (blocks native function calls).
     disabled_modules: HashSet<String>,
-    /// Maximum number of instructions before termination. `None` = unlimited.
-    instruction_limit: Option<u64>,
-    /// Current instruction counter, reset per `execute_program` call.
-    instruction_count: u64,
     /// All active coroutines managed by the scheduler.
     coroutines: Vec<Coroutine>,
     /// Next coroutine ID to assign.
@@ -84,18 +112,6 @@ pub struct VM {
     last_line: u32,
     /// Last file path seen (for detecting line changes).
     last_file: String,
-    /// Fast-path guard: true when any debug hook or breakpoint is active.
-    has_debug_hooks: bool,
-    /// Open upvalues: indexed by absolute stack slot. `Some(cell)` when a
-    /// local has been captured. Direct indexing eliminates HashMap hashing.
-    open_upvalues: Vec<Option<Rc<RefCell<Value>>>>,
-    /// Cached flag: true when any open upvalue exists. Avoids scanning the
-    /// vec on every LoadLocal/StoreLocal.
-    has_open_upvalues: bool,
-    /// Pre-computed instruction pointer + length for each function chunk.
-    /// Index 0 = main chunk, index 1..N = function chunks.
-    /// Avoids `chunk_for().instructions()` chain on every Call/Return.
-    func_ip_cache: Vec<(*const Instruction, usize)>,
 }
 
 impl VM {
