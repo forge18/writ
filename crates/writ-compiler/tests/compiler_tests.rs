@@ -14,7 +14,7 @@ fn compile_expr(source: &str) -> Vec<Instruction> {
     compiler
         .compile_expr(&expr, Some(0))
         .expect("compile_expr failed");
-    compiler.into_chunk().instructions().to_vec()
+    compiler.into_chunk().decode_all()
 }
 
 /// Compiles a program (sequence of statements) and returns the instructions.
@@ -27,7 +27,7 @@ fn compile(source: &str) -> Vec<Instruction> {
     for stmt in &stmts {
         compiler.compile_stmt(stmt).expect("compile failed");
     }
-    compiler.into_chunk().instructions().to_vec()
+    compiler.into_chunk().decode_all()
 }
 
 /// Compiles a program and returns the full Compiler (for accessing functions).
@@ -302,8 +302,8 @@ let y = "hello""#,
     }
     let chunk = compiler.into_chunk();
     // Both should use LoadStr with the same string pool index
-    let str_instrs: Vec<_> = chunk
-        .instructions()
+    let decoded = chunk.decode_all();
+    let str_instrs: Vec<_> = decoded
         .iter()
         .filter(|i| matches!(i, Instruction::LoadStr(_, _)))
         .collect();
@@ -508,7 +508,7 @@ fn test_compile_function_decl() {
     assert_eq!(functions[0].name, "add");
     assert_eq!(functions[0].arity, 2);
     // With typed parameters (a: int, b: int), the compiler emits AddInt
-    let func_instrs = functions[0].chunk.instructions();
+    let func_instrs = functions[0].chunk.decode_all();
     assert!(
         func_instrs
             .iter()
@@ -541,7 +541,7 @@ fn test_compile_return_value() {
     let compiler = compile_full("func get() -> int { return 42 }");
     let functions = compiler.functions();
     assert_eq!(functions.len(), 1);
-    let func_instrs = functions[0].chunk.instructions();
+    let func_instrs = functions[0].chunk.decode_all();
     assert!(
         func_instrs
             .iter()
@@ -559,7 +559,7 @@ fn test_compile_function_implicit_return() {
     let compiler = compile_full("func noop() { }");
     let functions = compiler.functions();
     assert_eq!(functions.len(), 1);
-    let func_instrs = functions[0].chunk.instructions();
+    let func_instrs = functions[0].chunk.decode_all();
     // Should have implicit ReturnNull
     assert!(
         func_instrs
@@ -760,7 +760,7 @@ fn test_compile_bare_yield() {
     );
     let funcs = compiler.functions();
     assert_eq!(funcs.len(), 1);
-    let instrs = funcs[0].chunk.instructions();
+    let instrs = funcs[0].chunk.decode_all();
     assert!(
         instrs.iter().any(|i| matches!(i, Instruction::Yield)),
         "expected Yield instruction, got: {instrs:?}"
@@ -778,7 +778,7 @@ fn test_compile_yield_seconds() {
     );
     let funcs = compiler.functions();
     assert_eq!(funcs.len(), 1);
-    let instrs = funcs[0].chunk.instructions();
+    let instrs = funcs[0].chunk.decode_all();
     assert!(
         instrs
             .iter()
@@ -804,7 +804,7 @@ fn test_compile_yield_frames() {
     );
     let funcs = compiler.functions();
     assert_eq!(funcs.len(), 1);
-    let instrs = funcs[0].chunk.instructions();
+    let instrs = funcs[0].chunk.decode_all();
     assert!(
         instrs
             .iter()
@@ -830,7 +830,7 @@ fn test_compile_yield_until() {
     );
     let funcs = compiler.functions();
     assert_eq!(funcs.len(), 1);
-    let instrs = funcs[0].chunk.instructions();
+    let instrs = funcs[0].chunk.decode_all();
     assert!(
         instrs
             .iter()
@@ -854,7 +854,7 @@ fn test_compile_yield_coroutine() {
     let funcs = compiler.functions();
     assert_eq!(funcs.len(), 2);
     // parent is the second function
-    let parent_instrs = funcs[1].chunk.instructions();
+    let parent_instrs = funcs[1].chunk.decode_all();
     assert!(
         parent_instrs
             .iter()

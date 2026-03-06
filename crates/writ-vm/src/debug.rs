@@ -1,6 +1,7 @@
 use crate::error::StackTrace;
 
 /// Context provided to the breakpoint handler when execution pauses.
+#[cfg_attr(not(feature = "debug-hooks"), allow(dead_code))]
 pub struct BreakpointContext<'a> {
     /// Source file path where the breakpoint was hit.
     pub file: &'a str,
@@ -14,6 +15,7 @@ pub struct BreakpointContext<'a> {
 
 /// Action returned by the breakpoint handler to control execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "debug-hooks"), allow(dead_code))]
 pub enum BreakpointAction {
     /// Resume normal execution.
     Continue,
@@ -36,6 +38,7 @@ pub(crate) type CallHook = Box<dyn Fn(&str, &str, u32)>;
 
 /// Internal stepping state for the debugger.
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(not(feature = "debug-hooks"), allow(dead_code))]
 pub(crate) enum StepState {
     /// No stepping active — run normally.
     #[default]

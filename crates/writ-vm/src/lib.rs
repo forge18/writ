@@ -23,6 +23,7 @@ pub use binding::{
 };
 pub use class_instance::WritClassInstance;
 pub use coroutine::{Coroutine, CoroutineId, CoroutineState, WaitCondition};
+#[cfg(feature = "debug-hooks")]
 pub use debug::{BreakpointAction, BreakpointContext};
 pub use error::{RuntimeError, StackFrame, StackTrace};
 pub use field_layout::FieldLayout;

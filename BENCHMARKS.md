@@ -26,15 +26,15 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 
 ## Results (Apple M-series, single-threaded)
 
-| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | VM Only (Round 11) | VM Only (Round 12) | Total Improvement |
-| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ------------------ | ------------------ | ----------------- |
-| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | -79% |
-| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | -72% |
-| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | -78% |
-| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | -77% |
-| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | -73% |
-| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | -76% |
-| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | -81% |
+| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | VM Only (Round 11) | VM Only (Round 12) | VM Only (Round 13) | Total Improvement |
+| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ------------------ | ------------------ | ------------------ | ----------------- |
+| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | 30.2 ms | -80% |
+| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | 37.2 ms | -72% |
+| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | 31.5 ms | -80% |
+| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | 14.8 ms | -78% |
+| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | 0.471 ms | -76% |
+| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | 4.08 ms | -77% |
+| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | 0.139 ms | -82% |
 
 ## Compilation Pipeline Results (Round 9)
 
@@ -59,12 +59,12 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 | Ruby 3.0 | ~23 ms | YARV bytecode VM |
 | Wren 0.4 | ~30 ms | NaN-boxed single-pass compiler |
 | Python 3.11 | ~31 ms | Specializing adaptive interpreter |
-| **Writ** | **32 ms** | Register-based VM (no NaN-boxing) |
+| **Writ** | **30 ms** | Register-based VM (no NaN-boxing) |
 | Rhai | ~225 ms | Rust-embeddable, AST-walking (estimated) |
 
 ### Key Observations
 
-- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~32ms vs ~30ms), down from ~5x slower after twelve rounds of optimization. Round 10's compact object representation brought binary_trees from -38% to -72% total improvement.
+- **Writ matches Wren/Python** on function-call-heavy benchmarks (~30ms), down from ~5x slower after thirteen rounds of optimization. Round 10's compact object representation brought binary_trees from -38% to -72% total improvement.
 - **Writ is faster than Rhai**, the most comparable Rust-embeddable scripting language. Rhai documents itself as "roughly 2x slower than Python 3" and uses AST-walking rather than bytecode compilation.
 - **Different hardware** between our results (Apple M-series) and the Muxup results (AMD Ryzen 9 5950X). Ratios are more meaningful than absolute numbers.
 - **Binary trees are not directly comparable** — Wren uses depth=12 with the CLBG structure; we use depth=8 with 100 iterations.
@@ -130,7 +130,7 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 2. **Register allocator in compiler** — Linear stack-based allocator with destination propagation. `compile_expr` returns the register containing the result and accepts an optional destination hint. Locals resolve directly to their register — no `LoadLocal`/`StoreLocal` emission needed.
 3. **Three-address instruction set** — Replaced entire `Instruction` enum. Old stack instructions (`Push`, `Pop`, `LoadLocal`, `StoreLocal`, `AddLocals`, `ReturnLocal`, etc.) replaced by register variants (`Move`, `AddInt(d,a,b)`, `Return(src)`, `CallDirect(base_reg, func_idx, arity)`). Round 6 superinstructions absorbed into native three-address format.
 4. **Quickening preserved** — Generic `Add(d,a,b)` rewrites to `QAddInt(d,a,b)` or `QAddFloat(d,a,b)` at runtime. Deopt path reverts to generic and falls through to type dispatch.
-5. **Fused test-and-branch** — `TestLtInt(a, b, offset)`, `TestLtIntImm(a, imm, offset)`, and float variants fuse comparison + conditional jump into single instructions. Eliminates temporary register and separate `JumpIfFalsy`.
+5. **Fused test-and-branch** — `TestLtInt(a, b, offset)`, `TestLtIntImm(a, imm, offset)`, and float variants fuse comparison + conditional jump into single instructions. Eliminates temporary register and separate `JumpIfFalsy`. (Note: the `Test*IntImm` variants are defined but never emitted by the compiler; their enum presence is preserved to maintain LLVM jump table layout — see Remaining Optimization Opportunities.)
 6. **Open upvalue write-through** — `StoreUpvalue` syncs values back to parent stack slots via `open_upvalues` HashMap, so parent functions see mutations to captured variables through direct register reads. `MakeClosure` syncs self-referential captures for recursive closures.
 
 **Analysis:** The register conversion directly addressed the #1 profiling bottleneck (`drop_in_place<Value>` at 10-38%). Arithmetic instructions now read source registers by reference and write results in-place — no `push`/`pop`/`clone`/`drop` cycle. The biggest wins are on tight arithmetic loops: mandelbrot (-45%), loop_sum (-50%), sieve (-28%), queens (-35%). Fibonacci and permute show slight regressions (+19%, +19%) because the register calling convention has higher per-call overhead than the old stack model (extend stack to `max_registers`, write result to `result_reg`, truncate). These benchmarks are dominated by call overhead rather than arithmetic. Binary trees shows a small improvement (-3%) as expected — it's dominated by object allocation, not stack ops.
@@ -173,37 +173,55 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 **Analysis:** The float type propagation directly addresses the mandelbrot hotspot: `promote_float_pair_op` consumed ~6% of execution time doing runtime float type dispatch for operations the compiler could resolve statically. The mandelbrot benchmark's inner loop has expressions like `2.0 * (x * 1.0) / fsize - 1.5` where `x` is int — previously the `x * 1.0` mixed operation emitted generic `Mul`, losing type info for the entire chain. With `IntToFloat` coercion, the compiler now emits `IntToFloat + MulFloat` and all subsequent operations stay typed. The tail call optimization has no benchmark impact (none of the benchmarks use self-recursive tail calls) but is a correctness improvement for user programs.
 
-## Profiling Analysis (Post-Round 6)
+**Round 13** (0.471ms sieve, -13%; 30.2ms fib, -5%; 14.8ms mandelbrot, -2%; 4.08ms queens, -3%; broad improvements):
 
-Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the dominant cost centers. Flamegraph SVGs are in `flamegraphs/`.
+1. **Inline array indexing** — Inlined the Array+Int fast path directly in the `GetIndex` and `SetIndex` dispatch arms. The previous implementation called out to `exec_get_index_reg`/`exec_set_index_reg` helper functions that performed (Value, Value) pattern matching across Array/Dict/AoSoA variants. The inline path checks for `Value::Array` and integer index directly, skipping the function call, Dict/AoSoA branches, and deferring `save_pc!()` to the error/fallback path.
+2. **CallMethod stack-slice dispatch** — Replaced per-call `Vec<Value>` heap allocation in `exec_call_method_reg` with direct stack-slice passing (`&self.stack[arg_start..arg_start+n]`), matching the pattern already used by `exec_native_call_reg`. Eliminates one heap allocation + N value clones per method call. For sieve's `.push()` called 5000 times per iteration, this removes 5000 heap allocations per benchmark run.
+3. **Debug hooks compile-time gate** — Added `debug-hooks` cargo feature that gates all `has_debug_hooks` checks in the dispatch loop behind `#[cfg(feature = "debug-hooks")]`. When disabled (the default), the per-instruction load + compare + branch compiles away entirely. Debug API methods (`set_breakpoint`, `on_line`, `on_call`, `on_return`) and internal functions (`debug_probe`, `fire_call_hook`, `fire_return_hook`) are also gated. LSP/debugger crates can enable the feature via `writ-vm = { features = ["debug-hooks"] }`.
+4. **Upvalue flattening** — Replaced `Rc<RefCell<Value>>` upvalue cells with a flat `Vec<Value>` store (`upvalue_store`) indexed by `u32`. `ClosureData.upvalues` changed from `Vec<Rc<RefCell<Value>>>` to `Vec<u32>`, `CallFrame.upvalues` similarly. `LoadUpvalue` now does a direct Vec index + `cheap_clone` instead of `Rc::clone` + `RefCell::borrow()` + `Value::clone`. `StoreUpvalue` writes directly to the store. Closure calls clone `Vec<u32>` (cheap memcpy) instead of N Rc refcount bumps. Open upvalue tracking changed from `Vec<Option<Rc<RefCell<Value>>>>` to `Vec<Option<u32>>` for the same sharing semantics via index equality.
+
+**Analysis:** The combined optimizations address all three remaining profiling bottlenecks from Round 12. The sieve improvement (-13%) comes primarily from inline array indexing and CallMethod stack-slice dispatch — the benchmark's hot loop does `flags[i]` (GetIndex), `flags[i] = false` (SetIndex), and `flags.push(true)` (CallMethod) on every iteration. The debug hooks gate contributes a broad -2-6% across all benchmarks by eliminating the per-instruction branch. The upvalue flattening improves queens (-3%) by replacing `Rc<RefCell<Value>>` indirection with direct Vec indexing on every `LoadUpvalue`/`StoreUpvalue`. Fibonacci and permute benefit from the debug gate and reduced dispatch table pressure.
+
+## Profiling Analysis (Post-Round 12)
+
+Flamegraph profiling (`cargo flamegraph --profile profiling`) of all 7 benchmarks with the register-based VM. Profiling SVGs and sample outputs are in `flamegraphs/`.
 
 ### Top Bottlenecks by Sample Weight
 
 | Bottleneck | fibonacci | permute | binary_trees | mandelbrot | sieve | queens | loop_sum |
 | ---------- | --------- | ------- | ----------- | ---------- | ----- | ------ | -------- |
-| `drop_in_place<Value>` (stack cleanup) | **38%** | **13%** | — | **12%** | 6% | 7% | **17%** |
-| `Value::cheap_clone` / extraction | 2% | 1% | — | **10%** | **22%** | — | 3% |
-| ~~Object alloc/dealloc (HashMap)~~ | — | — | ~~**50%**~~ | — | — | — | — |
-| SipHash (`open_upvalues` HashMap) | — | — | — | — | 4% | **12%** | — |
-| `promote_float_pair_op` | — | — | — | **6%** | — | — | — |
-| `exec_call` / frame overhead | — | — | — | — | — | 5% | — |
-| `Vec::push` / `Vec::pop` (stack ops) | 1% | 4% | — | 2% | — | — | 1% |
+| Instruction dispatch (match + fetch) | 22% | 24% | — | 24% | 16% | 17% | **32%** |
+| Typed arithmetic (AddInt/MulFloat/etc) | 18% | 18% | — | **58%** | 15% | — | **46%** |
+| Call/Return overhead (ensure_registers) | **47%** | **30%** | 23% | — | — | 10% | — |
+| `Rc::drop_slow` (struct dealloc) | — | — | **59%** | — | — | — | — |
+| Array/index ops (GetIndex/SetIndex/CallMethod) | — | — | — | — | **54%** | 3% | — |
+| Upvalue ops (LoadUpvalue/StoreUpvalue) | — | — | — | — | — | **24%** | — |
+| Debug hooks check (`has_debug_hooks`) | 6% | 6% | — | 9% | 6% | 7% | 10% |
 
 ### Key Findings
 
-1. **Stack drop glue is the #1 cost** — `Value` is a 24-byte enum with non-Copy variants (`Str`, `Object` contain `Rc`). Every `Return` truncates the stack, running `drop_in_place` on each value even when most are I32/Bool that need no dropping. This dominates fibonacci (38%) and is significant everywhere.
+1. **Call/Return overhead dominates recursion benchmarks** — fibonacci spends 47% and permute 30% in Call/Return paths: `ensure_registers` (stack resize via `Vec::resize`), frame push/pop, and instruction pointer reload. The fast return path (Round 8) already skips `drop_in_place` for scalar-only frames, so the remaining cost is structural frame management.
 
-2. ~~**Object representation is catastrophic for binary_trees**~~ — **Fixed in Round 10.** Replaced per-instance `HashMap<String, Value>` with `Vec<Value>` + shared `Rc<FieldLayout>`. binary_trees improved -53% (83.1ms → 38.9ms).
+2. **Instruction dispatch is the floor** — 16-32% of time across benchmarks is pure dispatch overhead: the `match instruction` pattern match and instruction pointer advance. loop_sum (32%) and mandelbrot (24%) are most affected because their inner loops are dominated by cheap register-to-register operations. This is the theoretical limit without computed goto or JIT compilation.
 
-3. **Upvalue HashMap is expensive for closures** — Queens spends 12% in `SipHasher13::write` from `open_upvalues: HashMap<usize, Rc<RefCell<Value>>>` lookups. Upvalue slot indices are small integers — a direct-indexed `Vec` or fixed-size array would be O(1) with no hashing.
+3. **Rc::drop_slow dominates binary_trees** — 59% of binary_trees time is in `Rc::drop_slow`, triggered when tree node reference counts reach zero. This is the cost of reference-counted object lifetime management — the compact `Vec<Value>` representation (Round 10) eliminated HashMap overhead, but Rc deallocation remains fundamental.
 
-4. **Float promotion overhead** — Mandelbrot spends 6% in `promote_float_pair_op` for mixed-type arithmetic. The compiler should emit `MulFloat`/`AddFloat` directly for float-typed expressions; current type tracking covers locals but not all intermediate sub-expressions.
+4. **Array indexing dominates sieve** — 54% of sieve is in `GetIndex`/`SetIndex`/`CallMethod` (array `.push()`). The `exec_get_index_reg` and `exec_set_index_reg` helpers handle generic indexing (arrays, dicts, strings) with type dispatch and bounds checking. Specializing array-of-bool or array-of-int access could eliminate this overhead.
 
-5. **Value extraction (`as_i64`, `as_f64`, `cheap_clone`)** — Every arithmetic instruction pops values, matches discriminants, extracts the inner type, computes, and pushes a new Value. A register-based VM would keep values in place, eliminating most clone/extract/push cycles.
+5. **Upvalue overhead dominates queens** — 24% of queens is in `LoadUpvalue` (`.borrow().clone()`) and `StoreUpvalue`. The `Rc<RefCell<Value>>` indirection for captured variables requires borrowing, cloning, and refcount management on every access. This replaced the previous `HashMap<usize, Rc<RefCell<Value>>>` (Round 8), but the `RefCell` borrow/clone cost remains.
 
-## Remaining Optimization Opportunities
+6. **Debug hooks check is 6-10% everywhere** — The `if self.has_debug_hooks` branch at the top of the dispatch loop costs 6-10% of execution time. While the branch is always-not-taken in benchmarks (predictable), it still adds a load + compare + branch to every instruction. Compiling out debug support for production builds could recover this.
 
-1. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~12 bytes). 3x better instruction cache density. High risk of LLVM codegen regression (as demonstrated by Round 11's compact CallFrame attempt).
+### Previous Bottlenecks (Fixed)
+
+- ~~**`drop_in_place<Value>` (38% fib)**~~ — **Fixed in Rounds 7-8.** Register-based VM eliminated push/pop/clone cycles. Fast return path skips drop glue for scalar-only frames.
+- ~~**Object alloc/dealloc HashMap (50% binary_trees)**~~ — **Fixed in Round 10.** Compact `Vec<Value>` + shared `Rc<FieldLayout>`.
+- ~~**`promote_float_pair_op` (6% mandelbrot)**~~ — **Fixed in Round 12.** `IntToFloat` coercion enables typed float instructions for mixed int/float expressions.
+- ~~**SipHash `open_upvalues` HashMap (12% queens)**~~ — **Fixed in Round 8.** Replaced HashMap with direct-indexed `Vec<Option<Rc<RefCell<Value>>>>`.
+- ~~**`Value::cheap_clone` / extraction (22% sieve)**~~ — **Fixed in Round 7.** Register-based VM reads source registers by reference, no clone needed.
+- ~~**Generic array indexing dispatch (54% sieve)**~~ — **Fixed in Round 13.** Inline Array+Int fast path in GetIndex/SetIndex + CallMethod stack-slice dispatch.
+- ~~**Debug hooks per-instruction branch (6-10% broad)**~~ — **Fixed in Round 13.** `debug-hooks` cargo feature compiles out all checks in production builds.
+- ~~**Rc<RefCell<Value>> upvalue cells (24% queens)**~~ — **Fixed in Round 13.** Flat `Vec<Value>` store with `u32` index replaces Rc/RefCell indirection.
 
 ## Design Constraints
 

@@ -11,6 +11,7 @@ use crate::chunk::Chunk;
 use crate::error::CompileError;
 use crate::instruction::Instruction;
 use crate::local::Local;
+use crate::opcode::op;
 use crate::upvalue::UpvalueDescriptor;
 
 /// Creates a dummy Span for compiler-generated code (e.g., collection literals).
@@ -541,7 +542,7 @@ impl Compiler {
                     let r = self.alloc_temp(&expr.span)?;
                     self.compile_expr(elem, Some(r))?;
                 }
-                let count = elements.len() as u16;
+                let count = elements.len() as u8;
                 let d = self.dst_or_temp(dst, &expr.span)?;
                 self.emit(Instruction::MakeArray(d, start, count), line);
                 // Free all element temps
@@ -1801,8 +1802,8 @@ impl Compiler {
         // Ensure implicit return if body doesn't end with Return
         if self.chunk.is_empty()
             || !matches!(
-                self.chunk.instructions().last(),
-                Some(Instruction::Return(_)) | Some(Instruction::ReturnNull)
+                self.chunk.last_opcode(),
+                Some(op::Return) | Some(op::ReturnNull)
             )
         {
             self.emit(Instruction::ReturnNull, line);
@@ -1914,8 +1915,8 @@ impl Compiler {
                 }
                 if self.chunk.is_empty()
                     || !matches!(
-                        self.chunk.instructions().last(),
-                        Some(Instruction::Return(_)) | Some(Instruction::ReturnNull)
+                        self.chunk.last_opcode(),
+                        Some(op::Return) | Some(op::ReturnNull)
                     )
                 {
                     self.emit(Instruction::ReturnNull, line);
@@ -2112,7 +2113,7 @@ impl Compiler {
     ) -> Result<u8, CompileError> {
         let span = dummy_span(line);
         let start = self.next_reg;
-        let mut count: u16 = 0;
+        let mut count: u8 = 0;
         for elem in elements {
             match elem {
                 ArrayElement::Expr(e) => {
@@ -2144,7 +2145,7 @@ impl Compiler {
     ) -> Result<u8, CompileError> {
         let span = dummy_span(line);
         let start = self.next_reg;
-        let mut count: u16 = 0;
+        let mut count: u8 = 0;
         for elem in elements {
             match elem {
                 DictElement::KeyValue { key, value } => {
@@ -2361,9 +2362,9 @@ impl Compiler {
                 self.add_local(&field.name, span)?;
             }
 
-            let field_count = u16::try_from(decl.fields.len()).map_err(|_| CompileError {
+            let field_count = u8::try_from(decl.fields.len()).map_err(|_| CompileError {
                 annotation: None,
-                message: "too many struct fields (max 65535)".to_string(),
+                message: "too many struct fields (max 255)".to_string(),
                 span: span.clone(),
             })?;
             let name_idx = self.chunk.add_string(struct_name);
@@ -2457,9 +2458,9 @@ impl Compiler {
                 self.add_local(field_name, span)?;
             }
 
-            let field_count = u16::try_from(all_field_names.len()).map_err(|_| CompileError {
+            let field_count = u8::try_from(all_field_names.len()).map_err(|_| CompileError {
                 annotation: None,
-                message: "too many class fields (max 65535)".to_string(),
+                message: "too many class fields (max 255)".to_string(),
                 span: span.clone(),
             })?;
             let name_idx = self.chunk.add_string(class_name);
@@ -2538,8 +2539,8 @@ impl Compiler {
 
         if self.chunk.is_empty()
             || !matches!(
-                self.chunk.instructions().last(),
-                Some(Instruction::Return(_)) | Some(Instruction::ReturnNull)
+                self.chunk.last_opcode(),
+                Some(op::Return) | Some(op::ReturnNull)
             )
         {
             self.emit(Instruction::ReturnNull, line);

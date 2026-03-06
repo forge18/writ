@@ -5,6 +5,7 @@ mod compiler;
 mod error;
 mod instruction;
 mod local;
+pub mod opcode;
 mod peephole;
 mod upvalue;
 

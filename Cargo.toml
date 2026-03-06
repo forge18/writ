@@ -55,3 +55,9 @@ strip = "symbols"
 [profile.bench]
 lto = "fat"
 codegen-units = 1
+
+# Profiling: same as release but with debug symbols and no strip
+[profile.profiling]
+inherits = "release"
+debug = 2
+strip = "none"

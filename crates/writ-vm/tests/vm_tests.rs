@@ -5,7 +5,9 @@ use writ_compiler::{Chunk, CompiledFunction, Compiler};
 use writ_lexer::Lexer;
 use writ_parser::Parser;
 
-use writ_vm::{BreakpointAction, RuntimeError, VM, Value, WritObject, fn0, fn1, fn2};
+#[cfg(feature = "debug-hooks")]
+use writ_vm::BreakpointAction;
+use writ_vm::{RuntimeError, VM, Value, WritObject, fn0, fn1, fn2};
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -1179,6 +1181,7 @@ fn test_stack_trace_lambda() {
     );
 }
 
+#[cfg(feature = "debug-hooks")]
 #[test]
 fn test_breakpoint_fires() {
     let fired = Rc::new(Cell::new(false));
@@ -1207,6 +1210,7 @@ fn test_breakpoint_fires() {
     assert_eq!(*bp_file.borrow(), "bp.writ");
 }
 
+#[cfg(feature = "debug-hooks")]
 #[test]
 fn test_breakpoint_continue() {
     let (chunk, functions) = compile_with_file(
@@ -1224,6 +1228,7 @@ fn test_breakpoint_continue() {
     assert_eq!(result, Value::I32(30));
 }
 
+#[cfg(feature = "debug-hooks")]
 #[test]
 fn test_breakpoint_not_set_does_not_fire() {
     let fired = Rc::new(Cell::new(false));
@@ -1246,6 +1251,7 @@ fn test_breakpoint_not_set_does_not_fire() {
     );
 }
 
+#[cfg(feature = "debug-hooks")]
 #[test]
 fn test_debug_hook_on_line() {
     let lines = Rc::new(RefCell::new(Vec::<u32>::new()));
@@ -1273,6 +1279,7 @@ fn test_debug_hook_on_line() {
     assert!(recorded.contains(&3));
 }
 
+#[cfg(feature = "debug-hooks")]
 #[test]
 fn test_debug_hook_on_call() {
     let calls = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -1296,6 +1303,7 @@ fn test_debug_hook_on_call() {
     );
 }
 
+#[cfg(feature = "debug-hooks")]
 #[test]
 fn test_debug_hook_on_return() {
     let returns = Rc::new(RefCell::new(Vec::<String>::new()));

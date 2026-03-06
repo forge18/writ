@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::instruction::Instruction;
+use crate::opcode::INSTR_WORDS;
 
 /// A chunk of compiled bytecode with its associated constant data.
 ///
@@ -9,7 +10,12 @@ use crate::instruction::Instruction;
 /// (a top-level script or, in later phases, a function body).
 #[derive(Debug, Clone)]
 pub struct Chunk {
-    instructions: Vec<Instruction>,
+    /// Compact u32-encoded bytecode.
+    code: Vec<u32>,
+    /// Maps instruction index → word offset in `code`.
+    instruction_offsets: Vec<u32>,
+    /// Number of logical instructions.
+    instr_count: usize,
     strings: Vec<Rc<String>>,
     /// O(1) deduplication index: string content → pool index.
     string_dedup: HashMap<String, u32>,
@@ -25,7 +31,9 @@ impl Chunk {
     /// Creates a new empty chunk.
     pub fn new() -> Self {
         Self {
-            instructions: Vec::new(),
+            code: Vec::new(),
+            instruction_offsets: Vec::new(),
+            instr_count: 0,
             strings: Vec::new(),
             string_dedup: HashMap::new(),
             int64_constants: Vec::new(),
@@ -37,7 +45,14 @@ impl Chunk {
 
     /// Appends an instruction and records its source line.
     pub fn write(&mut self, instruction: Instruction, line: u32) {
-        self.instructions.push(instruction);
+        let word_offset = self.code.len() as u32;
+        self.instruction_offsets.push(word_offset);
+        let (w0, w1) = instruction.encode();
+        self.code.push(w0);
+        if let Some(w) = w1 {
+            self.code.push(w);
+        }
+        self.instr_count += 1;
         self.lines.push(line);
     }
 
@@ -54,15 +69,84 @@ impl Chunk {
         index
     }
 
-    /// Returns the instruction list.
-    pub fn instructions(&self) -> &[Instruction] {
-        &self.instructions
+    /// Returns the opcode byte of the last instruction, or `None` if empty.
+    pub fn last_opcode(&self) -> Option<u8> {
+        if self.instr_count == 0 {
+            return None;
+        }
+        let word_offset = self.instruction_offsets[self.instr_count - 1] as usize;
+        Some((self.code[word_offset] & 0xFF) as u8)
     }
 
-    /// Runs the peephole optimizer on this chunk's instructions.
+    /// Returns the compact u32-encoded bytecode.
+    pub fn code(&self) -> &[u32] {
+        &self.code
+    }
+
+    /// Returns the number of u32 words in the encoded bytecode.
+    pub fn word_len(&self) -> usize {
+        self.code.len()
+    }
+
+    /// Returns the instruction-index-to-word-offset mapping.
+    pub fn instruction_offsets(&self) -> &[u32] {
+        &self.instruction_offsets
+    }
+
+    /// Returns the source line for a word offset in the code vec.
+    /// Uses binary search on instruction_offsets (cold path only).
+    pub fn line_for_word_offset(&self, word_offset: usize) -> u32 {
+        let idx = self
+            .instruction_offsets
+            .partition_point(|&off| (off as usize) <= word_offset)
+            .saturating_sub(1);
+        self.lines[idx]
+    }
+
+    /// Runs the peephole optimizer on this chunk's instructions,
+    /// then rebuilds the compact code vec.
     /// `self_func_idx` is the function index for self-recursive tail call detection.
     pub fn optimize(&mut self, self_func_idx: Option<u16>) {
-        crate::peephole::optimize(&mut self.instructions, &mut self.lines, self_func_idx);
+        // Decode instruction stream from code vec
+        let mut instructions = self.decode_all();
+        crate::peephole::optimize(&mut instructions, &mut self.lines, self_func_idx);
+        self.rebuild_code(&instructions);
+        self.instr_count = instructions.len();
+    }
+
+    /// Re-encodes an instruction slice into `code` with word-based jump offsets.
+    /// Called after peephole optimization modifies the instruction stream.
+    fn rebuild_code(&mut self, instructions: &[Instruction]) {
+        // Pass 1: compute instruction_offsets
+        self.instruction_offsets.clear();
+        let mut word_pos = 0u32;
+        for instr in instructions {
+            self.instruction_offsets.push(word_pos);
+            let (_, w1) = instr.encode();
+            word_pos += if w1.is_some() { 2 } else { 1 };
+        }
+
+        // Pass 2: encode with converted jump offsets (instruction-count → word-count)
+        self.code.clear();
+        for (i, instr) in instructions.iter().enumerate() {
+            let (w0, w1) = instr.encode();
+            self.code.push(w0);
+            if let Some(mut extra) = w1 {
+                // If this is a jump instruction, convert the offset
+                if let Some(instr_offset) = instr.jump_offset() {
+                    let instr_width = 2u32; // all jump instructions are 2-word
+                    let ip_after = self.instruction_offsets[i] + instr_width;
+                    let target_instr_idx = (i as i32 + 1 + instr_offset) as usize;
+                    let target_word = if target_instr_idx < self.instruction_offsets.len() {
+                        self.instruction_offsets[target_instr_idx]
+                    } else {
+                        word_pos // jump past end
+                    };
+                    extra = (target_word as i32 - ip_after as i32) as u32;
+                }
+                self.code.push(extra);
+            }
+        }
     }
 
     /// Returns the string constant pool as `Rc<String>` references.
@@ -105,10 +189,25 @@ impl Chunk {
         self.lines[index]
     }
 
+    /// Decodes all instructions from the code vec (for tests/debug).
+    pub fn decode_all(&self) -> Vec<Instruction> {
+        let mut result = Vec::new();
+        let mut pos = 0;
+        while pos < self.code.len() {
+            let w0 = self.code[pos];
+            let op = (w0 & 0xFF) as u8;
+            let words = INSTR_WORDS[op as usize] as usize;
+            let w1 = if words > 1 { self.code[pos + 1] } else { 0 };
+            result.push(Instruction::decode(w0, w1));
+            pos += words;
+        }
+        result
+    }
+
     /// Emits a jump instruction with its current offset as a placeholder.
     /// Returns the index of the jump instruction for later patching.
     pub fn emit_jump(&mut self, instruction: Instruction, line: u32) -> usize {
-        let index = self.instructions.len();
+        let index = self.instr_count;
         self.write(instruction, line);
         index
     }
@@ -116,45 +215,30 @@ impl Chunk {
     /// Patches a previously emitted jump instruction so it targets the
     /// current instruction position.
     ///
-    /// The offset is `current_position - (jump_index + 1)`, making the
-    /// jump relative to the instruction after the jump itself.
+    /// Stores an instruction-count offset relative to the next instruction.
+    /// `rebuild_code()` later converts these to word-count offsets.
     pub fn patch_jump(&mut self, jump_index: usize) {
-        let offset = (self.instructions.len() as i32) - (jump_index as i32) - 1;
-        match &mut self.instructions[jump_index] {
-            Instruction::Jump(o)
-            | Instruction::JumpIfFalsy(_, o)
-            | Instruction::JumpIfTruthy(_, o)
-            | Instruction::TestLtInt(_, _, o)
-            | Instruction::TestLeInt(_, _, o)
-            | Instruction::TestGtInt(_, _, o)
-            | Instruction::TestGeInt(_, _, o)
-            | Instruction::TestEqInt(_, _, o)
-            | Instruction::TestNeInt(_, _, o)
-            | Instruction::TestLtIntImm(_, _, o)
-            | Instruction::TestLeIntImm(_, _, o)
-            | Instruction::TestGtIntImm(_, _, o)
-            | Instruction::TestGeIntImm(_, _, o)
-            | Instruction::TestLtFloat(_, _, o)
-            | Instruction::TestLeFloat(_, _, o)
-            | Instruction::TestGtFloat(_, _, o)
-            | Instruction::TestGeFloat(_, _, o) => *o = offset,
-            _ => panic!("patch_jump called on non-jump instruction"),
-        }
+        let instr_offset = (self.instr_count as i32) - (jump_index as i32) - 1;
+        let jump_word_start = self.instruction_offsets[jump_index] as usize;
+        let op = (self.code[jump_word_start] & 0xFF) as u8;
+        let jump_width = INSTR_WORDS[op as usize] as usize;
+        // The offset word is always the last word of the instruction
+        self.code[jump_word_start + jump_width - 1] = instr_offset as u32;
     }
 
     /// Returns the current instruction count (useful for loop targets).
     pub fn current_offset(&self) -> usize {
-        self.instructions.len()
+        self.instr_count
     }
 
     /// Returns the number of instructions.
     pub fn len(&self) -> usize {
-        self.instructions.len()
+        self.instr_count
     }
 
     /// Returns true if the chunk has no instructions.
     pub fn is_empty(&self) -> bool {
-        self.instructions.is_empty()
+        self.instr_count == 0
     }
 
     /// Sets the source file path associated with this chunk.
@@ -208,6 +292,50 @@ mod tests {
         let chunk = Chunk::new();
         assert!(chunk.is_empty());
         assert_eq!(chunk.len(), 0);
-        assert_eq!(chunk.instructions(), &[]);
+        assert_eq!(chunk.decode_all(), &[]);
+    }
+
+    #[test]
+    fn test_code_vec_sync() {
+        let mut chunk = Chunk::new();
+        // 1-word: Add(2, 0, 1) → 1 word
+        chunk.write(Instruction::Add(2, 0, 1), 1);
+        // 2-word: LoadInt(0, 42) → 2 words
+        chunk.write(Instruction::LoadInt(0, 42), 1);
+        // 1-word: Return(0) → 1 word
+        chunk.write(Instruction::Return(0), 1);
+
+        assert_eq!(chunk.len(), 3);
+        assert_eq!(chunk.word_len(), 4); // 1 + 2 + 1
+        assert_eq!(chunk.instruction_offsets(), &[0, 1, 3]);
+    }
+
+    #[test]
+    fn test_line_for_word_offset() {
+        let mut chunk = Chunk::new();
+        chunk.write(Instruction::LoadInt(0, 1), 10); // words 0-1
+        chunk.write(Instruction::Add(2, 0, 1), 20); // word 2
+        chunk.write(Instruction::LoadInt(3, 3), 30); // words 3-4
+
+        assert_eq!(chunk.line_for_word_offset(0), 10);
+        assert_eq!(chunk.line_for_word_offset(1), 10); // still LoadInt's extra word
+        assert_eq!(chunk.line_for_word_offset(2), 20);
+        assert_eq!(chunk.line_for_word_offset(3), 30);
+    }
+
+    #[test]
+    fn test_decode_all_roundtrip() {
+        let mut chunk = Chunk::new();
+        chunk.write(Instruction::LoadInt(0, 42), 1);
+        chunk.write(Instruction::LoadInt(1, -7), 1);
+        chunk.write(Instruction::AddInt(2, 0, 1), 1);
+        chunk.write(Instruction::Return(2), 1);
+
+        let decoded = chunk.decode_all();
+        assert_eq!(decoded.len(), 4);
+        assert_eq!(decoded[0], Instruction::LoadInt(0, 42));
+        assert_eq!(decoded[1], Instruction::LoadInt(1, -7));
+        assert_eq!(decoded[2], Instruction::AddInt(2, 0, 1));
+        assert_eq!(decoded[3], Instruction::Return(2));
     }
 }

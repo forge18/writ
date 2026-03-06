@@ -288,11 +288,11 @@ fn compile(source: &str) -> (Vec<Vec<Instruction>>, Vec<String>) {
     let mut all_chunks: Vec<Vec<Instruction>> = Vec::new();
     let mut chunk_names: Vec<String> = Vec::new();
 
-    all_chunks.push(chunk.instructions().to_vec());
+    all_chunks.push(chunk.decode_all());
     chunk_names.push("main".to_string());
 
     for f in &functions {
-        all_chunks.push(f.chunk.instructions().to_vec());
+        all_chunks.push(f.chunk.decode_all());
         chunk_names.push(f.name.clone());
     }
 

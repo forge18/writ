@@ -7,11 +7,6 @@ pub(crate) enum ChunkId {
     Function(usize),
 }
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::value::Value;
-
 /// A single activation record on the call stack.
 ///
 /// In the register-based VM, each frame owns a window of the value stack
@@ -34,8 +29,8 @@ pub(crate) struct CallFrame {
     /// True if any register may hold an Rc-bearing value. When false, the
     /// return handler can use `set_len` instead of `truncate` (skips drops).
     pub has_rc_values: bool,
-    /// Upvalues for the closure being executed. `None` for non-closure frames.
-    pub upvalues: Option<Vec<Rc<RefCell<Value>>>>,
+    /// Indices into the VM's flat upvalue store. `None` for non-closure frames.
+    pub upvalues: Option<Vec<u32>>,
 }
 
 impl CallFrame {

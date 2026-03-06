@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::frame::CallFrame;
 use crate::value::Value;
 
@@ -57,7 +54,9 @@ pub struct Coroutine {
     /// The ID of the owning object (for structured concurrency).
     pub owner_id: Option<u64>,
     /// Open upvalues for this coroutine's execution context.
-    pub(crate) open_upvalues: Vec<Option<Rc<RefCell<Value>>>>,
+    pub(crate) open_upvalues: Vec<Option<u32>>,
+    /// Flat upvalue store for this coroutine.
+    pub(crate) upvalue_store: Vec<Value>,
     /// Child coroutine IDs (for cancellation propagation).
     pub(crate) children: Vec<CoroutineId>,
 }
@@ -77,6 +76,7 @@ mod tests {
             return_value: None,
             owner_id: None,
             open_upvalues: Vec::new(),
+            upvalue_store: Vec::new(),
             children: Vec::new(),
         };
         assert_eq!(coro.state, CoroutineState::Running);
@@ -95,6 +95,7 @@ mod tests {
             return_value: None,
             owner_id: None,
             open_upvalues: Vec::new(),
+            upvalue_store: Vec::new(),
             children: Vec::new(),
         };
         coro.state = CoroutineState::Suspended;

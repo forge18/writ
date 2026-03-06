@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [features]
+debug-hooks = []
 mobile-aosoa = ["writ-compiler/mobile-aosoa"]
 
 [dependencies]

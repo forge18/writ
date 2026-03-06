@@ -2,13 +2,13 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use writ_compiler::{Chunk, ClassMeta, CompiledFunction, Instruction, StructMeta, string_hash};
+use writ_compiler::opcode::{INSTR_WORDS, op};
+use writ_compiler::{Chunk, ClassMeta, CompiledFunction, StructMeta, string_hash};
 
 use crate::coroutine::{Coroutine, CoroutineId, CoroutineState, WaitCondition};
-use crate::debug::{
-    BreakpointAction, BreakpointContext, BreakpointHandler, BreakpointKey, CallHook, LineHook,
-    StepState,
-};
+#[cfg(feature = "debug-hooks")]
+use crate::debug::{BreakpointAction, BreakpointContext};
+use crate::debug::{BreakpointHandler, BreakpointKey, CallHook, LineHook, StepState};
 use crate::error::{RuntimeError, StackFrame, StackTrace};
 use crate::frame::{CallFrame, ChunkId};
 use crate::native::{NativeFunction, NativeMethod};
@@ -52,19 +52,21 @@ pub struct VM {
     has_open_upvalues: bool,
 
     // ── Cache line 1: call/return hot fields ─────────────────────
-    /// Pre-computed instruction pointer + length for each function chunk.
+    /// Pre-computed code pointer + word length for each function chunk.
     /// Index 0 = main chunk, index 1..N = function chunks.
-    /// Avoids `chunk_for().instructions()` chain on every Call/Return.
-    func_ip_cache: Vec<(*const Instruction, usize)>,
+    /// Points to the compact u32-encoded bytecode (`chunk.code()`).
+    func_ip_cache: Vec<(*const u32, usize)>,
     /// Function table: compiled functions indexed by position.
     functions: Vec<CompiledFunction>,
     /// Maximum number of instructions before termination. `None` = unlimited.
     instruction_limit: Option<u64>,
 
     // ── Cache line 2: warm fields (closures) ─────────────────────
-    /// Open upvalues: indexed by absolute stack slot. `Some(cell)` when a
-    /// local has been captured. Direct indexing eliminates HashMap hashing.
-    open_upvalues: Vec<Option<Rc<RefCell<Value>>>>,
+    /// Open upvalues: indexed by absolute stack slot. `Some(idx)` when a
+    /// local has been captured; the value is an index into `upvalue_store`.
+    open_upvalues: Vec<Option<u32>>,
+    /// Flat upvalue value store. Closures reference slots by `u32` index.
+    upvalue_store: Vec<Value>,
 
     // ── Cold fields: setup, metadata, debug ──────────────────────
     /// The top-level/main chunk being executed.
@@ -147,6 +149,7 @@ impl VM {
             last_file: String::new(),
             has_debug_hooks: false,
             open_upvalues: Vec::new(),
+            upvalue_store: Vec::new(),
             has_open_upvalues: false,
             func_ip_cache: Vec::new(),
         }
@@ -257,6 +260,7 @@ impl VM {
     // ── Debug API ───────────────────────────────────────────────────
 
     /// Registers a breakpoint at the given file and line.
+    #[cfg(feature = "debug-hooks")]
     pub fn set_breakpoint(&mut self, file: &str, line: u32) -> &mut Self {
         self.breakpoints.insert(BreakpointKey {
             file: file.to_string(),
@@ -267,6 +271,7 @@ impl VM {
     }
 
     /// Removes a breakpoint at the given file and line.
+    #[cfg(feature = "debug-hooks")]
     pub fn remove_breakpoint(&mut self, file: &str, line: u32) -> &mut Self {
         self.breakpoints.remove(&BreakpointKey {
             file: file.to_string(),
@@ -277,6 +282,7 @@ impl VM {
     }
 
     /// Registers a callback invoked when a breakpoint is hit.
+    #[cfg(feature = "debug-hooks")]
     pub fn on_breakpoint<F>(&mut self, handler: F) -> &mut Self
     where
         F: Fn(&BreakpointContext) -> BreakpointAction + 'static,
@@ -287,6 +293,7 @@ impl VM {
     }
 
     /// Registers a hook called before each new source line executes.
+    #[cfg(feature = "debug-hooks")]
     pub fn on_line<F>(&mut self, handler: F) -> &mut Self
     where
         F: Fn(&str, u32) + 'static,
@@ -297,6 +304,7 @@ impl VM {
     }
 
     /// Registers a hook called when any function is entered.
+    #[cfg(feature = "debug-hooks")]
     pub fn on_call<F>(&mut self, handler: F) -> &mut Self
     where
         F: Fn(&str, &str, u32) + 'static,
@@ -307,6 +315,7 @@ impl VM {
     }
 
     /// Registers a hook called when any function returns.
+    #[cfg(feature = "debug-hooks")]
     pub fn on_return<F>(&mut self, handler: F) -> &mut Self
     where
         F: Fn(&str, &str, u32) + 'static,
@@ -317,6 +326,7 @@ impl VM {
     }
 
     /// Recomputes the fast-path debug flag.
+    #[cfg(feature = "debug-hooks")]
     fn update_debug_flag(&mut self) {
         self.has_debug_hooks = !self.breakpoints.is_empty()
             || self.breakpoint_handler.is_some()
@@ -432,7 +442,7 @@ impl VM {
         // Rebuild instruction pointer cache with all functions
         self.rebuild_ip_cache();
 
-        let main_max = self.main_chunk.instructions().len().min(255) as u8;
+        let main_max = self.main_chunk.len().min(255) as u8;
         self.ensure_registers(0, main_max.max(16));
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Main,
@@ -657,12 +667,12 @@ impl VM {
     /// Must be called after main_chunk or functions are modified.
     fn rebuild_ip_cache(&mut self) {
         self.func_ip_cache.clear();
-        let main_instrs = self.main_chunk.instructions();
+        let main_code = self.main_chunk.code();
         self.func_ip_cache
-            .push((main_instrs.as_ptr(), main_instrs.len()));
+            .push((main_code.as_ptr(), main_code.len()));
         for func in &self.functions {
-            let instrs = func.chunk.instructions();
-            self.func_ip_cache.push((instrs.as_ptr(), instrs.len()));
+            let code = func.chunk.code();
+            self.func_ip_cache.push((code.as_ptr(), code.len()));
         }
     }
 
@@ -675,10 +685,10 @@ impl VM {
         }
     }
 
-    /// Returns cached (ip_base, len) for the given chunk. Avoids the
-    /// `chunk_for().instructions().as_ptr()` chain on Call/Return hot paths.
+    /// Returns cached (code_base, word_len) for the given chunk. Avoids the
+    /// `chunk_for().code().as_ptr()` chain on Call/Return hot paths.
     #[inline(always)]
-    fn cached_ip(&self, id: ChunkId) -> (*const Instruction, usize) {
+    fn cached_ip(&self, id: ChunkId) -> (*const u32, usize) {
         let idx = match id {
             ChunkId::Main => 0,
             ChunkId::Function(i) => i + 1,
@@ -713,12 +723,13 @@ impl VM {
     }
 
     /// Builds a stack trace from the current call stack.
+    /// `frame.pc` is a word offset into the chunk's code vec.
     fn build_stack_trace(&self) -> StackTrace {
         let mut frames = Vec::new();
         for frame in self.frames.iter().rev() {
             let chunk = self.chunk_for(frame.chunk_id);
-            let line = if frame.pc > 0 && frame.pc - 1 < chunk.len() {
-                chunk.line(frame.pc - 1)
+            let line = if frame.pc > 0 {
+                chunk.line_for_word_offset(frame.pc.saturating_sub(1))
             } else {
                 0
             };
@@ -746,16 +757,15 @@ impl VM {
         let mut chunk_id = frame.chunk_id;
         let has_limit = self.instruction_limit.is_some();
 
-        // Auto-advancing instruction pointer. SAFETY: instruction slices are not
-        // mutated during execution, and ip is reloaded after every Call/Return.
-        // ip_base is kept for deriving integer pc (error paths, frame save).
+        // Auto-advancing instruction pointer over compact u32 bytecode.
+        // SAFETY: code vecs are not mutated during execution (only opcode bytes
+        // are quickened in-place), and ip is reloaded after every Call/Return.
         let (cached_base, cached_len) = self.cached_ip(chunk_id);
-        let mut ip_base: *const Instruction = cached_base;
-        let mut ip: *const Instruction = unsafe { ip_base.add(frame.pc) };
-        let mut ip_end: *const Instruction = unsafe { ip_base.add(cached_len) };
+        let mut ip_base: *const u32 = cached_base;
+        let mut ip: *const u32 = unsafe { ip_base.add(frame.pc) };
+        let mut ip_end: *const u32 = unsafe { ip_base.add(cached_len) };
 
-        // Macro to reload ip state from a frame using the cached instruction
-        // pointer table. Avoids `chunk_for().instructions()` on every Call/Return.
+        // Macro to reload ip state from a frame using the cached code pointer table.
         macro_rules! reload_ip {
             ($self:expr, $chunk_id:expr, $pc:expr) => {{
                 let (base_ptr, len) = $self.cached_ip($chunk_id);
@@ -765,6 +775,13 @@ impl VM {
             }};
         }
 
+        // Macro to save pc as word offset.
+        macro_rules! save_pc {
+            () => {
+                unsafe { ip.offset_from(ip_base) as usize }
+            };
+        }
+
         loop {
             // Instruction limit enforcement (batch check every 256 instructions)
             if has_limit {
@@ -772,14 +789,14 @@ impl VM {
                 if self.instruction_count & 0xFF == 0
                     && self.instruction_count > self.instruction_limit.unwrap()
                 {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
                     return Err(self.make_error("instruction limit exceeded".to_string()));
                 }
             }
 
             // End of chunk: implicit return null
             if ip >= ip_end {
+                #[cfg(feature = "debug-hooks")]
                 if self.has_debug_hooks {
                     self.fire_return_hook();
                 }
@@ -820,58 +837,75 @@ impl VM {
             }
 
             // Debug probe: check for line changes, breakpoints, and step state
+            #[cfg(feature = "debug-hooks")]
             if self.has_debug_hooks {
-                let pc = unsafe { ip.offset_from(ip_base) as usize };
+                let pc = save_pc!();
                 self.frames.last_mut().unwrap().pc = pc;
                 self.debug_probe(chunk_id, pc)?;
             }
 
             // SAFETY: ip < ip_end is guaranteed by the check above.
-            let instruction = unsafe { *ip };
+            // Fetch the first word and advance ip. Decode opcode + ABC fields.
+            let w0 = unsafe { *ip };
             ip = unsafe { ip.add(1) };
+            let opc = (w0 & 0xFF) as u8;
+            let a = ((w0 >> 8) & 0xFF) as u8;
+            let b = ((w0 >> 16) & 0xFF) as u8;
+            let c = ((w0 >> 24) & 0xFF) as u8;
+            // Bx = 16-bit field in bits 16..31 (for ABx format)
+            let bx = (w0 >> 16) as u16;
 
-            match instruction {
+            match opc {
                 // ── Literals ──────────────────────────────────────────
-                Instruction::LoadInt(dst, v) => {
-                    self.stack[base + dst as usize] = Value::I32(v);
+                op::LoadInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.stack[base + a as usize] = Value::I32(w1 as i32);
                 }
-                Instruction::LoadConstInt(dst, idx) => {
+                op::LoadConstInt => {
                     let chunk = self.chunk_for(chunk_id);
-                    let v = chunk.int64_constants()[idx as usize];
-                    self.stack[base + dst as usize] = Value::I64(v);
+                    let v = chunk.int64_constants()[bx as usize];
+                    self.stack[base + a as usize] = Value::I64(v);
                 }
-                Instruction::LoadFloat(dst, v) => {
-                    self.stack[base + dst as usize] = Value::F32(v);
+                op::LoadFloat => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.stack[base + a as usize] = Value::F32(f32::from_bits(w1));
                 }
-                Instruction::LoadConstFloat(dst, idx) => {
+                op::LoadConstFloat => {
                     let chunk = self.chunk_for(chunk_id);
-                    let v = chunk.float64_constants()[idx as usize];
-                    self.stack[base + dst as usize] = Value::F64(v);
+                    let v = chunk.float64_constants()[bx as usize];
+                    self.stack[base + a as usize] = Value::F64(v);
                 }
-                Instruction::LoadBool(dst, v) => {
-                    self.stack[base + dst as usize] = Value::Bool(v);
+                op::LoadBool => {
+                    self.stack[base + a as usize] = Value::Bool(b != 0);
                 }
-                Instruction::LoadStr(dst, idx) => {
+                op::LoadStr => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     let chunk = self.chunk_for(chunk_id);
-                    let s = Rc::clone(&chunk.rc_strings()[idx as usize]);
-                    self.stack[base + dst as usize] = Value::Str(s);
+                    let s = Rc::clone(&chunk.rc_strings()[w1 as usize]);
+                    self.stack[base + a as usize] = Value::Str(s);
                 }
-                Instruction::LoadNull(dst) => {
-                    self.stack[base + dst as usize] = Value::Null;
+                op::LoadNull => {
+                    self.stack[base + a as usize] = Value::Null;
                 }
-                Instruction::Move(dst, src) => {
-                    let val = self.stack[base + src as usize].cheap_clone();
-                    let abs_dst = base + dst as usize;
-                    // Sync to open upvalue cell if destination is captured
+                op::Move => {
+                    let val = self.stack[base + b as usize].cheap_clone();
+                    let abs_dst = base + a as usize;
+                    // Sync to upvalue store if destination is captured
                     if self.has_open_upvalues
                         && abs_dst < self.open_upvalues.len()
-                        && let Some(cell) = &self.open_upvalues[abs_dst]
+                        && let Some(uv_idx) = self.open_upvalues[abs_dst]
                     {
-                        *cell.borrow_mut() = val.cheap_clone();
+                        self.upvalue_store[uv_idx as usize] = val.cheap_clone();
                     }
                     self.stack[abs_dst] = val;
                 }
-                Instruction::LoadGlobal(dst, name_hash) => {
+                op::LoadGlobal => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    let name_hash = w1;
                     let val = if let Some((_, value)) = self.globals.get(&name_hash) {
                         value.clone()
                     } else {
@@ -890,100 +924,94 @@ impl VM {
                             .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
                         Value::Str(Rc::new(name))
                     };
-                    self.stack[base + dst as usize] = val;
+                    self.stack[base + a as usize] = val;
                 }
 
                 // ── Arithmetic (generic, quickenable) ────────────────
-                Instruction::Add(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    // Quicken based on observed operand types
-                    match (a_ref, b_ref) {
+                op::Add => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    // Quicken: rewrite opcode byte only
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QAddInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QAddInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QAddFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QAddFloat;
                         },
                         _ => {}
                     }
-                    self.exec_add_reg(base, dst, a, b)?;
+                    self.exec_add_reg(base, a, b, c)?;
                 }
-                Instruction::Sub(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Sub => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QSubInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QSubInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QSubFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QSubFloat;
                         },
                         _ => {}
                     }
                     self.exec_binary_arith_reg(
-                        base + dst as usize,
                         base + a as usize,
                         base + b as usize,
+                        base + c as usize,
                         i32::checked_sub,
                         i64::checked_sub,
                         |x, y| x - y,
                     )?;
                 }
-                Instruction::Mul(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Mul => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QMulInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QMulInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QMulFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QMulFloat;
                         },
                         _ => {}
                     }
                     self.exec_binary_arith_reg(
-                        base + dst as usize,
                         base + a as usize,
                         base + b as usize,
+                        base + c as usize,
                         i32::checked_mul,
                         i64::checked_mul,
                         |x, y| x * y,
                     )?;
                 }
-                Instruction::Div(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Div => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QDivInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QDivInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QDivFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QDivFloat;
                         },
                         _ => {}
                     }
-                    self.exec_div_reg(base, dst, a, b)?;
+                    self.exec_div_reg(base, a, b, c)?;
                 }
-                Instruction::Mod(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_mod_reg(base, dst, a, b)?;
+                op::Mod => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    self.exec_mod_reg(base, a, b, c)?;
                 }
 
                 // ── Unary ────────────────────────────────────────────
-                Instruction::Neg(dst, src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let val = &self.stack[base + src as usize];
+                op::Neg => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let val = &self.stack[base + b as usize];
                     let result = match val {
                         Value::I32(v) => match v.checked_neg() {
                             Some(r) => Value::I32(r),
@@ -1000,15 +1028,14 @@ impl VM {
                             );
                         }
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::Not(dst, src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let val = &self.stack[base + src as usize];
+                op::Not => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let val = &self.stack[base + b as usize];
                     match val {
                         Value::Bool(v) => {
-                            self.stack[base + dst as usize] = Value::Bool(!v);
+                            self.stack[base + a as usize] = Value::Bool(!v);
                         }
                         _ => {
                             return Err(
@@ -1019,154 +1046,150 @@ impl VM {
                 }
 
                 // ── Type coercion ──────────────────────────────────────
-                Instruction::IntToFloat(dst, src) => {
-                    let val = &self.stack[base + src as usize];
+                op::IntToFloat => {
+                    let val = &self.stack[base + b as usize];
                     let result = match val {
                         Value::I32(v) => Value::F64(*v as f64),
                         Value::I64(v) => Value::F64(*v as f64),
                         _ => unreachable!("IntToFloat: compiler guarantees int operand"),
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
 
                 // ── Comparison (generic, quickenable) ────────────────
-                Instruction::Eq(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Eq => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QEqInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QEqInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QEqFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QEqFloat;
                         },
                         _ => {}
                     }
-                    let eq = self.stack[base + a as usize] == self.stack[base + b as usize];
-                    self.stack[base + dst as usize] = Value::Bool(eq);
+                    let eq = self.stack[base + b as usize] == self.stack[base + c as usize];
+                    self.stack[base + a as usize] = Value::Bool(eq);
                 }
-                Instruction::Ne(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Ne => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QNeInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QNeInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QNeFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QNeFloat;
                         },
                         _ => {}
                     }
-                    let ne = self.stack[base + a as usize] != self.stack[base + b as usize];
-                    self.stack[base + dst as usize] = Value::Bool(ne);
+                    let ne = self.stack[base + b as usize] != self.stack[base + c as usize];
+                    self.stack[base + a as usize] = Value::Bool(ne);
                 }
-                Instruction::Lt(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Lt => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QLtInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QLtInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QLtFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QLtFloat;
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, dst, a, b, |x, y| x < y, |x, y| x < y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y)?;
                 }
-                Instruction::Le(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Le => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QLeInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QLeInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QLeFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QLeFloat;
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, dst, a, b, |x, y| x <= y, |x, y| x <= y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y)?;
                 }
-                Instruction::Gt(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Gt => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QGtInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QGtInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QGtFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QGtFloat;
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, dst, a, b, |x, y| x > y, |x, y| x > y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y)?;
                 }
-                Instruction::Ge(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    match (a_ref, b_ref) {
+                op::Ge => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    match (lhs, rhs) {
                         (Value::I32(_) | Value::I64(_), Value::I32(_) | Value::I64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QGeInt(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QGeInt;
                         },
                         (Value::F32(_) | Value::F64(_), Value::F32(_) | Value::F64(_)) => unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::QGeFloat(dst, a, b);
+                            *(ip.sub(1) as *mut u8) = op::QGeFloat;
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, dst, a, b, |x, y| x >= y, |x, y| x >= y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y)?;
                 }
 
                 // ── Logical ──────────────────────────────────────────
-                Instruction::And(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
+                op::And => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
                     match (
-                        &self.stack[base + a as usize],
                         &self.stack[base + b as usize],
+                        &self.stack[base + c as usize],
                     ) {
                         (Value::Bool(av), Value::Bool(bv)) => {
-                            self.stack[base + dst as usize] = Value::Bool(*av && *bv);
+                            self.stack[base + a as usize] = Value::Bool(*av && *bv);
                         }
                         _ => {
                             return Err(self.make_error(format!(
                                 "cannot apply '&&' to {} and {}",
-                                self.stack[base + a as usize].type_name(),
-                                self.stack[base + b as usize].type_name()
+                                self.stack[base + b as usize].type_name(),
+                                self.stack[base + c as usize].type_name()
                             )));
                         }
                     }
                 }
-                Instruction::Or(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
+                op::Or => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
                     match (
-                        &self.stack[base + a as usize],
                         &self.stack[base + b as usize],
+                        &self.stack[base + c as usize],
                     ) {
                         (Value::Bool(av), Value::Bool(bv)) => {
-                            self.stack[base + dst as usize] = Value::Bool(*av || *bv);
+                            self.stack[base + a as usize] = Value::Bool(*av || *bv);
                         }
                         _ => {
                             return Err(self.make_error(format!(
                                 "cannot apply '||' to {} and {}",
-                                self.stack[base + a as usize].type_name(),
-                                self.stack[base + b as usize].type_name()
+                                self.stack[base + b as usize].type_name(),
+                                self.stack[base + c as usize].type_name()
                             )));
                         }
                     }
                 }
 
                 // ── Return ───────────────────────────────────────────
-                Instruction::Return(src) => {
+                op::Return => {
+                    let src = a;
+                    #[cfg(feature = "debug-hooks")]
                     if self.has_debug_hooks {
                         self.fire_return_hook();
                     }
@@ -1198,7 +1221,8 @@ impl VM {
                     chunk_id = caller.chunk_id;
                     reload_ip!(self, chunk_id, caller.pc);
                 }
-                Instruction::ReturnNull => {
+                op::ReturnNull => {
+                    #[cfg(feature = "debug-hooks")]
                     if self.has_debug_hooks {
                         self.fire_return_hook();
                     }
@@ -1229,25 +1253,31 @@ impl VM {
                 }
 
                 // ── Jumps ────────────────────────────────────────────
-                Instruction::Jump(offset) => {
-                    ip = unsafe { ip.offset(offset as isize) };
+                op::Jump => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    ip = unsafe { ip.offset(w1 as i32 as isize) };
                 }
-                Instruction::JumpIfFalsy(src, offset) => {
-                    if self.stack[base + src as usize].is_falsy() {
-                        ip = unsafe { ip.offset(offset as isize) };
+                op::JumpIfFalsy => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    if self.stack[base + a as usize].is_falsy() {
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::JumpIfTruthy(src, offset) => {
-                    if !self.stack[base + src as usize].is_falsy() {
-                        ip = unsafe { ip.offset(offset as isize) };
+                op::JumpIfTruthy => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    if !self.stack[base + a as usize].is_falsy() {
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
 
                 // ── Function calls ───────────────────────────────────
-                Instruction::Call(base_reg, arg_count) => {
-                    unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_call_reg(base, base_reg, arg_count)?;
+                op::Call => {
+                    unsafe { self.frames.last_mut().unwrap_unchecked() }.pc = save_pc!();
+                    self.exec_call_reg(base, a, b)?;
+                    #[cfg(feature = "debug-hooks")]
                     if self.has_debug_hooks {
                         self.fire_call_hook();
                     }
@@ -1256,15 +1286,18 @@ impl VM {
                     chunk_id = f.chunk_id;
                     reload_ip!(self, chunk_id, f.pc);
                 }
-                Instruction::CallDirect(base_reg, func_idx_u16, arg_count) => {
-                    unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let func_idx = func_idx_u16 as usize;
+                op::CallDirect => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    unsafe { self.frames.last_mut().unwrap_unchecked() }.pc = save_pc!();
+                    let base_reg = a;
+                    let arg_count = b;
+                    let func_idx = w1 as usize;
                     let n = arg_count as usize;
                     let func = &self.functions[func_idx];
                     let max_regs = func.max_registers;
                     let func_has_rc = func.has_rc_values;
-                    let result_reg = base + base_reg as usize; // caller's result register
+                    let result_reg = base + base_reg as usize;
 
                     if func.is_variadic {
                         let min_args = func.arity.saturating_sub(1);
@@ -1274,7 +1307,6 @@ impl VM {
                                 func.name, min_args, arg_count
                             )));
                         }
-                        // Pack variadic args into array
                         let fixed_count = min_args as usize;
                         let variadic_count = n - fixed_count;
                         let arg_start = base + base_reg as usize;
@@ -1282,9 +1314,7 @@ impl VM {
                         let variadic_args: Vec<Value> = (0..variadic_count)
                             .map(|i| self.stack[variadic_start + i].cheap_clone())
                             .collect();
-                        // New frame base = arg_start (args already in place)
                         let new_base = arg_start;
-                        // Put variadic array after fixed args
                         self.stack[new_base + fixed_count] =
                             Value::Array(Rc::new(RefCell::new(variadic_args)));
                         self.ensure_registers(new_base, max_regs);
@@ -1294,7 +1324,7 @@ impl VM {
                             base: new_base,
                             result_reg,
                             max_registers: max_regs,
-                            has_rc_values: true, // variadic creates Array
+                            has_rc_values: true,
                             upvalues: None,
                         });
                     } else {
@@ -1304,9 +1334,6 @@ impl VM {
                                 func.name, func.arity, arg_count
                             )));
                         }
-                        // new_base must be > result_reg so truncate(frame.base) won't
-                        // destroy the result. With args, base_reg+0..arity-1 hold args,
-                        // but with 0 args new_base == result_reg — so bump by 1.
                         let new_base = if n == 0 {
                             result_reg + 1
                         } else {
@@ -1324,6 +1351,7 @@ impl VM {
                         });
                     }
 
+                    #[cfg(feature = "debug-hooks")]
                     if self.has_debug_hooks {
                         self.fire_call_hook();
                     }
@@ -1332,8 +1360,12 @@ impl VM {
                     chunk_id = ChunkId::Function(func_idx);
                     reload_ip!(self, chunk_id, 0);
                 }
-                Instruction::TailCallDirect(base_reg, func_idx_u16, arg_count) => {
-                    let func_idx = func_idx_u16 as usize;
+                op::TailCallDirect => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    let base_reg = a;
+                    let arg_count = b;
+                    let func_idx = w1 as usize;
                     let n = arg_count as usize;
                     let func = &self.functions[func_idx];
 
@@ -1370,49 +1402,51 @@ impl VM {
 
                     self.ensure_registers(base, max_regs);
 
+                    #[cfg(feature = "debug-hooks")]
                     if self.has_debug_hooks {
                         self.fire_call_hook();
                     }
                     chunk_id = ChunkId::Function(func_idx);
                     reload_ip!(self, chunk_id, 0);
                 }
-                Instruction::CallNative(_base_reg, _id, _arg_count) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
+                op::CallNative => {
+                    let _w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
                     return Err(self.make_error("native functions not yet supported".to_string()));
                 }
 
                 // ── Null handling ────────────────────────────────────
-                Instruction::NullCoalesce(dst, a, b) => {
-                    let val = &self.stack[base + a as usize];
+                op::NullCoalesce => {
+                    let val = &self.stack[base + b as usize];
                     if val.is_null() {
-                        let fallback = self.stack[base + b as usize].cheap_clone();
-                        self.stack[base + dst as usize] = fallback;
+                        let fallback = self.stack[base + c as usize].cheap_clone();
+                        self.stack[base + a as usize] = fallback;
                     } else {
                         let v = val.cheap_clone();
-                        self.stack[base + dst as usize] = v;
+                        self.stack[base + a as usize] = v;
                     }
                 }
 
                 // ── String concatenation ─────────────────────────────
-                Instruction::Concat(dst, a, b) => {
-                    let lhs = &self.stack[base + a as usize];
-                    let rhs = &self.stack[base + b as usize];
+                op::Concat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
                     let result = format!("{lhs}{rhs}");
-                    self.stack[base + dst as usize] = Value::Str(Rc::new(result));
+                    self.stack[base + a as usize] = Value::Str(Rc::new(result));
                 }
 
                 // ── Collections ──────────────────────────────────────
-                Instruction::MakeArray(dst, start, count) => {
-                    let n = count as usize;
-                    let s = base + start as usize;
+                op::MakeArray => {
+                    let n = c as usize;
+                    let s = base + b as usize;
                     let elements: Vec<Value> =
                         (0..n).map(|i| self.stack[s + i].cheap_clone()).collect();
-                    self.stack[base + dst as usize] = Value::Array(Rc::new(RefCell::new(elements)));
+                    self.stack[base + a as usize] = Value::Array(Rc::new(RefCell::new(elements)));
                 }
-                Instruction::MakeDict(dst, start, count) => {
-                    let n = count as usize;
-                    let s = base + start as usize;
+                op::MakeDict => {
+                    let n = c as usize;
+                    let s = base + b as usize;
                     let mut map = HashMap::new();
                     for i in 0..n {
                         let key = match &self.stack[s + i * 2] {
@@ -1422,46 +1456,94 @@ impl VM {
                         let val = self.stack[s + i * 2 + 1].cheap_clone();
                         map.insert(key, val);
                     }
-                    self.stack[base + dst as usize] = Value::Dict(Rc::new(RefCell::new(map)));
+                    self.stack[base + a as usize] = Value::Dict(Rc::new(RefCell::new(map)));
                 }
 
                 // ── Field/Index access ───────────────────────────────
-                Instruction::GetField(dst, obj_reg, name_hash) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_get_field_reg(base, dst, obj_reg, name_hash)?;
+                op::GetField => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    self.exec_get_field_reg(base, a, b, w1)?;
                 }
-                Instruction::SetField(obj_reg, name_hash, val_reg) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_set_field_reg(base, obj_reg, name_hash, val_reg)?;
+                op::SetField => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    self.exec_set_field_reg(base, a, w1, b)?;
                 }
-                Instruction::GetIndex(dst, obj_reg, idx_reg) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_get_index_reg(base, dst, obj_reg, idx_reg)?;
+                op::GetIndex => {
+                    // Inline Array+Int fast path; fallback to generic helper
+                    // GetIndex(dst, obj, idx) = a=dst, b=obj, c=idx
+                    if let Value::Array(arr) = &self.stack[base + b as usize] {
+                        let arr_rc = Rc::clone(arr);
+                        let idx_val = &self.stack[base + c as usize];
+                        let i = match idx_val {
+                            Value::I32(v) => *v as i64,
+                            Value::I64(v) => *v,
+                            _ => {
+                                self.frames.last_mut().unwrap().pc = save_pc!();
+                                self.exec_get_index_reg(base, a, b, c)?;
+                                continue;
+                            }
+                        };
+                        let arr = arr_rc.borrow();
+                        if i < 0 || i as usize >= arr.len() {
+                            self.frames.last_mut().unwrap().pc = save_pc!();
+                            return Err(self.make_error(format!(
+                                "array index {i} out of bounds (length {})",
+                                arr.len()
+                            )));
+                        }
+                        self.stack[base + a as usize] = arr[i as usize].clone();
+                    } else {
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_get_index_reg(base, a, b, c)?;
+                    }
                 }
-                Instruction::SetIndex(obj_reg, idx_reg, val_reg) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_set_index_reg(base, obj_reg, idx_reg, val_reg)?;
+                op::SetIndex => {
+                    // Inline Array+Int fast path; fallback to generic helper
+                    // SetIndex(obj, idx, val) = a=obj, b=idx, c=val
+                    if let Value::Array(arr) = &self.stack[base + a as usize] {
+                        let arr_rc = Rc::clone(arr);
+                        let idx_val = &self.stack[base + b as usize];
+                        let i = match idx_val {
+                            Value::I32(v) => *v as i64,
+                            Value::I64(v) => *v,
+                            _ => {
+                                self.frames.last_mut().unwrap().pc = save_pc!();
+                                self.exec_set_index_reg(base, a, b, c)?;
+                                continue;
+                            }
+                        };
+                        let value = self.stack[base + c as usize].clone();
+                        let mut arr = arr_rc.borrow_mut();
+                        if i < 0 || i as usize >= arr.len() {
+                            self.frames.last_mut().unwrap().pc = save_pc!();
+                            return Err(self.make_error(format!(
+                                "array index {i} out of bounds (length {})",
+                                arr.len()
+                            )));
+                        }
+                        arr[i as usize] = value;
+                    } else {
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_set_index_reg(base, a, b, c)?;
+                    }
                 }
 
                 // ── Coroutines ───────────────────────────────────────
-                Instruction::StartCoroutine(base_reg, arg_count) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_start_coroutine_reg(base, base_reg, arg_count)?;
+                op::StartCoroutine => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    self.exec_start_coroutine_reg(base, a, b)?;
                 }
-                Instruction::Yield => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
+                op::Yield => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
                     return Ok(RunResult::Yield(WaitCondition::OneFrame));
                 }
-                Instruction::YieldSeconds(src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let seconds = &self.stack[base + src as usize];
+                op::YieldSeconds => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let seconds = &self.stack[base + a as usize];
                     let secs = match seconds {
                         v @ (Value::F32(_) | Value::F64(_)) => v.as_f64(),
                         v @ (Value::I32(_) | Value::I64(_)) => v.as_i64() as f64,
@@ -1474,10 +1556,9 @@ impl VM {
                     };
                     return Ok(RunResult::Yield(WaitCondition::Seconds { remaining: secs }));
                 }
-                Instruction::YieldFrames(src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let frames_val = &self.stack[base + src as usize];
+                op::YieldFrames => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let frames_val = &self.stack[base + a as usize];
                     let n = match frames_val {
                         v @ (Value::I32(_) | Value::I64(_)) if v.as_i64() >= 0 => v.as_i64() as u32,
                         _ => {
@@ -1489,16 +1570,14 @@ impl VM {
                     };
                     return Ok(RunResult::Yield(WaitCondition::Frames { remaining: n }));
                 }
-                Instruction::YieldUntil(src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let predicate = self.stack[base + src as usize].cheap_clone();
+                op::YieldUntil => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let predicate = self.stack[base + a as usize].cheap_clone();
                     return Ok(RunResult::Yield(WaitCondition::Until { predicate }));
                 }
-                Instruction::YieldCoroutine(dst, src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let handle = &self.stack[base + src as usize];
+                op::YieldCoroutine => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let handle = &self.stack[base + b as usize];
                     let child_id = match handle {
                         Value::CoroutineHandle(id) => *id,
                         _ => {
@@ -1510,15 +1589,14 @@ impl VM {
                     };
                     return Ok(RunResult::Yield(WaitCondition::Coroutine {
                         child_id,
-                        result_reg: dst,
+                        result_reg: a,
                     }));
                 }
 
                 // ── Spread ───────────────────────────────────────────
-                Instruction::Spread(src) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let val = self.stack[base + src as usize].clone();
+                op::Spread => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    let val = self.stack[base + a as usize].clone();
                     match val {
                         Value::Array(arr) => {
                             let items = arr.borrow();
@@ -1535,139 +1613,137 @@ impl VM {
                 }
 
                 // ── Structs ──────────────────────────────────────────
-                Instruction::MakeStruct(dst, name_idx, start, field_count) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_make_struct_reg(base, dst, name_idx, start, field_count, chunk_id)?;
+                op::MakeStruct => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    // ABC+W: a=dst, b=start, c=count, w1=name_hash
+                    self.exec_make_struct_reg(base, a, w1, b, c, chunk_id)?;
                 }
 
                 // ── Classes ─────────────────────────────────────────
-                Instruction::MakeClass(dst, name_idx, start, field_count) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_make_class_reg(base, dst, name_idx, start, field_count, chunk_id)?;
+                op::MakeClass => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    self.exec_make_class_reg(base, a, w1, b, c, chunk_id)?;
                 }
 
                 // ── Method calls ─────────────────────────────────────
-                Instruction::CallMethod(base_reg, name_hash, arg_count) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_call_method_reg(base, base_reg, name_hash, arg_count)?;
+                op::CallMethod => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    // AB+W: a=base_reg, b=arg_count, w1=name_hash
+                    self.exec_call_method_reg(base, a, w1, b)?;
                 }
 
                 // ── Closures ─────────────────────────────────────────
-                Instruction::LoadUpvalue(dst, idx) => {
-                    let val = self
+                op::LoadUpvalue => {
+                    let uv_idx = self
                         .current_frame()
                         .upvalues
                         .as_ref()
-                        .expect("LoadUpvalue in non-closure frame")[idx as usize]
-                        .borrow()
-                        .clone();
-                    self.stack[base + dst as usize] = val;
+                        .expect("LoadUpvalue in non-closure frame")[b as usize];
+                    self.stack[base + a as usize] =
+                        self.upvalue_store[uv_idx as usize].cheap_clone();
                 }
-                Instruction::StoreUpvalue(src, idx) => {
-                    let val = self.stack[base + src as usize].cheap_clone();
-                    let cell = Rc::clone(
-                        &self
-                            .current_frame()
-                            .upvalues
-                            .as_ref()
-                            .expect("StoreUpvalue in non-closure frame")[idx as usize],
-                    );
-                    *cell.borrow_mut() = val;
-                    // Write-through: if this upvalue is still open (pointing to a
-                    // parent stack slot), sync the value back to the stack so the
-                    // parent function sees the update when reading the register.
+                op::StoreUpvalue => {
+                    let val = self.stack[base + a as usize].cheap_clone();
+                    let uv_idx = self
+                        .current_frame()
+                        .upvalues
+                        .as_ref()
+                        .expect("StoreUpvalue in non-closure frame")[b as usize]
+                        as usize;
+                    self.upvalue_store[uv_idx] = val.cheap_clone();
+                    // Sync stack slot if this upvalue is still open
                     if self.has_open_upvalues {
                         for (abs_slot, entry) in self.open_upvalues.iter().enumerate() {
-                            if let Some(open_cell) = entry
-                                && Rc::ptr_eq(&cell, open_cell)
-                            {
-                                self.stack[abs_slot] = cell.borrow().cheap_clone();
+                            if *entry == Some(uv_idx as u32) {
+                                self.stack[abs_slot] = val;
                                 break;
                             }
                         }
                     }
                 }
-                Instruction::MakeClosure(dst, func_idx) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    self.exec_make_closure_reg(base, dst, func_idx)?;
+                op::MakeClosure => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    self.exec_make_closure_reg(base, a, bx)?;
                 }
-                Instruction::CloseUpvalue(slot) => {
-                    let abs = base + slot as usize;
+                op::CloseUpvalue => {
+                    let abs = base + a as usize;
                     if abs < self.open_upvalues.len()
-                        && let Some(cell) = self.open_upvalues[abs].take()
+                        && let Some(uv_idx) = self.open_upvalues[abs].take()
                     {
-                        *cell.borrow_mut() = self.stack[abs].clone();
+                        self.upvalue_store[uv_idx as usize] = self.stack[abs].clone();
                         self.has_open_upvalues = self.open_upvalues.iter().any(|e| e.is_some());
                     }
                 }
 
                 // ── AoSoA conversion (mobile only) ────────────────
                 #[cfg(feature = "mobile-aosoa")]
-                Instruction::ConvertToAoSoA(src) => {
-                    self.exec_convert_to_aosoa_reg(base, src)?;
+                op::ConvertToAoSoA => {
+                    self.exec_convert_to_aosoa_reg(base, a)?;
                 }
 
                 // ── Typed arithmetic (compiler-guaranteed types) ────────
-                Instruction::AddInt(dst, a, b) => {
-                    let abs_a = base + a as usize;
+                op::AddInt => {
                     let abs_b = base + b as usize;
-                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                    let abs_c = base + c as usize;
+                    let result = match (&self.stack[abs_b], &self.stack[abs_c]) {
                         (Value::I32(av), Value::I32(bv)) => match av.checked_add(*bv) {
                             Some(r) => Value::I32(r),
                             None => Value::I64(*av as i64 + *bv as i64),
                         },
                         _ => {
-                            let r = self.stack[abs_a]
+                            let r = self.stack[abs_b]
                                 .as_i64()
-                                .checked_add(self.stack[abs_b].as_i64())
+                                .checked_add(self.stack[abs_c].as_i64())
                                 .ok_or_else(|| self.make_error("integer overflow".into()))?;
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::AddFloat(dst, a, b) => {
+                op::AddFloat => {
                     let result = Value::promote_float_pair_op(
-                        &self.stack[base + a as usize],
                         &self.stack[base + b as usize],
+                        &self.stack[base + c as usize],
                         |x, y| x + y,
                     );
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::SubInt(dst, a, b) => {
-                    let abs_a = base + a as usize;
+                op::SubInt => {
                     let abs_b = base + b as usize;
-                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                    let abs_c = base + c as usize;
+                    let result = match (&self.stack[abs_b], &self.stack[abs_c]) {
                         (Value::I32(av), Value::I32(bv)) => match av.checked_sub(*bv) {
                             Some(r) => Value::I32(r),
                             None => Value::I64(*av as i64 - *bv as i64),
                         },
                         _ => {
-                            let r = self.stack[abs_a]
+                            let r = self.stack[abs_b]
                                 .as_i64()
-                                .checked_sub(self.stack[abs_b].as_i64())
+                                .checked_sub(self.stack[abs_c].as_i64())
                                 .ok_or_else(|| self.make_error("integer overflow".into()))?;
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::SubFloat(dst, a, b) => {
+                op::SubFloat => {
                     let result = Value::promote_float_pair_op(
-                        &self.stack[base + a as usize],
                         &self.stack[base + b as usize],
+                        &self.stack[base + c as usize],
                         |x, y| x - y,
                     );
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::MulInt(dst, a, b) => {
-                    let abs_a = base + a as usize;
+                op::MulInt => {
                     let abs_b = base + b as usize;
-                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                    let abs_c = base + c as usize;
+                    let result = match (&self.stack[abs_b], &self.stack[abs_c]) {
                         (Value::I32(av), Value::I32(bv)) => match av.checked_mul(*bv) {
                             Some(r) => Value::I32(r),
                             None => {
@@ -1678,63 +1754,64 @@ impl VM {
                             }
                         },
                         _ => {
-                            let r = self.stack[abs_a]
+                            let r = self.stack[abs_b]
                                 .as_i64()
-                                .checked_mul(self.stack[abs_b].as_i64())
+                                .checked_mul(self.stack[abs_c].as_i64())
                                 .ok_or_else(|| self.make_error("integer overflow".into()))?;
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::MulFloat(dst, a, b) => {
+                op::MulFloat => {
                     let result = Value::promote_float_pair_op(
-                        &self.stack[base + a as usize],
                         &self.stack[base + b as usize],
+                        &self.stack[base + c as usize],
                         |x, y| x * y,
                     );
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::DivInt(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    let abs_a = base + a as usize;
+                op::DivInt => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
                     let abs_b = base + b as usize;
-                    if self.stack[abs_b].as_i64() == 0 {
+                    let abs_c = base + c as usize;
+                    if self.stack[abs_c].as_i64() == 0 {
                         return Err(self.make_error("division by zero".to_string()));
                     }
-                    let result = match (&self.stack[abs_a], &self.stack[abs_b]) {
+                    let result = match (&self.stack[abs_b], &self.stack[abs_c]) {
                         (Value::I32(av), Value::I32(bv)) => match av.checked_div(*bv) {
                             Some(r) => Value::I32(r),
                             None => Value::I64(*av as i64 / *bv as i64),
                         },
                         _ => {
-                            let r = self.stack[abs_a]
+                            let r = self.stack[abs_b]
                                 .as_i64()
-                                .checked_div(self.stack[abs_b].as_i64())
+                                .checked_div(self.stack[abs_c].as_i64())
                                 .ok_or_else(|| self.make_error("integer overflow".into()))?;
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::DivFloat(dst, a, b) => {
-                    self.frames.last_mut().unwrap().pc =
-                        unsafe { ip.offset_from(ip_base) as usize };
-                    if self.stack[base + b as usize].as_f64() == 0.0 {
+                op::DivFloat => {
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    if self.stack[base + c as usize].as_f64() == 0.0 {
                         return Err(self.make_error("division by zero".to_string()));
                     }
                     let result = Value::promote_float_pair_op(
-                        &self.stack[base + a as usize],
                         &self.stack[base + b as usize],
+                        &self.stack[base + c as usize],
                         |x, y| x / y,
                     );
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
 
                 // ── Immediate arithmetic ────────────────────────────────
-                Instruction::AddIntImm(dst, src, imm) => {
-                    let abs_src = base + src as usize;
+                op::AddIntImm => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    let imm = w1 as i32;
+                    let abs_src = base + b as usize;
                     let result = match &self.stack[abs_src] {
                         Value::I32(v) => match v.checked_add(imm) {
                             Some(r) => Value::I32(r),
@@ -1746,10 +1823,13 @@ impl VM {
                         ),
                         _ => unreachable!(),
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
-                Instruction::SubIntImm(dst, src, imm) => {
-                    let abs_src = base + src as usize;
+                op::SubIntImm => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
+                    let imm = w1 as i32;
+                    let abs_src = base + b as usize;
                     let result = match &self.stack[abs_src] {
                         Value::I32(v) => match v.checked_sub(imm) {
                             Some(r) => Value::I32(r),
@@ -1761,556 +1841,458 @@ impl VM {
                         ),
                         _ => unreachable!(),
                     };
-                    self.stack[base + dst as usize] = result;
+                    self.stack[base + a as usize] = result;
                 }
 
                 // ── Typed comparison ─────────────────────────────────────
-                Instruction::LtInt(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_i64()
-                        < self.stack[base + b as usize].as_i64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::LtInt => {
+                    let r = self.stack[base + b as usize].as_i64()
+                        < self.stack[base + c as usize].as_i64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::LtFloat(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_f64()
-                        < self.stack[base + b as usize].as_f64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::LtFloat => {
+                    let r = self.stack[base + b as usize].as_f64()
+                        < self.stack[base + c as usize].as_f64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::LeInt(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_i64()
-                        <= self.stack[base + b as usize].as_i64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::LeInt => {
+                    let r = self.stack[base + b as usize].as_i64()
+                        <= self.stack[base + c as usize].as_i64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::LeFloat(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_f64()
-                        <= self.stack[base + b as usize].as_f64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::LeFloat => {
+                    let r = self.stack[base + b as usize].as_f64()
+                        <= self.stack[base + c as usize].as_f64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::GtInt(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_i64()
-                        > self.stack[base + b as usize].as_i64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::GtInt => {
+                    let r = self.stack[base + b as usize].as_i64()
+                        > self.stack[base + c as usize].as_i64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::GtFloat(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_f64()
-                        > self.stack[base + b as usize].as_f64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::GtFloat => {
+                    let r = self.stack[base + b as usize].as_f64()
+                        > self.stack[base + c as usize].as_f64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::GeInt(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_i64()
-                        >= self.stack[base + b as usize].as_i64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::GeInt => {
+                    let r = self.stack[base + b as usize].as_i64()
+                        >= self.stack[base + c as usize].as_i64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::GeFloat(dst, a, b) => {
-                    let r = self.stack[base + a as usize].as_f64()
-                        >= self.stack[base + b as usize].as_f64();
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::GeFloat => {
+                    let r = self.stack[base + b as usize].as_f64()
+                        >= self.stack[base + c as usize].as_f64();
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::EqInt(dst, a, b) => {
-                    let r = self.stack[base + a as usize] == self.stack[base + b as usize];
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::EqInt => {
+                    let r = self.stack[base + b as usize] == self.stack[base + c as usize];
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::EqFloat(dst, a, b) => {
-                    let r = self.stack[base + a as usize] == self.stack[base + b as usize];
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::EqFloat => {
+                    let r = self.stack[base + b as usize] == self.stack[base + c as usize];
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::NeInt(dst, a, b) => {
-                    let r = self.stack[base + a as usize] != self.stack[base + b as usize];
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::NeInt => {
+                    let r = self.stack[base + b as usize] != self.stack[base + c as usize];
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
-                Instruction::NeFloat(dst, a, b) => {
-                    let r = self.stack[base + a as usize] != self.stack[base + b as usize];
-                    self.stack[base + dst as usize] = Value::Bool(r);
+                op::NeFloat => {
+                    let r = self.stack[base + b as usize] != self.stack[base + c as usize];
+                    self.stack[base + a as usize] = Value::Bool(r);
                 }
 
                 // ── Fused compare-and-jump (int) ────────────────────────
-                Instruction::TestLtInt(a, b, offset) => {
+                op::TestLtInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     if self.stack[base + a as usize].as_i64()
                         >= self.stack[base + b as usize].as_i64()
                     {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestLeInt(a, b, offset) => {
+                op::TestLeInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     if self.stack[base + a as usize].as_i64()
                         > self.stack[base + b as usize].as_i64()
                     {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestGtInt(a, b, offset) => {
+                op::TestGtInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     if self.stack[base + a as usize].as_i64()
                         <= self.stack[base + b as usize].as_i64()
                     {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestGeInt(a, b, offset) => {
+                op::TestGeInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     if self.stack[base + a as usize].as_i64()
                         < self.stack[base + b as usize].as_i64()
                     {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestEqInt(a, b, offset) => {
+                op::TestEqInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     if self.stack[base + a as usize] != self.stack[base + b as usize] {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestNeInt(a, b, offset) => {
+                op::TestNeInt => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     if self.stack[base + a as usize] == self.stack[base + b as usize] {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
 
-                // ── Fused compare-and-jump (int immediate) ──────────────
-                Instruction::TestLtIntImm(a, imm, offset) => {
-                    if self.stack[base + a as usize].as_i64() >= imm as i64 {
-                        ip = unsafe { ip.offset(offset as isize) };
-                    }
-                }
-                Instruction::TestLeIntImm(a, imm, offset) => {
-                    if self.stack[base + a as usize].as_i64() > imm as i64 {
-                        ip = unsafe { ip.offset(offset as isize) };
-                    }
-                }
-                Instruction::TestGtIntImm(a, imm, offset) => {
-                    if self.stack[base + a as usize].as_i64() <= imm as i64 {
-                        ip = unsafe { ip.offset(offset as isize) };
-                    }
-                }
-                Instruction::TestGeIntImm(a, imm, offset) => {
-                    if self.stack[base + a as usize].as_i64() < imm as i64 {
-                        ip = unsafe { ip.offset(offset as isize) };
-                    }
-                }
+                // ── Fused compare-and-jump (int immediate, DEAD) ──────────
+                op::TestLtIntImm | op::TestLeIntImm | op::TestGtIntImm | op::TestGeIntImm => unsafe {
+                    std::hint::unreachable_unchecked()
+                },
 
                 // ── Fused compare-and-jump (float) ──────────────────────
-                Instruction::TestLtFloat(a, b, offset) => {
+                op::TestLtFloat => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     let va = self.stack[base + a as usize].as_f64();
                     let vb = self.stack[base + b as usize].as_f64();
                     if !matches!(va.partial_cmp(&vb), Some(std::cmp::Ordering::Less)) {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestLeFloat(a, b, offset) => {
+                op::TestLeFloat => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     let va = self.stack[base + a as usize].as_f64();
                     let vb = self.stack[base + b as usize].as_f64();
                     if !matches!(
                         va.partial_cmp(&vb),
                         Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
                     ) {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestGtFloat(a, b, offset) => {
+                op::TestGtFloat => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     let va = self.stack[base + a as usize].as_f64();
                     let vb = self.stack[base + b as usize].as_f64();
                     if !matches!(va.partial_cmp(&vb), Some(std::cmp::Ordering::Greater)) {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
-                Instruction::TestGeFloat(a, b, offset) => {
+                op::TestGeFloat => {
+                    let w1 = unsafe { *ip };
+                    ip = unsafe { ip.add(1) };
                     let va = self.stack[base + a as usize].as_f64();
                     let vb = self.stack[base + b as usize].as_f64();
                     if !matches!(
                         va.partial_cmp(&vb),
                         Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
                     ) {
-                        ip = unsafe { ip.offset(offset as isize) };
+                        ip = unsafe { ip.offset(w1 as i32 as isize) };
                     }
                 }
 
                 // ── Quickened arithmetic (runtime-specialized) ──────────
-                Instruction::QAddInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        let result = match (a_ref, b_ref) {
+                // In quickened ops: a=dst, b=lhs, c=rhs (same ABC layout)
+                op::QAddInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        let result = match (lhs, rhs) {
                             (Value::I32(av), Value::I32(bv)) => match av.checked_add(*bv) {
                                 Some(r) => Value::I32(r),
                                 None => Value::I64(*av as i64 + *bv as i64),
                             },
                             _ => {
-                                let r = a_ref
-                                    .as_i64()
-                                    .checked_add(b_ref.as_i64())
+                                let r = lhs.as_i64().checked_add(rhs.as_i64())
                                     .ok_or_else(|| self.make_error("integer overflow".into()))?;
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + dst as usize] = result;
+                        self.stack[base + a as usize] = result;
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Add(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_add_reg(base, dst, a, b)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Add; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_add_reg(base, a, b, c)?;
                     }
                 }
-                Instruction::QAddFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x + y);
+                op::QAddFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] =
+                            Value::promote_float_pair_op(lhs, rhs, |x, y| x + y);
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Add(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_add_reg(base, dst, a, b)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Add; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_add_reg(base, a, b, c)?;
                     }
                 }
-                Instruction::QSubInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        let result = match (a_ref, b_ref) {
+                op::QSubInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        let result = match (lhs, rhs) {
                             (Value::I32(av), Value::I32(bv)) => match av.checked_sub(*bv) {
                                 Some(r) => Value::I32(r),
                                 None => Value::I64(*av as i64 - *bv as i64),
                             },
                             _ => {
-                                let r = a_ref
-                                    .as_i64()
-                                    .checked_sub(b_ref.as_i64())
+                                let r = lhs.as_i64().checked_sub(rhs.as_i64())
                                     .ok_or_else(|| self.make_error("integer overflow".into()))?;
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + dst as usize] = result;
+                        self.stack[base + a as usize] = result;
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Sub(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith_reg(
-                            base + dst as usize,
-                            base + a as usize,
-                            base + b as usize,
-                            i32::checked_sub,
-                            i64::checked_sub,
-                            |x, y| x - y,
-                        )?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Sub; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_binary_arith_reg(base + a as usize, base + b as usize, base + c as usize, i32::checked_sub, i64::checked_sub, |x, y| x - y)?;
                     }
                 }
-                Instruction::QSubFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x - y);
+                op::QSubFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] =
+                            Value::promote_float_pair_op(lhs, rhs, |x, y| x - y);
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Sub(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith_reg(
-                            base + dst as usize,
-                            base + a as usize,
-                            base + b as usize,
-                            i32::checked_sub,
-                            i64::checked_sub,
-                            |x, y| x - y,
-                        )?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Sub; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_binary_arith_reg(base + a as usize, base + b as usize, base + c as usize, i32::checked_sub, i64::checked_sub, |x, y| x - y)?;
                     }
                 }
-
-                Instruction::QMulInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        let result = match (a_ref, b_ref) {
+                op::QMulInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        let result = match (lhs, rhs) {
                             (Value::I32(av), Value::I32(bv)) => match av.checked_mul(*bv) {
                                 Some(r) => Value::I32(r),
                                 None => Value::I64(*av as i64 * *bv as i64),
                             },
                             _ => {
-                                let r = a_ref
-                                    .as_i64()
-                                    .checked_mul(b_ref.as_i64())
+                                let r = lhs.as_i64().checked_mul(rhs.as_i64())
                                     .ok_or_else(|| self.make_error("integer overflow".into()))?;
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + dst as usize] = result;
+                        self.stack[base + a as usize] = result;
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Mul(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith_reg(
-                            base + dst as usize,
-                            base + a as usize,
-                            base + b as usize,
-                            i32::checked_mul,
-                            i64::checked_mul,
-                            |x, y| x * y,
-                        )?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Mul; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_binary_arith_reg(base + a as usize, base + b as usize, base + c as usize, i32::checked_mul, i64::checked_mul, |x, y| x * y)?;
                     }
                 }
-                Instruction::QMulFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x * y);
+                op::QMulFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] =
+                            Value::promote_float_pair_op(lhs, rhs, |x, y| x * y);
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Mul(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_binary_arith_reg(
-                            base + dst as usize,
-                            base + a as usize,
-                            base + b as usize,
-                            i32::checked_mul,
-                            i64::checked_mul,
-                            |x, y| x * y,
-                        )?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Mul; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_binary_arith_reg(base + a as usize, base + b as usize, base + c as usize, i32::checked_mul, i64::checked_mul, |x, y| x * y)?;
                     }
                 }
-
-                Instruction::QDivInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        if b_ref.as_i64() == 0 {
+                op::QDivInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        if rhs.as_i64() == 0 {
                             return Err(self.make_error("division by zero".to_string()));
                         }
-                        let result = match (a_ref, b_ref) {
+                        let result = match (lhs, rhs) {
                             (Value::I32(av), Value::I32(bv)) => match av.checked_div(*bv) {
                                 Some(r) => Value::I32(r),
                                 None => Value::I64(*av as i64 / *bv as i64),
                             },
                             _ => {
-                                let r = a_ref
-                                    .as_i64()
-                                    .checked_div(b_ref.as_i64())
+                                let r = lhs.as_i64().checked_div(rhs.as_i64())
                                     .ok_or_else(|| self.make_error("integer overflow".into()))?;
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + dst as usize] = result;
+                        self.stack[base + a as usize] = result;
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Div(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_div_reg(base, dst, a, b)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Div; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_div_reg(base, a, b, c)?;
                     }
                 }
-                Instruction::QDivFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        if b_ref.as_f64() == 0.0 {
+                op::QDivFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        if rhs.as_f64() == 0.0 {
                             return Err(self.make_error("division by zero".to_string()));
                         }
-                        self.stack[base + dst as usize] =
-                            Value::promote_float_pair_op(a_ref, b_ref, |x, y| x / y);
+                        self.stack[base + a as usize] =
+                            Value::promote_float_pair_op(lhs, rhs, |x, y| x / y);
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Div(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_div_reg(base, dst, a, b)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Div; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_div_reg(base, a, b, c)?;
                     }
                 }
 
                 // ── Quickened comparison ─────────────────────────────────
-                Instruction::QLtInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_i64() < b_ref.as_i64());
+                op::QLtInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_i64() < rhs.as_i64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Lt(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x < y, |x, y| x < y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Lt; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y)?;
                     }
                 }
-                Instruction::QLtFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_f64() < b_ref.as_f64());
+                op::QLtFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_f64() < rhs.as_f64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Lt(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x < y, |x, y| x < y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Lt; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y)?;
                     }
                 }
-
-                Instruction::QLeInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_i64() <= b_ref.as_i64());
+                op::QLeInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_i64() <= rhs.as_i64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Le(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x <= y, |x, y| x <= y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Le; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y)?;
                     }
                 }
-                Instruction::QLeFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_f64() <= b_ref.as_f64());
+                op::QLeFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_f64() <= rhs.as_f64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Le(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x <= y, |x, y| x <= y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Le; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y)?;
                     }
                 }
-
-                Instruction::QGtInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_i64() > b_ref.as_i64());
+                op::QGtInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_i64() > rhs.as_i64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Gt(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x > y, |x, y| x > y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Gt; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y)?;
                     }
                 }
-                Instruction::QGtFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_f64() > b_ref.as_f64());
+                op::QGtFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_f64() > rhs.as_f64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Gt(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x > y, |x, y| x > y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Gt; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y)?;
                     }
                 }
-
-                Instruction::QGeInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_i64() >= b_ref.as_i64());
+                op::QGeInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_i64() >= rhs.as_i64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ge(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x >= y, |x, y| x >= y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Ge; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y)?;
                     }
                 }
-                Instruction::QGeFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_f64() >= b_ref.as_f64());
+                op::QGeFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_f64() >= rhs.as_f64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ge(dst, a, b);
-                        }
-                        self.frames.last_mut().unwrap().pc =
-                            unsafe { ip.offset_from(ip_base) as usize };
-                        self.exec_comparison_reg(base, dst, a, b, |x, y| x >= y, |x, y| x >= y)?;
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Ge; }
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y)?;
                     }
                 }
-
-                Instruction::QEqInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_i64() == b_ref.as_i64());
+                op::QEqInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_i64() == rhs.as_i64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Eq(dst, a, b);
-                        }
-                        let eq = self.stack[base + a as usize] == self.stack[base + b as usize];
-                        self.stack[base + dst as usize] = Value::Bool(eq);
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Eq; }
+                        let eq = self.stack[base + b as usize] == self.stack[base + c as usize];
+                        self.stack[base + a as usize] = Value::Bool(eq);
                     }
                 }
-                Instruction::QEqFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_f64() == b_ref.as_f64());
+                op::QEqFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_f64() == rhs.as_f64());
                     } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Eq(dst, a, b);
-                        }
-                        let eq = self.stack[base + a as usize] == self.stack[base + b as usize];
-                        self.stack[base + dst as usize] = Value::Bool(eq);
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Eq; }
+                        let eq = self.stack[base + b as usize] == self.stack[base + c as usize];
+                        self.stack[base + a as usize] = Value::Bool(eq);
+                    }
+                }
+                op::QNeInt => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_int() && rhs.is_int() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_i64() != rhs.as_i64());
+                    } else {
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Ne; }
+                        let ne = self.stack[base + b as usize] != self.stack[base + c as usize];
+                        self.stack[base + a as usize] = Value::Bool(ne);
+                    }
+                }
+                op::QNeFloat => {
+                    let lhs = &self.stack[base + b as usize];
+                    let rhs = &self.stack[base + c as usize];
+                    if lhs.is_float() && rhs.is_float() {
+                        self.stack[base + a as usize] = Value::Bool(lhs.as_f64() != rhs.as_f64());
+                    } else {
+                        unsafe { *(ip.sub(1) as *mut u8) = op::Ne; }
+                        let ne = self.stack[base + b as usize] != self.stack[base + c as usize];
+                        self.stack[base + a as usize] = Value::Bool(ne);
                     }
                 }
 
-                Instruction::QNeInt(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_int() && b_ref.is_int() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_i64() != b_ref.as_i64());
-                    } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ne(dst, a, b);
-                        }
-                        let ne = self.stack[base + a as usize] != self.stack[base + b as usize];
-                        self.stack[base + dst as usize] = Value::Bool(ne);
+                // ── Unknown opcode ─────────────────────────────────────
+                _ => {
+                    // Skip the extra word for 2-word instructions
+                    let words = INSTR_WORDS[opc as usize] as usize;
+                    if words > 1 {
+                        ip = unsafe { ip.add(words - 1) };
                     }
-                }
-                Instruction::QNeFloat(dst, a, b) => {
-                    let a_ref = &self.stack[base + a as usize];
-                    let b_ref = &self.stack[base + b as usize];
-                    if a_ref.is_float() && b_ref.is_float() {
-                        self.stack[base + dst as usize] =
-                            Value::Bool(a_ref.as_f64() != b_ref.as_f64());
-                    } else {
-                        unsafe {
-                            *(ip.sub(1) as *mut Instruction) = Instruction::Ne(dst, a, b);
-                        }
-                        let ne = self.stack[base + a as usize] != self.stack[base + b as usize];
-                        self.stack[base + dst as usize] = Value::Bool(ne);
-                    }
+                    self.frames.last_mut().unwrap().pc = save_pc!();
+                    return Err(self.make_error(format!("unknown opcode {opc}")));
                 }
             }
         }
@@ -2369,23 +2351,26 @@ impl VM {
 
     // ── Upvalue helpers ──────────────────────────────────────────
 
-    fn capture_local(&mut self, abs_slot: usize) -> Rc<RefCell<Value>> {
+    /// Captures a local variable into the flat upvalue store.
+    /// Returns the store index. Reuses existing capture if already open.
+    fn capture_local(&mut self, abs_slot: usize) -> u32 {
         if abs_slot < self.open_upvalues.len()
-            && let Some(existing) = &self.open_upvalues[abs_slot]
+            && let Some(existing_idx) = self.open_upvalues[abs_slot]
         {
-            return Rc::clone(existing);
+            return existing_idx;
         }
-        let cell = Rc::new(RefCell::new(self.stack[abs_slot].clone()));
+        let idx = self.upvalue_store.len() as u32;
+        self.upvalue_store.push(self.stack[abs_slot].clone());
         if abs_slot >= self.open_upvalues.len() {
             self.open_upvalues.resize(abs_slot + 1, None);
         }
-        self.open_upvalues[abs_slot] = Some(Rc::clone(&cell));
+        self.open_upvalues[abs_slot] = Some(idx);
         self.has_open_upvalues = true;
-        cell
+        idx
     }
 
     /// Closes all open upvalues at or above `min_slot` by syncing the
-    /// current stack value into their heap cells, then removing them
+    /// current stack value into the flat upvalue store, then removing them
     /// from the open set.
     fn close_upvalues_above(&mut self, min_slot: usize) {
         let end = self.open_upvalues.len();
@@ -2394,10 +2379,10 @@ impl VM {
         }
         let mut any_remaining = false;
         for slot in min_slot..end {
-            if let Some(cell) = self.open_upvalues[slot].take()
+            if let Some(uv_idx) = self.open_upvalues[slot].take()
                 && slot < self.stack.len()
             {
-                *cell.borrow_mut() = self.stack[slot].clone();
+                self.upvalue_store[uv_idx as usize] = self.stack[slot].clone();
             }
         }
         // Check if any open upvalues remain below min_slot
@@ -2632,7 +2617,7 @@ impl VM {
                 base: new_base,
                 result_reg: callee_abs,
                 max_registers: max_regs,
-                has_rc_values: true, // closure has upvalue Rc's
+                has_rc_values: true, // closures may capture Rc-bearing values
                 upvalues: Some(upvalues),
             });
 
@@ -2882,11 +2867,12 @@ impl VM {
             }
 
             let body = Rc::clone(&method.body);
-            let args: Vec<Value> = (0..n)
-                .map(|i| self.stack[receiver_abs + 1 + i].clone())
-                .collect();
-
-            let result = (body)(&receiver, &args).map_err(|msg| self.make_error(msg))?;
+            // Pass a direct slice of the stack — no Vec allocation.
+            let arg_start = receiver_abs + 1;
+            let result = {
+                let args = &self.stack[arg_start..arg_start + n];
+                (body)(&receiver, args).map_err(|msg| self.make_error(msg))?
+            };
             self.stack[receiver_abs] = result;
             return Ok(());
         }
@@ -3346,7 +3332,7 @@ impl VM {
         dst: u8,
         name_idx: u32,
         start: u8,
-        field_count: u16,
+        field_count: u8,
         chunk_id: ChunkId,
     ) -> Result<(), RuntimeError> {
         let chunk = self.chunk_for(chunk_id);
@@ -3384,7 +3370,7 @@ impl VM {
         dst: u8,
         name_idx: u32,
         start: u8,
-        field_count: u16,
+        field_count: u8,
         chunk_id: ChunkId,
     ) -> Result<(), RuntimeError> {
         let chunk = self.chunk_for(chunk_id);
@@ -3439,27 +3425,27 @@ impl VM {
         for desc in &descriptors {
             if desc.is_local {
                 let abs_slot = self.current_frame().base + desc.index as usize;
-                let cell = self.capture_local(abs_slot);
-                upvalues.push(cell);
+                let idx = self.capture_local(abs_slot);
+                upvalues.push(idx);
             } else {
                 let parent_uv = self
                     .current_frame()
                     .upvalues
                     .as_ref()
                     .expect("transitive capture requires parent closure");
-                upvalues.push(Rc::clone(&parent_uv[desc.index as usize]));
+                upvalues.push(parent_uv[desc.index as usize]);
             }
         }
 
         let abs_dst = base + dst as usize;
         self.stack[abs_dst] = Value::Closure(Box::new(ClosureData { func_idx, upvalues }));
         // If this closure captured its own slot (self-recursion), the upvalue
-        // cell was created before the closure was stored. Sync it now.
+        // store was populated before the closure was stored. Sync it now.
         if self.has_open_upvalues
             && abs_dst < self.open_upvalues.len()
-            && let Some(cell) = &self.open_upvalues[abs_dst]
+            && let Some(uv_idx) = self.open_upvalues[abs_dst]
         {
-            *cell.borrow_mut() = self.stack[abs_dst].cheap_clone();
+            self.upvalue_store[uv_idx as usize] = self.stack[abs_dst].cheap_clone();
         }
         Ok(())
     }
@@ -3533,6 +3519,7 @@ impl VM {
             return_value: None,
             owner_id: None,
             open_upvalues: Vec::new(),
+            upvalue_store: Vec::new(),
             children: Vec::new(),
         };
 
@@ -3764,6 +3751,7 @@ impl VM {
         std::mem::swap(&mut self.stack, &mut coro.stack);
         std::mem::swap(&mut self.frames, &mut coro.frames);
         std::mem::swap(&mut self.open_upvalues, &mut coro.open_upvalues);
+        std::mem::swap(&mut self.upvalue_store, &mut coro.upvalue_store);
         self.active_coroutine = Some(idx);
 
         // Run until yield or return
@@ -3774,6 +3762,7 @@ impl VM {
         std::mem::swap(&mut self.stack, &mut coro.stack);
         std::mem::swap(&mut self.frames, &mut coro.frames);
         std::mem::swap(&mut self.open_upvalues, &mut coro.open_upvalues);
+        std::mem::swap(&mut self.upvalue_store, &mut coro.upvalue_store);
         self.active_coroutine = None;
 
         match result {
@@ -3925,11 +3914,12 @@ impl VM {
 
     /// Checks for line changes, fires debug hooks, and handles breakpoints.
     /// Called once per instruction when `has_debug_hooks` is true.
+    #[cfg(feature = "debug-hooks")]
     #[cold]
     #[inline(never)]
     fn debug_probe(&mut self, chunk_id: ChunkId, pc: usize) -> Result<(), RuntimeError> {
         let chunk = self.chunk_for(chunk_id);
-        let current_line = chunk.line(pc);
+        let current_line = chunk.line_for_word_offset(pc);
         let current_file = chunk.file().unwrap_or("").to_string();
 
         // Only act on line changes
@@ -3996,6 +3986,7 @@ impl VM {
     }
 
     /// Fires the on_call debug hook for the current (just-pushed) frame.
+    #[cfg(feature = "debug-hooks")]
     #[cold]
     #[inline(never)]
     fn fire_call_hook(&self) {
@@ -4014,6 +4005,7 @@ impl VM {
     }
 
     /// Fires the on_return debug hook for the current (about-to-pop) frame.
+    #[cfg(feature = "debug-hooks")]
     #[cold]
     #[inline(never)]
     fn fire_return_hook(&self) {

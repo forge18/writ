@@ -14,8 +14,8 @@ use crate::writ_struct::WritStruct;
 pub struct ClosureData {
     /// Index into the VM's function table.
     pub func_idx: usize,
-    /// Captured upvalue cells shared with enclosing scopes.
-    pub upvalues: Vec<Rc<RefCell<Value>>>,
+    /// Indices into the VM's flat upvalue store.
+    pub upvalues: Vec<u32>,
 }
 
 /// A runtime value in the Writ VM.
@@ -228,12 +228,7 @@ impl PartialEq for Value {
             (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
             (Value::Struct(a), Value::Struct(b)) => a == b,
             (Value::Closure(a), Value::Closure(b)) => {
-                a.func_idx == b.func_idx
-                    && a.upvalues.len() == b.upvalues.len()
-                    && a.upvalues
-                        .iter()
-                        .zip(b.upvalues.iter())
-                        .all(|(a, b)| Rc::ptr_eq(a, b))
+                a.func_idx == b.func_idx && a.upvalues == b.upvalues
             }
             (Value::CoroutineHandle(a), Value::CoroutineHandle(b)) => a == b,
             #[cfg(feature = "mobile-aosoa")]
