@@ -7,6 +7,9 @@ Writ includes a [criterion](https://github.com/bheisler/criterion.rs)-based benc
 ```sh
 cargo bench --bench vm        # VM execution only (no lex/parse/compile)
 cargo bench --bench pipeline  # Full pipeline (lex + parse + compile + execute)
+cargo bench --bench compiler  # Compiler only (parse → bytecode)
+cargo bench --bench lexer     # Lexer only (source → tokens)
+cargo bench --bench parser    # Parser only (tokens → AST)
 ```
 
 ## Benchmark Programs
@@ -23,15 +26,27 @@ cargo bench --bench pipeline  # Full pipeline (lex + parse + compile + execute)
 
 ## Results (Apple M-series, single-threaded)
 
-| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | Total Improvement |
-|-----------|----------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|-------------------|
-| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | -79% |
-| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | -36% |
-| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | -78% |
-| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | -76% |
-| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | -73% |
-| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | -75% |
-| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | -81% |
+| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | Total Improvement |
+| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ----------------- |
+| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | -79% |
+| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | -71% |
+| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | -78% |
+| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | -75% |
+| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | -72% |
+| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | -75% |
+| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | -79% |
+
+## Compilation Pipeline Results (Round 9)
+
+| Benchmark | Lexer | Parser | Compiler | Pipeline (full) |
+| --------- | ----- | ------ | -------- | --------------- |
+| fibonacci | 885 ns | 1.48 µs | 765 ns | 31.8 ms |
+| structs | 1.02 µs | 1.43 µs | 1.32 µs | — |
+| loop | — | 817 ns | 388 ns | — |
+| arithmetic | 216 ns | — | — | — |
+| interpolation | 668 ns | — | — | — |
+
+Pipeline numbers include lex + parse + compile + VM execution. Compiler and lexer are measured in isolation on the same source programs.
 
 ## Cross-Language Comparison
 
@@ -49,7 +64,7 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 ### Key Observations
 
-- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~32ms vs ~30ms), down from ~5x slower after eight rounds of optimization. Round 8 recovered most of the fib/permute regression from the Round 7 register conversion via fast return paths and upvalue optimization.
+- **Writ is competitive with Wren/Python** on function-call-heavy benchmarks (~32ms vs ~30ms), down from ~5x slower after ten rounds of optimization. Round 10's compact object representation brought binary_trees from -38% to -71% total improvement.
 - **Writ is faster than Rhai**, the most comparable Rust-embeddable scripting language. Rhai documents itself as "roughly 2x slower than Python 3" and uses AST-walking rather than bytecode compilation.
 - **Different hardware** between our results (Apple M-series) and the Muxup results (AMD Ryzen 9 5950X). Ratios are more meaningful than absolute numbers.
 - **Binary trees are not directly comparable** — Wren uses depth=12 with the CLBG structure; we use depth=8 with 100 iterations.
@@ -127,6 +142,24 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 **Analysis:** The fast return path directly addresses the remaining `drop_in_place` overhead from Round 7. Functions like `fib` and `permute` use only Int registers, so every return now skips all drop glue via `set_len` — a single pointer write instead of per-element destructor calls. The upvalue Vec replacement eliminates hashing overhead that was 12% of queens execution time. Together these recover most of the fib/permute regression (+19% → +10% from Round 6 baseline) while further improving queens (-6%) and keeping arithmetic benchmarks stable.
 
+**Round 9** (31.6ms fib, -2%; 15.3ms mandelbrot, -3%; 0.536ms sieve, -2%; broad minor improvements):
+
+1. **Typed native binding layer** — Replaced `NativeFn = Rc<dyn Fn(&[Value]) -> Result<Value, String>>` with `FromValue`/`IntoValue`/`IntoNativeHandler` traits in `binding.rs`. Native functions are now registered with typed signatures (`fn1(|x: f64| -> Result<f64, String> { Ok(x.sqrt()) })`); the binding layer generates monomorphized extraction code at registration time.
+2. **Stack-slice dispatch** — `exec_native_call_reg` passes `&self.stack[arg_start..arg_start + n]` directly to the handler instead of allocating a `Vec<Value>` per call. Eliminates one heap allocation and `n` `cheap_clone` calls per native invocation.
+3. **Arity inference** — `IntoNativeHandler::arity()` is a static method returning `Option<u8>`, so native function arity is encoded at registration time from the closure signature — no manually-passed arity argument.
+4. **Width coercion at the boundary** — `FromValue for i64` widens `I32→i64` for free (`*n as i64`); `FromValue for i32` range-checks `I64→i32` via `i32::try_from`. Spec-correct narrowing errors propagate as `RuntimeError` with the argument position in the message.
+
+**Analysis:** The dominant win is eliminating the per-call `Vec<Value>` allocation. Each stdlib call previously heap-allocated a Vec, cloned `n` args into it, passed a `&[Value]` slice, then dropped the Vec. With stack-slice dispatch, the allocation is gone — the handler reads directly from the register window. Improvements are modest across benchmarks because stdlib calls are not on most hot paths (fibonacci/permute/loop_sum are pure arithmetic). The largest gains appear on sieve and mandelbrot, which exercise arithmetic helpers. The typing machinery compiles away entirely — `FromValue` extractors are inlined by LLVM into direct match-on-discriminant sequences identical to the old hand-written pattern matching, with no overhead added.
+
+**Round 10** (38.9ms binary_trees, -53%; all other benchmarks within noise):
+
+1. **Compact object representation** — Replaced per-instance `HashMap<String, Value>` field storage in `WritStruct` and `WritClassInstance` with `Vec<Value>` backed by shared `Rc<FieldLayout>`. The `FieldLayout` struct (type name, field count, `hash_to_index: HashMap<u32, usize>`, field names, public fields/methods) is built once per type at load time and shared across all instances via `Rc`.
+2. **Eliminated per-construction overhead** — `exec_make_struct_reg` now does `Rc::clone(&layout)` + `Vec::with_capacity` + push Values instead of N string clones + N HashMap inserts + Vec/HashSet clones. No string operations in the construction hot path.
+3. **Single-lookup field access** — `get_field_by_hash(u32)` and `set_field_by_hash(u32, Value)` methods use the instruction's pre-computed FNV-1a hash to index directly into the Vec via the shared layout's `hash_to_index` map. One small HashMap lookup (3 entries for binary_trees) instead of two full HashMap lookups.
+4. **WritStruct size reduction** — `WritStruct` shrank from ~192 bytes (String + HashMap + Vec + 2×HashSet) to ~32 bytes (Rc + Vec). `Box<WritStruct>` in the `Value` enum remains 8 bytes.
+
+**Analysis:** binary_trees was the weakest benchmark at -38% total improvement, with profiling showing ~50% of time in HashMap alloc/dealloc/drop for object instances. The compact representation eliminates all per-instance HashMap operations — construction, field access, and destruction are now Vec-based with shared metadata. The -53% improvement on binary_trees (83.1ms → 38.9ms) exceeds the estimated -30-40%. Other benchmarks show no change (within noise threshold) as expected — they don't use struct/class instances on their hot paths.
+
 ## Profiling Analysis (Post-Round 6)
 
 Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the dominant cost centers. Flamegraph SVGs are in `flamegraphs/`.
@@ -137,7 +170,7 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the domina
 | ---------- | --------- | ------- | ----------- | ---------- | ----- | ------ | -------- |
 | `drop_in_place<Value>` (stack cleanup) | **38%** | **13%** | — | **12%** | 6% | 7% | **17%** |
 | `Value::cheap_clone` / extraction | 2% | 1% | — | **10%** | **22%** | — | 3% |
-| Object alloc/dealloc (HashMap) | — | — | **50%** | — | — | — | — |
+| ~~Object alloc/dealloc (HashMap)~~ | — | — | ~~**50%**~~ | — | — | — | — |
 | SipHash (`open_upvalues` HashMap) | — | — | — | — | 4% | **12%** | — |
 | `promote_float_pair_op` | — | — | — | **6%** | — | — | — |
 | `exec_call` / frame overhead | — | — | — | — | — | 5% | — |
@@ -147,7 +180,7 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the domina
 
 1. **Stack drop glue is the #1 cost** — `Value` is a 24-byte enum with non-Copy variants (`Str`, `Object` contain `Rc`). Every `Return` truncates the stack, running `drop_in_place` on each value even when most are I32/Bool that need no dropping. This dominates fibonacci (38%) and is significant everywhere.
 
-2. **Object representation is catastrophic for binary_trees** — Each class instance is a `HashMap<String, Value>` inside `Rc<RefCell<dyn WritObject>>`. Creating and destroying tree nodes spends ~50% of time in HashMap alloc/dealloc/drop. A fixed-layout struct representation would eliminate this entirely.
+2. ~~**Object representation is catastrophic for binary_trees**~~ — **Fixed in Round 10.** Replaced per-instance `HashMap<String, Value>` with `Vec<Value>` + shared `Rc<FieldLayout>`. binary_trees improved -53% (83.1ms → 38.9ms).
 
 3. **Upvalue HashMap is expensive for closures** — Queens spends 12% in `SipHasher13::write` from `open_upvalues: HashMap<usize, Rc<RefCell<Value>>>` lookups. Upvalue slot indices are small integers — a direct-indexed `Vec` or fixed-size array would be O(1) with no hashing.
 
@@ -159,20 +192,19 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks reveals the domina
 
 Ordered by profiling-informed expected impact:
 
-1. **Compact object representation** (est. -30-40% binary_trees) — Replace per-instance `HashMap<String, Value>` with fixed-layout field arrays. Field offsets resolved at compile time. Eliminates HashMap alloc/dealloc/hashing for struct/class instances.
+1. **Call/Return frame optimization** (est. -5-15% fib/permute) — Inline frame stack (`[CallFrame; 64]`), split cold upvalue fields to side-table, frame reuse for CallDirect. Remaining bottleneck for call-heavy benchmarks after fast return path eliminated most drop glue.
 
-2. **Call/Return frame optimization** (est. -5-15% fib/permute) — Inline frame stack (`[CallFrame; 64]`), split cold upvalue fields to side-table, frame reuse for CallDirect. Remaining bottleneck for call-heavy benchmarks after fast return path eliminated most drop glue.
+2. **Float type propagation** (est. -5-10% mandelbrot) — Extend compiler type tracking to propagate float types through sub-expressions (`a * b` where both are float → emit `MulFloat` directly). Currently only locals and function returns carry type info.
 
-3. **Float type propagation** (est. -5-10% mandelbrot) — Extend compiler type tracking to propagate float types through sub-expressions (`a * b` where both are float → emit `MulFloat` directly). Currently only locals and function returns carry type info.
+3. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~16 bytes). 4x better instruction cache density.
 
-4. **Instruction encoding compaction** (est. -3-5%) — Encode instructions as compact `u32` words (8-bit opcode + 24-bit operands) instead of Rust enum (~16 bytes). 4x better instruction cache density.
-
-5. **Tail call optimization** — `CallDirect + Return` → `TailCallDirect` that reuses the current frame. Prevents stack overflow on tail-recursive code but does not help current benchmarks (fib/permute are not tail-recursive).
+4. **Tail call optimization** — `CallDirect + Return` → `TailCallDirect` that reuses the current frame. Prevents stack overflow on tail-recursive code but does not help current benchmarks (fib/permute are not tail-recursive).
 
 ## Design Constraints
 
 1. **No NaN boxing** — Values remain native Rust data types (`i32`/`i64`, `f32`/`f64`, `bool`, `Rc<String>`, etc.). This preserves zero-cost FFI with Rust host code: no marshaling, no conversion, no boxing/unboxing at the boundary.
 2. **Minimal FFI marshaling** — Writ is designed for embedding in Rust applications. Host-registered functions receive and return `Value` directly. Any optimization must preserve this property — Writ values ARE Rust values.
+3. **Typed binding layer compatibility** — The typed native binding layer (`FromValue`/`IntoValue`/`IntoNativeHandler` in `binding.rs`) passes stack slices directly to native functions. All VM optimizations must preserve the register-window layout so `&self.stack[arg_start..arg_start+n]` remains valid. Native calls execute synchronously within the caller's frame (no `CallFrame` push/pop), so frame stack and return path optimizations do not affect the FFI boundary.
 
 ## References
 

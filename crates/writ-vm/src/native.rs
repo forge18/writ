@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::binding::{IntoNativeHandler, IntoNativeMethodHandler};
 use crate::value::Value;
 
 /// Type alias for native function callables.
@@ -26,6 +27,23 @@ pub struct NativeFunction {
     pub body: NativeFn,
 }
 
+impl NativeFunction {
+    /// Constructs a `NativeFunction` from a typed handler.
+    /// Arity is inferred from the handler's type.
+    pub fn from_handler<H: IntoNativeHandler>(
+        name: &str,
+        module: Option<&str>,
+        handler: H,
+    ) -> Self {
+        NativeFunction {
+            name: name.to_string(),
+            module: module.map(|m| m.to_string()),
+            arity: H::arity(),
+            body: handler.into_handler(),
+        }
+    }
+}
+
 /// A host-registered method callable on a specific value type.
 pub struct NativeMethod {
     /// The method name as seen by scripts.
@@ -36,4 +54,21 @@ pub struct NativeMethod {
     pub arity: Option<u8>,
     /// The callable body. Receives the receiver value and arguments.
     pub body: NativeMethodFn,
+}
+
+impl NativeMethod {
+    /// Constructs a `NativeMethod` from a typed handler.
+    /// Arity is inferred from the handler's type.
+    pub fn from_handler<H: IntoNativeMethodHandler>(
+        name: &str,
+        module: Option<&str>,
+        handler: H,
+    ) -> Self {
+        NativeMethod {
+            name: name.to_string(),
+            module: module.map(|m| m.to_string()),
+            arity: H::arity(),
+            body: handler.into_method_handler(),
+        }
+    }
 }

@@ -40,7 +40,9 @@ fn bench_compiler(c: &mut Criterion) {
     group.bench_function("fibonacci", |b| {
         b.iter(|| {
             let mut compiler = Compiler::new();
-            compiler.compile_program(&fib_stmts).unwrap();
+            for stmt in &fib_stmts {
+                compiler.compile_stmt(stmt).unwrap();
+            }
             compiler.into_parts()
         });
     });
@@ -51,7 +53,9 @@ fn bench_compiler(c: &mut Criterion) {
     group.bench_function("structs", |b| {
         b.iter(|| {
             let mut compiler = Compiler::new();
-            compiler.compile_program(&struct_stmts).unwrap();
+            for stmt in &struct_stmts {
+                compiler.compile_stmt(stmt).unwrap();
+            }
             compiler.into_parts()
         });
     });
@@ -62,7 +66,9 @@ fn bench_compiler(c: &mut Criterion) {
     group.bench_function("loop", |b| {
         b.iter(|| {
             let mut compiler = Compiler::new();
-            compiler.compile_program(&loop_stmts).unwrap();
+            for stmt in &loop_stmts {
+                compiler.compile_stmt(stmt).unwrap();
+            }
             compiler.into_parts()
         });
     });

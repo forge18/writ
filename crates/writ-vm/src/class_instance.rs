@@ -1,5 +1,8 @@
-use std::collections::HashMap;
+use std::rc::Rc;
 
+use writ_compiler::string_hash;
+
+use crate::field_layout::FieldLayout;
 use crate::object::WritObject;
 use crate::value::Value;
 
@@ -9,36 +12,65 @@ use crate::value::Value;
 /// Unlike [`WritStruct`](crate::writ_struct::WritStruct) (value type, copied
 /// on assignment), class instances are wrapped in `Rc<RefCell<...>>` and use
 /// reference semantics.
+///
+/// Fields are stored in a `Vec<Value>` indexed by position. The shared
+/// `Rc<FieldLayout>` provides the hash-to-index mapping for field access.
 #[derive(Debug, Clone)]
 pub struct WritClassInstance {
-    /// The class type name (e.g., "Player").
-    pub class_name: String,
-    /// Field values, keyed by field name (includes inherited fields).
-    pub fields: HashMap<String, Value>,
-    /// Ordered field names (preserves declaration order, parent fields first).
-    pub field_order: Vec<String>,
+    /// Shared layout descriptor.
+    pub layout: Rc<FieldLayout>,
+    /// Field values in declaration order (parent fields first).
+    pub fields: Vec<Value>,
     /// Parent class name, if this class extends another.
     pub parent_class: Option<String>,
 }
 
+impl WritClassInstance {
+    /// Gets a field value by pre-computed hash (hot path for VM).
+    #[inline]
+    pub fn get_field_by_hash(&self, name_hash: u32) -> Option<&Value> {
+        self.layout
+            .hash_to_index
+            .get(&name_hash)
+            .map(|&idx| &self.fields[idx])
+    }
+
+    /// Sets a field value by pre-computed hash (hot path for VM).
+    #[inline]
+    pub fn set_field_by_hash(&mut self, name_hash: u32, value: Value) -> Result<(), String> {
+        if let Some(&idx) = self.layout.hash_to_index.get(&name_hash) {
+            self.fields[idx] = value;
+            Ok(())
+        } else {
+            Err(format!(
+                "'{}' has no field (hash {})",
+                self.layout.type_name, name_hash
+            ))
+        }
+    }
+}
+
 impl WritObject for WritClassInstance {
     fn type_name(&self) -> &str {
-        &self.class_name
+        &self.layout.type_name
     }
 
     fn get_field(&self, name: &str) -> Result<Value, String> {
-        self.fields
-            .get(name)
-            .cloned()
-            .ok_or_else(|| format!("'{}' has no field '{name}'", self.class_name))
+        let hash = string_hash(name);
+        self.layout
+            .hash_to_index
+            .get(&hash)
+            .map(|&idx| self.fields[idx].clone())
+            .ok_or_else(|| format!("'{}' has no field '{name}'", self.layout.type_name))
     }
 
     fn set_field(&mut self, name: &str, value: Value) -> Result<(), String> {
-        if self.fields.contains_key(name) {
-            self.fields.insert(name.to_string(), value);
+        let hash = string_hash(name);
+        if let Some(&idx) = self.layout.hash_to_index.get(&hash) {
+            self.fields[idx] = value;
             Ok(())
         } else {
-            Err(format!("'{}' has no field '{name}'", self.class_name))
+            Err(format!("'{}' has no field '{name}'", self.layout.type_name))
         }
     }
 
@@ -47,23 +79,32 @@ impl WritObject for WritClassInstance {
         // compiled functions (ClassName::method_name), not here.
         Err(format!(
             "'{}' has no native method '{name}'",
-            self.class_name
+            self.layout.type_name
         ))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
+    fn make_layout(type_name: &str, field_names: Vec<&str>) -> Rc<FieldLayout> {
+        let field_names: Vec<String> = field_names.iter().map(|s| s.to_string()).collect();
+        Rc::new(FieldLayout::new(
+            type_name.to_string(),
+            field_names,
+            HashSet::new(),
+            HashSet::new(),
+        ))
+    }
+
     fn make_entity(x: f32, y: f32) -> WritClassInstance {
-        let mut fields = HashMap::new();
-        fields.insert("x".to_string(), Value::F32(x));
-        fields.insert("y".to_string(), Value::F32(y));
+        let layout = make_layout("Entity", vec!["x", "y"]);
         WritClassInstance {
-            class_name: "Entity".to_string(),
-            fields,
-            field_order: vec!["x".to_string(), "y".to_string()],
+            layout,
+            fields: vec![Value::F32(x), Value::F32(y)],
             parent_class: None,
         }
     }
@@ -91,14 +132,10 @@ mod tests {
 
     #[test]
     fn inherited_fields() {
-        let mut fields = HashMap::new();
-        fields.insert("x".to_string(), Value::F32(0.0));
-        fields.insert("y".to_string(), Value::F32(0.0));
-        fields.insert("health".to_string(), Value::F32(100.0));
+        let layout = make_layout("Player", vec!["x", "y", "health"]);
         let player = WritClassInstance {
-            class_name: "Player".to_string(),
-            fields,
-            field_order: vec!["x".to_string(), "y".to_string(), "health".to_string()],
+            layout,
+            fields: vec![Value::F32(0.0), Value::F32(0.0), Value::F32(100.0)],
             parent_class: Some("Entity".to_string()),
         };
         assert_eq!(player.get_field("x").unwrap(), Value::F32(0.0));

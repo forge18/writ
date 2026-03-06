@@ -28,7 +28,9 @@ pub use writ_lexer::{LexError, SourceLine, format_error_context};
 pub use writ_parser::ParseError;
 pub use writ_types::{Type, TypeError};
 // FloatValue and IntValue have been flattened into Value directly (I32/I64/F32/F64 variants).
+pub use writ_vm::{Fn0, Fn1, Fn2, Fn3, MFn0, MFn1, MFn2, MFn3};
 pub use writ_vm::{RuntimeError, StackFrame, StackTrace, Value, ValueTag, WritObject};
+pub use writ_vm::{fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
 
 // Re-export codegen for embedders that want Rust source output.
 pub use writ_codegen::RustCodegen;
@@ -209,27 +211,26 @@ impl Writ {
     }
 
     /// Registers a host function that scripts can call.
-    pub fn register_fn<F>(&mut self, name: &str, arity: u8, f: F) -> &mut Self
+    pub fn register_fn<H>(&mut self, name: &str, handler: H) -> &mut Self
     where
-        F: Fn(&[Value]) -> Result<Value, String> + 'static,
+        H: writ_vm::binding::IntoNativeHandler,
     {
-        self.vm.register_fn(name, arity, f);
+        self.vm.register_fn(name, handler);
         self
     }
 
     /// Registers a method on a value type that scripts can call.
-    pub fn register_method<F>(
+    pub fn register_method<H>(
         &mut self,
         tag: ValueTag,
         name: &str,
         module: Option<&str>,
-        arity: Option<u8>,
-        f: F,
+        handler: H,
     ) -> &mut Self
     where
-        F: Fn(&Value, &[Value]) -> Result<Value, String> + 'static,
+        H: writ_vm::binding::IntoNativeMethodHandler,
     {
-        self.vm.register_method(tag, name, module, arity, f);
+        self.vm.register_method(tag, name, module, handler);
         self
     }
 

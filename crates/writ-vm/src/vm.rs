@@ -52,6 +52,10 @@ pub struct VM {
     struct_metas: HashMap<String, StructMeta>,
     /// Class metadata for constructing class instances at runtime.
     class_metas: HashMap<String, ClassMeta>,
+    /// Pre-built shared field layouts for struct types (hash→index maps).
+    struct_layouts: HashMap<String, Rc<crate::field_layout::FieldLayout>>,
+    /// Pre-built shared field layouts for class types (hash→index maps).
+    class_layouts: HashMap<String, Rc<crate::field_layout::FieldLayout>>,
     /// Set of disabled module names (blocks native function calls).
     disabled_modules: HashSet<String>,
     /// Maximum number of instructions before termination. `None` = unlimited.
@@ -109,6 +113,8 @@ impl VM {
             globals: HashMap::new(),
             struct_metas: HashMap::new(),
             class_metas: HashMap::new(),
+            struct_layouts: HashMap::new(),
+            class_layouts: HashMap::new(),
             disabled_modules: HashSet::new(),
             instruction_limit: None,
             instruction_count: 0,
@@ -130,76 +136,56 @@ impl VM {
         }
     }
 
-    /// Registers a native Rust function callable from Writ scripts.
+    /// Registers a typed Rust function callable from Writ scripts.
     ///
-    /// The function receives a slice of [`Value`] arguments and returns
-    /// either a [`Value`] result or a `String` error message.
-    pub fn register_fn<F>(&mut self, name: &str, arity: u8, f: F) -> &mut Self
+    /// The function's parameter and return types must implement [`FromValue`]
+    /// and [`IntoValue`] respectively. Arity is inferred from the function
+    /// signature — no manual arity argument is needed.
+    pub fn register_fn<H>(&mut self, name: &str, handler: H) -> &mut Self
     where
-        F: Fn(&[Value]) -> Result<Value, String> + 'static,
+        H: crate::binding::IntoNativeHandler,
     {
         self.native_functions.insert(
             name.to_string(),
-            NativeFunction {
-                name: name.to_string(),
-                module: None,
-                arity: Some(arity),
-                body: Rc::new(f),
-            },
+            NativeFunction::from_handler(name, None, handler),
         );
         self
     }
 
-    /// Registers a native function within a named module.
+    /// Registers a typed native function within a named module.
     ///
     /// Functions in a disabled module (via [`disable_module`](Self::disable_module))
     /// will produce a [`RuntimeError`] when called.
-    pub fn register_fn_in_module<F>(
-        &mut self,
-        name: &str,
-        module: &str,
-        arity: u8,
-        f: F,
-    ) -> &mut Self
+    pub fn register_fn_in_module<H>(&mut self, name: &str, module: &str, handler: H) -> &mut Self
     where
-        F: Fn(&[Value]) -> Result<Value, String> + 'static,
+        H: crate::binding::IntoNativeHandler,
     {
         self.native_functions.insert(
             name.to_string(),
-            NativeFunction {
-                name: name.to_string(),
-                module: Some(module.to_string()),
-                arity: Some(arity),
-                body: Rc::new(f),
-            },
+            NativeFunction::from_handler(name, Some(module), handler),
         );
         self
     }
 
-    /// Registers a native method on a specific value type.
+    /// Registers a typed native method on a specific value type.
     ///
-    /// The method body receives the receiver value and a slice of arguments.
+    /// The handler receives the receiver as its first typed argument, followed
+    /// by the method's arguments. Arity is inferred from the handler's type.
     /// Use `module` to associate the method with a disableable module.
-    pub fn register_method<F>(
+    pub fn register_method<H>(
         &mut self,
         tag: ValueTag,
         name: &str,
         module: Option<&str>,
-        arity: Option<u8>,
-        f: F,
+        handler: H,
     ) -> &mut Self
     where
-        F: Fn(&Value, &[Value]) -> Result<Value, String> + 'static,
+        H: crate::binding::IntoNativeMethodHandler,
     {
         let hash = string_hash(name);
         self.methods.insert(
             (tag, hash),
-            NativeMethod {
-                name: name.to_string(),
-                module: module.map(|m| m.to_string()),
-                arity,
-                body: Rc::new(f),
-            },
+            NativeMethod::from_handler(name, module, handler),
         );
         // Store the method name for reverse lookup
         self.field_names.insert(hash, name.to_string());
@@ -366,7 +352,10 @@ impl VM {
             }
         }
 
-        // 6. Rebuild the instruction pointer cache so it points to the new chunks
+        // 6. Rebuild field layouts for reloaded struct/class types
+        self.build_layouts();
+
+        // 7. Rebuild the instruction pointer cache so it points to the new chunks
         self.rebuild_ip_cache();
 
         Ok(())
@@ -414,6 +403,9 @@ impl VM {
                     .insert(string_hash(s), s.as_str().to_string());
             }
         }
+
+        // Build shared field layouts for new struct/class types
+        self.build_layouts();
 
         // Execute the module's top-level code
         self.stack.clear();
@@ -550,6 +542,8 @@ impl VM {
         self.field_names.clear();
         self.struct_metas.clear();
         self.class_metas.clear();
+        self.struct_layouts.clear();
+        self.class_layouts.clear();
         self.instruction_count = 0;
         self.coroutines.clear();
         self.next_coroutine_id = 1;
@@ -576,6 +570,9 @@ impl VM {
 
         // Build field name reverse lookup from all string pools
         self.build_field_names();
+
+        // Build shared field layouts for struct/class types
+        self.build_layouts();
 
         // Pre-compute instruction pointer cache for fast Call/Return.
         self.rebuild_ip_cache();
@@ -612,6 +609,31 @@ impl VM {
                 self.field_names
                     .insert(string_hash(s), s.as_str().to_string());
             }
+        }
+    }
+
+    /// Builds shared `FieldLayout` objects from struct/class metadata.
+    /// Called after loading metas so that construction and field access
+    /// can use index-based `Vec<Value>` instead of `HashMap<String, Value>`.
+    fn build_layouts(&mut self) {
+        use crate::field_layout::FieldLayout;
+        for (name, meta) in &self.struct_metas {
+            let layout = Rc::new(FieldLayout::new(
+                name.clone(),
+                meta.field_names.clone(),
+                meta.public_fields.clone(),
+                meta.public_methods.clone(),
+            ));
+            self.struct_layouts.insert(name.clone(), layout);
+        }
+        for (name, meta) in &self.class_metas {
+            let layout = Rc::new(FieldLayout::new(
+                name.clone(),
+                meta.field_names.clone(),
+                meta.public_fields.clone(),
+                meta.public_methods.clone(),
+            ));
+            self.class_layouts.insert(name.clone(), layout);
         }
     }
 
@@ -2684,12 +2706,14 @@ impl VM {
 
         let body = Rc::clone(&native.body);
 
-        // Collect args from consecutive registers
-        let args: Vec<Value> = (0..n)
-            .map(|i| self.stack[callee_abs + 1 + i].clone())
-            .collect();
-
-        let result = (body)(&args).map_err(|msg| self.make_error(msg))?;
+        // Pass a direct slice of the stack — no Vec allocation.
+        // callee_abs is one slot before arg_start so the write target is
+        // non-overlapping with the borrow, and the borrow ends before the write.
+        let arg_start = callee_abs + 1;
+        let result = {
+            let args = &self.stack[arg_start..arg_start + n];
+            (body)(args).map_err(|msg| self.make_error(msg))?
+        };
         self.stack[callee_abs] = result;
         Ok(())
     }
@@ -2718,7 +2742,7 @@ impl VM {
 
         // Struct method dispatch
         if let Value::Struct(ref s) = obj {
-            let qualified = format!("{}::{}", s.type_name, method_name);
+            let qualified = format!("{}::{}", s.layout.type_name, method_name);
             if let Some(&func_idx) = self.function_map.get(&qualified) {
                 let mut all_args = Vec::with_capacity(1 + remaining_args.len());
                 all_args.push(obj.clone());
@@ -2729,7 +2753,7 @@ impl VM {
             }
             return Err(self.make_error(format!(
                 "no method '{}' on type '{}'",
-                method_name, s.type_name
+                method_name, s.layout.type_name
             )));
         }
 
@@ -2986,7 +3010,7 @@ impl VM {
                 .cloned()
                 .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
 
-            let qualified = format!("{}::{}", s.type_name, method_name);
+            let qualified = format!("{}::{}", s.layout.type_name, method_name);
             if let Some(&func_idx) = self.function_map.get(&qualified) {
                 let args: Vec<Value> = (0..n)
                     .map(|i| self.stack[receiver_abs + 1 + i].clone())
@@ -3047,16 +3071,17 @@ impl VM {
                     .get_field(&field_name)
                     .map_err(|e| self.make_error(e))?
             }
-            Value::Struct(s) => {
+            Value::Struct(s) => s.get_field_by_hash(name_hash).cloned().ok_or_else(|| {
                 let field_name = self
                     .field_names
                     .get(&name_hash)
-                    .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?
-                    .clone();
-                s.get_field(&field_name).cloned().ok_or_else(|| {
-                    self.make_error(format!("'{}' has no field '{}'", s.type_name, field_name))
-                })?
-            }
+                    .cloned()
+                    .unwrap_or_else(|| format!("<hash:{name_hash}>"));
+                self.make_error(format!(
+                    "'{}' has no field '{}'",
+                    s.layout.type_name, field_name
+                ))
+            })?,
             #[cfg(feature = "mobile-aosoa")]
             Value::AoSoA(container) => {
                 let length_hash = string_hash("length");
@@ -3120,12 +3145,7 @@ impl VM {
                     Value::Struct(s) => s,
                     _ => unreachable!(),
                 };
-                let field_name = self
-                    .field_names
-                    .get(&name_hash)
-                    .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?
-                    .clone();
-                s.set_field(&field_name, value)
+                s.set_field_by_hash(name_hash, value)
                     .map_err(|e| self.make_error(e))?;
                 self.stack[base + obj_reg as usize] = Value::Struct(s);
             }
@@ -3265,28 +3285,23 @@ impl VM {
             .map(|s| s.as_str().to_string())
             .ok_or_else(|| self.make_error(format!("invalid struct name index {name_idx}")))?;
 
-        let meta = self
-            .struct_metas
+        let layout = self
+            .struct_layouts
             .get(&struct_name)
             .cloned()
             .ok_or_else(|| self.make_error(format!("unknown struct type '{struct_name}'")))?;
 
         let n = field_count as usize;
-        let mut fields = HashMap::new();
-        for (i, name) in meta.field_names.iter().enumerate() {
+        let mut fields = Vec::with_capacity(layout.field_count);
+        for i in 0..layout.field_count {
             if i < n {
-                fields.insert(name.clone(), self.stack[base + start as usize + i].clone());
+                fields.push(self.stack[base + start as usize + i].clone());
+            } else {
+                fields.push(Value::Null);
             }
         }
 
-        let writ_struct = crate::writ_struct::WritStruct {
-            type_name: struct_name,
-            fields,
-            field_order: meta.field_names.clone(),
-            public_fields: meta.public_fields.clone(),
-            public_methods: meta.public_methods.clone(),
-        };
-
+        let writ_struct = crate::writ_struct::WritStruct { layout, fields };
         self.stack[base + dst as usize] = Value::Struct(Box::new(writ_struct));
         Ok(())
     }
@@ -3308,25 +3323,31 @@ impl VM {
             .map(|s| s.as_str().to_string())
             .ok_or_else(|| self.make_error(format!("invalid class name index {name_idx}")))?;
 
-        let meta = self
-            .class_metas
+        let layout = self
+            .class_layouts
             .get(&class_name)
             .cloned()
             .ok_or_else(|| self.make_error(format!("unknown class type '{class_name}'")))?;
 
+        let parent_class = self
+            .class_metas
+            .get(&class_name)
+            .and_then(|m| m.parent.clone());
+
         let n = field_count as usize;
-        let mut fields = HashMap::new();
-        for (i, name) in meta.field_names.iter().enumerate() {
+        let mut fields = Vec::with_capacity(layout.field_count);
+        for i in 0..layout.field_count {
             if i < n {
-                fields.insert(name.clone(), self.stack[base + start as usize + i].clone());
+                fields.push(self.stack[base + start as usize + i].clone());
+            } else {
+                fields.push(Value::Null);
             }
         }
 
         let instance = crate::class_instance::WritClassInstance {
-            class_name,
+            layout,
             fields,
-            field_order: meta.field_names.clone(),
-            parent_class: meta.parent.clone(),
+            parent_class,
         };
 
         self.stack[base + dst as usize] = Value::Object(Rc::new(RefCell::new(instance)));
@@ -3466,15 +3487,15 @@ impl VM {
                 let elements = arr.borrow();
 
                 let first_type = match elements.first() {
-                    Some(Value::Struct(s)) => Some(s.type_name.clone()),
+                    Some(Value::Struct(s)) => Some(s.layout.type_name.clone()),
                     _ => None,
                 };
 
                 let type_name = match first_type {
                     Some(name)
-                        if elements
-                            .iter()
-                            .all(|v| matches!(v, Value::Struct(s) if s.type_name == name)) =>
+                        if elements.iter().all(
+                            |v| matches!(v, Value::Struct(s) if s.layout.type_name == name),
+                        ) =>
                     {
                         name
                     }
@@ -3483,20 +3504,14 @@ impl VM {
                     }
                 };
 
-                let meta = match self.struct_metas.get(&type_name) {
-                    Some(meta) => meta.clone(),
+                let layout = match self.struct_layouts.get(&type_name) {
+                    Some(layout) => Rc::clone(layout),
                     None => {
                         return Ok(());
                     }
                 };
 
-                let mut container = AoSoAContainer::new(
-                    type_name,
-                    meta.field_names.clone(),
-                    meta.public_fields.clone(),
-                    meta.public_methods.clone(),
-                    elements.len(),
-                );
+                let mut container = AoSoAContainer::new(layout, elements.len());
                 for elem in elements.iter() {
                     if let Value::Struct(s) = elem {
                         container.push(s).map_err(|e| self.make_error(e))?;

@@ -200,7 +200,7 @@ impl Value {
             Value::Array(_) => "array",
             Value::Dict(_) => "dict",
             Value::Object(_) => "object",
-            Value::Struct(s) => &s.type_name,
+            Value::Struct(s) => &s.layout.type_name,
             Value::Closure(_) => "function",
             #[cfg(feature = "mobile-aosoa")]
             Value::AoSoA(_) => "array",
@@ -289,12 +289,10 @@ impl Hash for Value {
             }
             Value::Struct(s) => {
                 8u8.hash(state);
-                s.type_name.hash(state);
-                for name in &s.field_order {
-                    if let Some(val) = s.fields.get(name) {
-                        name.hash(state);
-                        val.hash(state);
-                    }
+                s.layout.type_name.hash(state);
+                for (i, name) in s.layout.field_names.iter().enumerate() {
+                    name.hash(state);
+                    s.fields[i].hash(state);
                 }
             }
             Value::Closure(data) => {
@@ -351,14 +349,12 @@ impl fmt::Display for Value {
                 write!(f, "<{}>", obj.type_name())
             }
             Value::Struct(s) => {
-                write!(f, "{}(", s.type_name)?;
-                for (i, name) in s.field_order.iter().enumerate() {
+                write!(f, "{}(", s.layout.type_name)?;
+                for (i, name) in s.layout.field_names.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    if let Some(val) = s.fields.get(name) {
-                        write!(f, "{name}: {val}")?;
-                    }
+                    write!(f, "{name}: {}", s.fields[i])?;
                 }
                 write!(f, ")")
             }

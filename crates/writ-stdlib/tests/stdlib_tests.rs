@@ -100,9 +100,18 @@ fn test_math_abs() {
 
 #[test]
 fn test_math_clamp() {
-    assert_eq!(eval_with_stdlib("return clamp(10, 0, 5)"), Value::I32(5));
-    assert_eq!(eval_with_stdlib("return clamp(-3, 0, 5)"), Value::I32(0));
-    assert_eq!(eval_with_stdlib("return clamp(3, 0, 5)"), Value::I32(3));
+    assert_eq!(
+        eval_with_stdlib("return clamp(10.0, 0.0, 5.0)"),
+        Value::F64(5.0)
+    );
+    assert_eq!(
+        eval_with_stdlib("return clamp(-3.0, 0.0, 5.0)"),
+        Value::F64(0.0)
+    );
+    assert_eq!(
+        eval_with_stdlib("return clamp(3.0, 0.0, 5.0)"),
+        Value::F64(3.0)
+    );
 }
 
 #[test]

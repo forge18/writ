@@ -5,7 +5,7 @@ use writ_compiler::{Chunk, CompiledFunction, Compiler};
 use writ_lexer::Lexer;
 use writ_parser::Parser;
 
-use writ_vm::{BreakpointAction, RuntimeError, VM, Value, WritObject};
+use writ_vm::{BreakpointAction, RuntimeError, VM, Value, WritObject, fn0, fn1, fn2};
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -418,10 +418,15 @@ impl WritObject for MockPlayer {
 #[test]
 fn test_register_fn_callable() {
     let mut vm = VM::new();
-    vm.register_fn("add_native", 2, |args| match (&args[0], &args[1]) {
-        (Value::I32(a), Value::I32(b)) => Ok(Value::I32(a + b)),
-        _ => Err("expected two ints".to_string()),
-    });
+    vm.register_fn(
+        "add_native",
+        fn2(|a: Value, b: Value| -> Result<Value, String> {
+            match (&a, &b) {
+                (Value::I32(x), Value::I32(y)) => Ok(Value::I32(x + y)),
+                _ => Err("expected two ints".to_string()),
+            }
+        }),
+    );
     let result = eval_with_vm("return add_native(3, 4)", &mut vm);
     assert_eq!(result, Value::I32(7));
 }
@@ -429,10 +434,15 @@ fn test_register_fn_callable() {
 #[test]
 fn test_register_fn_wrong_arg_type() {
     let mut vm = VM::new();
-    vm.register_fn("need_int", 1, |args| match &args[0] {
-        Value::I32(v) => Ok(Value::I32(*v * 2)),
-        other => Err(format!("expected int, got {}", other.type_name())),
-    });
+    vm.register_fn(
+        "need_int",
+        fn1(|v: Value| -> Result<Value, String> {
+            match &v {
+                Value::I32(n) => Ok(Value::I32(*n * 2)),
+                other => Err(format!("expected int, got {}", other.type_name())),
+            }
+        }),
+    );
     let err = eval_error_with_vm(r#"return need_int("hello")"#, &mut vm);
     assert!(err.message.contains("expected int"));
 }
@@ -455,7 +465,10 @@ fn test_register_type_field_access() {
 
     let mut vm = VM::new();
     let obj_clone = player_obj.clone();
-    vm.register_fn("get_player", 0, move |_args| Ok(obj_clone.clone()));
+    vm.register_fn(
+        "get_player",
+        fn0(move || -> Result<Value, String> { Ok(obj_clone.clone()) }),
+    );
 
     let result = eval_with_vm(
         "func f() -> float {\n\
@@ -478,12 +491,15 @@ fn test_register_type_method_call() {
 
     let mut vm = VM::new();
     let obj_ref = Rc::clone(&player_obj);
-    vm.register_fn("greet_player", 0, move |_args| {
-        obj_ref
-            .borrow_mut()
-            .call_method("greet", &[])
-            .map_err(|e| e.to_string())
-    });
+    vm.register_fn(
+        "greet_player",
+        fn0(move || -> Result<Value, String> {
+            obj_ref
+                .borrow_mut()
+                .call_method("greet", &[])
+                .map_err(|e| e.to_string())
+        }),
+    );
 
     let result = eval_with_vm("return greet_player()", &mut vm);
     assert_eq!(result, Value::Str(Rc::new("Hello, I'm Hero!".to_string())));
@@ -492,9 +508,13 @@ fn test_register_type_method_call() {
 #[test]
 fn test_disable_module_blocks_calls() {
     let mut vm = VM::new();
-    vm.register_fn_in_module("read_file", "io", 1, |_args| {
-        Ok(Value::Str(Rc::new("file contents".to_string())))
-    });
+    vm.register_fn_in_module(
+        "read_file",
+        "io",
+        fn1(|_path: Value| -> Result<Value, String> {
+            Ok(Value::Str(Rc::new("file contents".to_string())))
+        }),
+    );
     vm.disable_module("io");
 
     let err = eval_error_with_vm(r#"return read_file("test.txt")"#, &mut vm);
@@ -536,7 +556,10 @@ fn test_instruction_limit_reset_per_call() {
 #[test]
 fn test_two_vms_isolated_registrations() {
     let mut vm1 = VM::new();
-    vm1.register_fn("exclusive", 0, |_args| Ok(Value::I32(42)));
+    vm1.register_fn(
+        "exclusive",
+        fn0(|| -> Result<Value, String> { Ok(Value::I32(42)) }),
+    );
 
     let mut vm2 = VM::new();
 
@@ -575,10 +598,13 @@ fn test_coroutine_runs_across_frames() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("inc", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "inc",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func work() {\n\
@@ -613,10 +639,13 @@ fn test_yield_one_frame() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("mark", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "mark",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func coro() {\n\
@@ -648,10 +677,13 @@ fn test_yield_seconds() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("done", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "done",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func delayed() {\n\
@@ -689,10 +721,13 @@ fn test_yield_frames() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("done", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "done",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func delayed() {\n\
@@ -734,13 +769,17 @@ fn test_yield_until_condition() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("is_ready", 0, move |_args| {
-        Ok(Value::Bool(*flag_check.borrow()))
-    });
-    vm.register_fn("done", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "is_ready",
+        fn0(move || -> Result<Value, String> { Ok(Value::Bool(*flag_check.borrow())) }),
+    );
+    vm.register_fn(
+        "done",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func waiter() {\n\
@@ -782,14 +821,20 @@ fn test_yield_coroutine_waits_for_child() {
     let log2 = Rc::clone(&log);
 
     let mut vm = VM::new();
-    vm.register_fn("log_parent", 0, move |_args| {
-        log1.borrow_mut().push("parent".to_string());
-        Ok(Value::Null)
-    });
-    vm.register_fn("log_child", 0, move |_args| {
-        log2.borrow_mut().push("child".to_string());
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "log_parent",
+        fn0(move || -> Result<Value, String> {
+            log1.borrow_mut().push("parent".to_string());
+            Ok(Value::Null)
+        }),
+    );
+    vm.register_fn(
+        "log_child",
+        fn0(move || -> Result<Value, String> {
+            log2.borrow_mut().push("child".to_string());
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func child_fn() {\n\
@@ -833,10 +878,13 @@ fn test_coroutine_return_value() {
     let result_ref = Rc::clone(&result);
 
     let mut vm = VM::new();
-    vm.register_fn("store_result", 1, move |args| {
-        *result_ref.borrow_mut() = args[0].clone();
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "store_result",
+        fn1(move |v: Value| -> Result<Value, String> {
+            *result_ref.borrow_mut() = v;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func compute() -> int {\n\
@@ -879,10 +927,13 @@ fn test_coroutine_cancel_on_owner_destroy() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("inc", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "inc",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func looper() {\n\
@@ -926,14 +977,20 @@ fn test_coroutine_cancel_propagates_to_child() {
     let child_ref = Rc::clone(&child_log);
 
     let mut vm = VM::new();
-    vm.register_fn("parent_work", 0, move |_args| {
-        *parent_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
-    vm.register_fn("child_work", 0, move |_args| {
-        *child_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "parent_work",
+        fn0(move || -> Result<Value, String> {
+            *parent_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
+    vm.register_fn(
+        "child_work",
+        fn0(move || -> Result<Value, String> {
+            *child_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func child_fn() {\n\
@@ -984,18 +1041,27 @@ fn test_multiple_coroutines_run_concurrently() {
     let c3 = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("inc_a", 0, move |_args| {
-        *c1.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
-    vm.register_fn("inc_b", 0, move |_args| {
-        *c2.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
-    vm.register_fn("inc_c", 0, move |_args| {
-        *c3.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "inc_a",
+        fn0(move || -> Result<Value, String> {
+            *c1.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
+    vm.register_fn(
+        "inc_b",
+        fn0(move || -> Result<Value, String> {
+            *c2.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
+    vm.register_fn(
+        "inc_c",
+        fn0(move || -> Result<Value, String> {
+            *c3.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     compile_and_run(
         "func a() { inc_a() }\n\
@@ -1022,10 +1088,13 @@ fn test_start_does_not_block() {
     let counter_ref = Rc::clone(&counter);
 
     let mut vm = VM::new();
-    vm.register_fn("inc", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    vm.register_fn(
+        "inc",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     // The main script starts a coroutine then returns 99.
     // The coroutine should NOT have run yet.
@@ -1287,11 +1356,14 @@ fn test_hot_reload_preserves_state() {
     // Register a native function to verify VM registrations survive reload
     let counter = Rc::new(Cell::new(0i32));
     let counter_c = counter.clone();
-    vm.register_fn("inc", 0, move |_args| {
-        let v = counter_c.get() + 1;
-        counter_c.set(v);
-        Ok(Value::I32(v))
-    });
+    vm.register_fn(
+        "inc",
+        fn0(move || -> Result<Value, String> {
+            let v = counter_c.get() + 1;
+            counter_c.set(v);
+            Ok(Value::I32(v))
+        }),
+    );
 
     vm.execute_program(&chunk, &functions, &[], &[])
         .expect("initial run failed");

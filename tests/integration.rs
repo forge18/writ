@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use writ::{Value, Writ, WritError, WritObject};
+use writ::{Value, Writ, WritError, WritObject, fn0};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -99,7 +99,10 @@ fn test_class_instantiation() {
     };
     let player_obj = Value::Object(Rc::new(RefCell::new(player)));
     let obj_clone = player_obj.clone();
-    writ.register_fn("create_player", 0, move |_args| Ok(obj_clone.clone()));
+    writ.register_fn(
+        "create_player",
+        fn0(move || -> Result<Value, String> { Ok(obj_clone.clone()) }),
+    );
 
     let result = writ
         .run(
@@ -130,12 +133,15 @@ fn test_trait_dispatch() {
     };
     let player_obj = Rc::new(RefCell::new(player));
     let obj_ref = Rc::clone(&player_obj);
-    writ.register_fn("greet_player", 0, move |_args| {
-        obj_ref
-            .borrow_mut()
-            .call_method("greet", &[])
-            .map_err(|e| e.to_string())
-    });
+    writ.register_fn(
+        "greet_player",
+        fn0(move || -> Result<Value, String> {
+            obj_ref
+                .borrow_mut()
+                .call_method("greet", &[])
+                .map_err(|e| e.to_string())
+        }),
+    );
 
     let result = writ.run("return greet_player()").unwrap();
     assert_eq!(result, Value::Str(Rc::new("Hello, I'm Hero!".to_string())));
@@ -150,10 +156,13 @@ fn test_coroutine_integration() {
 
     let counter = Rc::new(RefCell::new(0i32));
     let counter_ref = Rc::clone(&counter);
-    writ.register_fn("inc", 0, move |_args| {
-        *counter_ref.borrow_mut() += 1;
-        Ok(Value::Null)
-    });
+    writ.register_fn(
+        "inc",
+        fn0(move || -> Result<Value, String> {
+            *counter_ref.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
 
     writ.run(
         "func work() {\n\
@@ -325,7 +334,10 @@ fn test_host_type_integration() {
     };
     let player_obj = Value::Object(Rc::new(RefCell::new(player)));
     let obj_clone = player_obj.clone();
-    writ.register_fn("get_player", 0, move |_args| Ok(obj_clone.clone()));
+    writ.register_fn(
+        "get_player",
+        fn0(move || -> Result<Value, String> { Ok(obj_clone.clone()) }),
+    );
 
     // Access field through the full pipeline
     let result = writ

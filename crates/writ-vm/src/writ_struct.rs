@@ -1,53 +1,92 @@
-use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
+use writ_compiler::string_hash;
+
+use crate::field_layout::FieldLayout;
 use crate::value::Value;
 
 /// A Writ struct instance — a value-type collection of named fields.
 ///
 /// Structs are copied on assignment (value semantics). They support
 /// field access and method calls but have no inheritance.
+///
+/// Fields are stored in a `Vec<Value>` indexed by position. The shared
+/// `Rc<FieldLayout>` provides the hash-to-index mapping for field access
+/// and metadata for reflection.
 #[derive(Debug, Clone)]
 pub struct WritStruct {
-    /// The struct type name (e.g., "Point").
-    pub type_name: String,
-    /// Field values, keyed by field name.
-    pub fields: HashMap<String, Value>,
-    /// Ordered field names (preserves declaration order).
-    pub field_order: Vec<String>,
-    /// Set of public field names (for reflection visibility).
-    pub public_fields: HashSet<String>,
-    /// Set of public method names (for reflection visibility).
-    pub public_methods: HashSet<String>,
+    /// Shared layout descriptor (type name, field index map, reflection data).
+    pub layout: Rc<FieldLayout>,
+    /// Field values in declaration order. `fields[i]` corresponds to
+    /// `layout.field_names[i]`.
+    pub fields: Vec<Value>,
 }
 
 impl WritStruct {
     /// Gets a field value by name.
     pub fn get_field(&self, name: &str) -> Option<&Value> {
-        self.fields.get(name)
+        let hash = string_hash(name);
+        self.layout
+            .hash_to_index
+            .get(&hash)
+            .map(|&idx| &self.fields[idx])
+    }
+
+    /// Gets a field value by pre-computed hash (hot path).
+    #[inline]
+    pub fn get_field_by_hash(&self, name_hash: u32) -> Option<&Value> {
+        self.layout
+            .hash_to_index
+            .get(&name_hash)
+            .map(|&idx| &self.fields[idx])
     }
 
     /// Sets a field value by name. Returns `Err` if the field doesn't exist.
     pub fn set_field(&mut self, name: &str, value: Value) -> Result<(), String> {
-        if self.fields.contains_key(name) {
-            self.fields.insert(name.to_string(), value);
+        let hash = string_hash(name);
+        if let Some(&idx) = self.layout.hash_to_index.get(&hash) {
+            self.fields[idx] = value;
             Ok(())
         } else {
-            Err(format!("'{}' has no field '{}'", self.type_name, name))
+            Err(format!(
+                "'{}' has no field '{}'",
+                self.layout.type_name, name
+            ))
         }
+    }
+
+    /// Sets a field value by pre-computed hash (hot path).
+    #[inline]
+    pub fn set_field_by_hash(&mut self, name_hash: u32, value: Value) -> Result<(), String> {
+        if let Some(&idx) = self.layout.hash_to_index.get(&name_hash) {
+            self.fields[idx] = value;
+            Ok(())
+        } else {
+            Err(format!(
+                "'{}' has no field (hash {})",
+                self.layout.type_name, name_hash
+            ))
+        }
+    }
+
+    /// Returns the type name.
+    pub fn type_name(&self) -> &str {
+        &self.layout.type_name
     }
 
     /// Returns all public field names in declaration order.
     pub fn public_field_names(&self) -> Vec<String> {
-        self.field_order
+        self.layout
+            .field_names
             .iter()
-            .filter(|f| self.public_fields.contains(f.as_str()))
+            .filter(|f| self.layout.public_fields.contains(f.as_str()))
             .cloned()
             .collect()
     }
 
     /// Returns all public method names.
     pub fn public_method_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.public_methods.iter().cloned().collect();
+        let mut names: Vec<String> = self.layout.public_methods.iter().cloned().collect();
         names.sort();
         names
     }
@@ -55,7 +94,12 @@ impl WritStruct {
 
 impl PartialEq for WritStruct {
     fn eq(&self, other: &Self) -> bool {
-        if self.type_name != other.type_name {
+        // Fast path: same layout pointer means same type
+        if Rc::ptr_eq(&self.layout, &other.layout) {
+            return self.fields == other.fields;
+        }
+        // Slow path: different layout objects, compare type name
+        if self.layout.type_name != other.layout.type_name {
             return false;
         }
         self.fields == other.fields
@@ -64,21 +108,26 @@ impl PartialEq for WritStruct {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
-    fn make_point(x: i32, y: i32) -> WritStruct {
-        let mut fields = HashMap::new();
-        fields.insert("x".to_string(), Value::I32(x));
-        fields.insert("y".to_string(), Value::I32(y));
-        let mut public_fields = HashSet::new();
-        public_fields.insert("x".to_string());
-        public_fields.insert("y".to_string());
-        WritStruct {
-            type_name: "Point".to_string(),
-            fields,
-            field_order: vec!["x".to_string(), "y".to_string()],
+    fn make_layout(type_name: &str, field_names: Vec<&str>, public: Vec<&str>) -> Rc<FieldLayout> {
+        let field_names: Vec<String> = field_names.iter().map(|s| s.to_string()).collect();
+        let public_fields: HashSet<String> = public.iter().map(|s| s.to_string()).collect();
+        Rc::new(FieldLayout::new(
+            type_name.to_string(),
+            field_names,
             public_fields,
-            public_methods: HashSet::new(),
+            HashSet::new(),
+        ))
+    }
+
+    fn make_point(x: i32, y: i32) -> WritStruct {
+        let layout = make_layout("Point", vec!["x", "y"], vec!["x", "y"]);
+        WritStruct {
+            layout,
+            fields: vec![Value::I32(x), Value::I32(y)],
         }
     }
 
@@ -118,10 +167,11 @@ mod tests {
 
     #[test]
     fn public_field_names_in_order() {
-        let mut p = make_point(3, 4);
-        // Make only "y" public
-        p.public_fields.clear();
-        p.public_fields.insert("y".to_string());
+        let layout = make_layout("Point", vec!["x", "y"], vec!["y"]);
+        let p = WritStruct {
+            layout,
+            fields: vec![Value::I32(3), Value::I32(4)],
+        };
         assert_eq!(p.public_field_names(), vec!["y".to_string()]);
     }
 }
