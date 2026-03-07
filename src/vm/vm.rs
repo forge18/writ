@@ -82,6 +82,10 @@ pub struct VM {
     open_upvalues: Vec<Option<u32>>,
     /// Flat upvalue value store. Closures reference slots by `u32` index.
     upvalue_store: Vec<Value>,
+    /// Pre-captured upvalue index arrays for top-level functions, indexed by func_idx.
+    /// Populated by `MakeClosure` while the main chunk stack is live.
+    /// Enables `call_function` to provide correct upvalues after the main chunk exits.
+    closure_map: Vec<Option<Vec<u32>>>,
 
     // ── Cold fields: setup, metadata, debug ──────────────────────
     /// The top-level/main chunk being executed.
@@ -93,6 +97,10 @@ pub struct VM {
     field_names: HashMap<u32, String>,
     /// Host-registered native functions, keyed by name.
     native_functions: HashMap<String, NativeFunction>,
+    /// Indexed native function table for `CallNative` fast-path dispatch.
+    native_fn_vec: Vec<NativeFunction>,
+    /// Maps function name → index in `native_fn_vec` for compiler use.
+    native_fn_name_to_idx: HashMap<String, u32>,
     /// Host-registered methods on value types, keyed by (value tag, method name hash).
     methods: HashMap<(ValueTag, u32), NativeMethod>,
     /// Global constants/variables, keyed by name hash → (name, value).
@@ -129,6 +137,8 @@ pub struct VM {
     last_line: u32,
     /// Last file path seen (for detecting line changes).
     last_file: String,
+    /// String interner for deduplicating `Rc<str>` across chunks.
+    interner: super::intern::StringInterner,
 }
 
 impl VM {
@@ -142,6 +152,8 @@ impl VM {
             function_map: HashMap::new(),
             field_names: HashMap::new(),
             native_functions: HashMap::new(),
+            native_fn_vec: Vec::new(),
+            native_fn_name_to_idx: HashMap::new(),
             methods: HashMap::new(),
             globals: HashMap::new(),
             struct_metas: HashMap::new(),
@@ -165,8 +177,10 @@ impl VM {
             has_debug_hooks: false,
             open_upvalues: Vec::new(),
             upvalue_store: Vec::new(),
+            closure_map: Vec::new(),
             has_open_upvalues: false,
             func_ip_cache: Vec::new(),
+            interner: super::intern::StringInterner::new(),
         }
     }
 
@@ -179,10 +193,8 @@ impl VM {
     where
         H: super::binding::IntoNativeHandler,
     {
-        self.native_functions.insert(
-            name.to_string(),
-            NativeFunction::from_handler(name, None, handler),
-        );
+        let nf = NativeFunction::from_handler(name, None, handler);
+        self.register_native_fn(name, nf);
         self
     }
 
@@ -194,10 +206,8 @@ impl VM {
     where
         H: super::binding::IntoNativeHandler,
     {
-        self.native_functions.insert(
-            name.to_string(),
-            NativeFunction::from_handler(name, Some(module), handler),
-        );
+        let nf = NativeFunction::from_handler(name, Some(module), handler);
+        self.register_native_fn(name, nf);
         self
     }
 
@@ -241,19 +251,40 @@ impl VM {
         F: Fn(&[Value]) -> Result<Box<dyn WritObject>, String> + 'static,
     {
         let name_owned = name.to_string();
-        self.native_functions.insert(
-            name.to_string(),
-            NativeFunction {
-                name: name.to_string(),
-                module: None,
-                arity: None,
-                body: Rc::new(move |args| {
-                    let obj = factory(args).map_err(|e| format!("{}: {}", name_owned, e))?;
-                    Ok(Value::Object(Rc::new(RefCell::new(obj))))
-                }),
-            },
-        );
+        let nf = NativeFunction {
+            name: name.to_string(),
+            module: None,
+            arity: None,
+            body: Rc::new(move |args| {
+                let obj = factory(args).map_err(|e| format!("{}: {}", name_owned, e))?;
+                Ok(Value::Object(Rc::new(RefCell::new(obj))))
+            }),
+        };
+        self.register_native_fn(name, nf);
         self
+    }
+
+    /// Internal helper: inserts `nf` into both `native_functions` and `native_fn_vec`.
+    fn register_native_fn(&mut self, name: &str, nf: NativeFunction) {
+        let idx = self.native_fn_vec.len() as u32;
+        let nf2 = NativeFunction {
+            name: nf.name.clone(),
+            module: nf.module.clone(),
+            arity: nf.arity,
+            body: Rc::clone(&nf.body),
+        };
+        if let Some(&existing_idx) = self.native_fn_name_to_idx.get(name) {
+            self.native_fn_vec[existing_idx as usize] = nf2;
+        } else {
+            self.native_fn_vec.push(nf2);
+            self.native_fn_name_to_idx.insert(name.to_string(), idx);
+        }
+        self.native_functions.insert(name.to_string(), nf);
+    }
+
+    /// Returns the native function name→index map, for use by the compiler.
+    pub fn native_fn_index_map(&self) -> &HashMap<String, u32> {
+        &self.native_fn_name_to_idx
     }
 
     /// Disables a standard library module, blocking all native function
@@ -385,12 +416,18 @@ impl VM {
 
         for mut new_func in new_functions {
             new_func.chunk.set_file(file);
+            new_func.chunk.intern_strings(&mut self.interner);
             if let Some(&idx) = self.function_map.get(&new_func.name) {
                 self.functions[idx] = new_func;
+                // Invalidate cached closure upvalues; will be re-captured on next run.
+                if idx < self.closure_map.len() {
+                    self.closure_map[idx] = None;
+                }
             } else {
                 let idx = self.functions.len();
                 self.function_map.insert(new_func.name.clone(), idx);
                 self.functions.push(new_func);
+                self.closure_map.push(None);
             }
         }
 
@@ -427,12 +464,17 @@ impl VM {
 
         for mut new_func in functions.iter().cloned() {
             new_func.chunk.set_file(file);
+            new_func.chunk.intern_strings(&mut self.interner);
             if let Some(&idx) = self.function_map.get(&new_func.name) {
                 self.functions[idx] = new_func;
+                if idx < self.closure_map.len() {
+                    self.closure_map[idx] = None;
+                }
             } else {
                 let idx = self.functions.len();
                 self.function_map.insert(new_func.name.clone(), idx);
                 self.functions.push(new_func);
+                self.closure_map.push(None);
             }
         }
 
@@ -460,6 +502,7 @@ impl VM {
             let idx = self.functions.len();
             self.function_map.insert(func.name.clone(), idx);
             self.functions.push(func.clone());
+            self.closure_map.push(None);
         }
 
         for meta in struct_metas {
@@ -472,13 +515,19 @@ impl VM {
 
         for s in chunk.rc_strings() {
             self.field_names
-                .insert(string_hash(s), s.as_str().to_string());
+                .insert(string_hash(s), s.to_string());
         }
         for func in functions {
             for s in func.chunk.rc_strings() {
                 self.field_names
-                    .insert(string_hash(s), s.as_str().to_string());
+                    .insert(string_hash(s), s.to_string());
             }
+        }
+
+        // Intern strings in newly-added function chunks
+        let start = self.functions.len() - functions.len();
+        for func in &mut self.functions[start..] {
+            func.chunk.intern_strings(&mut self.interner);
         }
 
         self.build_layouts();
@@ -490,6 +539,7 @@ impl VM {
         // `rebuild_ip_cache` captures raw pointers into `main_chunk.code`.
         // Do not remove this clone. See `Chunk` doc comment for details.
         self.main_chunk = chunk.clone();
+        self.main_chunk.intern_strings(&mut self.interner);
 
         self.rebuild_ip_cache();
 
@@ -542,14 +592,15 @@ impl VM {
 
         // Result goes into a temporary slot after the frame
         let result_slot = base; // We'll read it from R(0) after return
+        let upvalues = self.closure_map.get(func_idx).and_then(|e| e.clone());
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base,
             result_reg: result_slot,
             max_registers: max_regs,
-            has_rc_values: self.functions[func_idx].has_rc_values,
-            upvalues: None,
+            has_rc_values: self.functions[func_idx].has_rc_values || upvalues.is_some(),
+            upvalues,
         });
 
         match self.run_until(return_depth)? {
@@ -578,14 +629,15 @@ impl VM {
         }
         self.ensure_registers(base, max_regs);
 
+        let upvalues = self.closure_map.get(func_idx).and_then(|e| e.clone());
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base,
             result_reg: base,
             max_registers: max_regs,
-            has_rc_values: self.functions[func_idx].has_rc_values,
-            upvalues: None,
+            has_rc_values: self.functions[func_idx].has_rc_values || upvalues.is_some(),
+            upvalues,
         });
 
         match self.run_until(return_depth)? {
@@ -616,6 +668,7 @@ impl VM {
         self.stack.clear();
         self.frames.clear();
         self.function_map.clear();
+        self.closure_map.clear();
         self.field_names.clear();
         self.struct_metas.clear();
         self.class_metas.clear();
@@ -625,10 +678,12 @@ impl VM {
         self.coroutines.clear();
         self.next_coroutine_id = 1;
         self.active_coroutine = None;
+        self.interner.clear();
 
         // Clone required: same quickening invariant as load_module. See `Chunk` doc.
         self.main_chunk = chunk.clone();
         self.functions = functions.to_vec();
+        self.closure_map.resize(self.functions.len(), None);
 
         for (i, func) in self.functions.iter().enumerate() {
             self.function_map.insert(func.name.clone(), i);
@@ -642,6 +697,7 @@ impl VM {
             self.class_metas.insert(meta.name.clone(), meta.clone());
         }
 
+        self.intern_chunk_strings();
         self.build_field_names();
         self.build_layouts();
         self.rebuild_ip_cache();
@@ -666,15 +722,23 @@ impl VM {
     }
 
     /// Builds the reverse hash → name lookup from all chunk string pools.
+    /// Interns all string pool entries in main chunk and function chunks.
+    fn intern_chunk_strings(&mut self) {
+        self.main_chunk.intern_strings(&mut self.interner);
+        for func in &mut self.functions {
+            func.chunk.intern_strings(&mut self.interner);
+        }
+    }
+
     fn build_field_names(&mut self) {
         for s in self.main_chunk.rc_strings() {
             self.field_names
-                .insert(string_hash(s), s.as_str().to_string());
+                .insert(string_hash(s), s.to_string());
         }
         for func in &self.functions {
             for s in func.chunk.rc_strings() {
                 self.field_names
-                    .insert(string_hash(s), s.as_str().to_string());
+                    .insert(string_hash(s), s.to_string());
             }
         }
     }
@@ -958,10 +1022,10 @@ impl VM {
                                     .rc_strings()
                                     .iter()
                                     .find(|s| string_hash(s) == name_hash)
-                                    .map(|s| s.as_str().to_string())
+                                    .map(|s| s.to_string())
                             })
                             .unwrap_or_else(|| format!("<unknown:{name_hash}>"));
-                        Value::Str(Rc::new(name))
+                        Value::Str(Rc::from(name.as_str()))
                     };
                     self.stack[base + a as usize] = val;
                 }
@@ -1415,17 +1479,23 @@ impl VM {
                     let arg_count = b;
                     let func_idx = w1 as usize;
                     let n = arg_count as usize;
-                    let func = &self.functions[func_idx];
-                    let max_regs = func.max_registers;
-                    let func_has_rc = func.has_rc_values;
+                    let max_regs = self.functions[func_idx].max_registers;
+                    let func_has_rc = self.functions[func_idx].has_rc_values;
+                    let func_is_variadic = self.functions[func_idx].is_variadic;
+                    let func_arity = self.functions[func_idx].arity;
+                    let func_name = self.functions[func_idx].name.clone();
                     let result_reg = base + base_reg as usize;
 
-                    if func.is_variadic {
-                        let min_args = func.arity.saturating_sub(1);
+                    // Resolve upvalues via closure_map (populated by MakeClosure during main chunk).
+                    let call_upvalues: Option<Vec<u32>> =
+                        self.closure_map.get(func_idx).and_then(|e| e.clone());
+
+                    if func_is_variadic {
+                        let min_args = func_arity.saturating_sub(1);
                         if arg_count < min_args {
                             return Err(self.make_error(format!(
                                 "function '{}' expects at least {} arguments, got {}",
-                                func.name, min_args, arg_count
+                                func_name, min_args, arg_count
                             )));
                         }
                         let fixed_count = min_args as usize;
@@ -1446,13 +1516,13 @@ impl VM {
                             result_reg,
                             max_registers: max_regs,
                             has_rc_values: true,
-                            upvalues: None,
+                            upvalues: call_upvalues,
                         });
                     } else {
-                        if func.arity != arg_count {
+                        if func_arity != arg_count {
                             return Err(self.make_error(format!(
                                 "function '{}' expects {} arguments, got {}",
-                                func.name, func.arity, arg_count
+                                func_name, func_arity, arg_count
                             )));
                         }
                         let new_base = if n == 0 {
@@ -1467,8 +1537,8 @@ impl VM {
                             base: new_base,
                             result_reg,
                             max_registers: max_regs,
-                            has_rc_values: func_has_rc,
-                            upvalues: None,
+                            has_rc_values: func_has_rc || call_upvalues.is_some(),
+                            upvalues: call_upvalues,
                         });
                     }
 
@@ -1531,10 +1601,28 @@ impl VM {
                     reload_ip!(self, chunk_id, 0);
                 }
                 op::CallNative => {
-                    let _w1 = unsafe { *ip };
+                    let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
-                    self.frames.last_mut().unwrap().pc = save_pc!();
-                    return Err(self.make_error("native functions not yet supported".to_string()));
+                    let native_idx = w1 as usize;
+                    let arg_count = b as usize;
+                    let callee_abs = base + a as usize;
+                    let arg_start = callee_abs;
+                    let native = unsafe { self.native_fn_vec.get_unchecked(native_idx) };
+                    if let Some(ref module) = native.module.clone() {
+                        if self.disabled_modules.contains(module.as_str()) {
+                            self.frames.last_mut().unwrap().pc = save_pc!();
+                            return Err(self.make_error(format!("module '{module}' is disabled")));
+                        }
+                    }
+                    let body = Rc::clone(&native.body);
+                    let result = {
+                        let args = &self.stack[arg_start..arg_start + arg_count];
+                        body(args).map_err(|msg| {
+                            self.frames.last_mut().unwrap().pc = save_pc!();
+                            self.make_error(msg)
+                        })?
+                    };
+                    self.stack[callee_abs] = result;
                 }
 
                 // ── Null handling ────────────────────────────────────
@@ -1554,7 +1642,7 @@ impl VM {
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
                     let result = format!("{lhs}{rhs}");
-                    self.stack[base + a as usize] = Value::Str(Rc::new(result));
+                    self.stack[base + a as usize] = Value::Str(Rc::from(result.as_str()));
                 }
 
                 // ── Collections ──────────────────────────────────────
@@ -1571,7 +1659,7 @@ impl VM {
                     let mut map = HashMap::new();
                     for i in 0..n {
                         let key = match &self.stack[s + i * 2] {
-                            Value::Str(sk) => (**sk).clone(),
+                            Value::Str(sk) => sk.to_string(),
                             other => other.to_string(),
                         };
                         let val = self.stack[s + i * 2 + 1].cheap_clone();
@@ -1666,7 +1754,8 @@ impl VM {
                     self.frames.last_mut().unwrap().pc = save_pc!();
                     let seconds = &self.stack[base + a as usize];
                     let secs = match seconds {
-                        v @ (Value::F32(_) | Value::F64(_)) => v.as_f64(),
+                        Value::F32(v) => *v as f64,
+                        Value::F64(v) => *v,
                         v @ (Value::I32(_) | Value::I64(_)) => v.as_i64() as f64,
                         _ => {
                             return Err(self.make_error(format!(
@@ -1689,7 +1778,9 @@ impl VM {
                             )));
                         }
                     };
-                    return Ok(RunResult::Yield(WaitCondition::Frames { remaining: n }));
+                    // The current tick counts as the first frame, so subtract 1.
+                    // remaining=0 means resume next tick; remaining=1 means skip one tick.
+                    return Ok(RunResult::Yield(WaitCondition::Frames { remaining: n.saturating_sub(1) }));
                 }
                 op::YieldUntil => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -2763,7 +2854,7 @@ impl VM {
             (a @ (Value::F32(_) | Value::F64(_)), b @ (Value::I32(_) | Value::I64(_))) => {
                 Value::F64(a.as_f64() + b.as_i64() as f64)
             }
-            (Value::Str(a), Value::Str(b)) => Value::Str(Rc::new(format!("{a}{b}"))),
+            (Value::Str(a), Value::Str(b)) => Value::Str(Rc::from(format!("{a}{b}").as_str())),
             _ => {
                 let lhs_v = self.stack[base + a as usize].clone();
                 let rhs_v = self.stack[base + b as usize].clone();
@@ -3039,11 +3130,14 @@ impl VM {
         };
 
         if let Some(func_idx) = func_idx {
-            let func = &self.functions[func_idx];
-            let expected_arity = func.arity;
-            let is_variadic = func.is_variadic;
-            let max_regs = func.max_registers;
-            let func_has_rc = func.has_rc_values;
+            let expected_arity = self.functions[func_idx].arity;
+            let is_variadic = self.functions[func_idx].is_variadic;
+            let max_regs = self.functions[func_idx].max_registers;
+            let func_has_rc = self.functions[func_idx].has_rc_values;
+
+            // Resolve upvalues via closure_map (populated by MakeClosure during main chunk).
+            let call_upvalues: Option<Vec<u32>> =
+                self.closure_map.get(func_idx).and_then(|e| e.clone());
 
             if is_variadic {
                 let min_args = expected_arity.saturating_sub(1);
@@ -3077,7 +3171,7 @@ impl VM {
                     result_reg: callee_abs,
                     max_registers: max_regs,
                     has_rc_values: true, // variadic creates Array
-                    upvalues: None,
+                    upvalues: call_upvalues,
                 });
             } else {
                 if expected_arity != arg_count {
@@ -3099,8 +3193,8 @@ impl VM {
                     base: new_base,
                     result_reg: callee_abs,
                     max_registers: max_regs,
-                    has_rc_values: func_has_rc,
-                    upvalues: None,
+                    has_rc_values: func_has_rc || call_upvalues.is_some(),
+                    upvalues: call_upvalues,
                 });
             }
 
@@ -3109,7 +3203,7 @@ impl VM {
 
         // Fall back to native functions
         let func_name = match &self.stack[callee_abs] {
-            Value::Str(s) => (**s).clone(),
+            Value::Str(s) => s.to_string(),
             _ => unreachable!(),
         };
 
@@ -3184,7 +3278,7 @@ impl VM {
         let obj = self.stack[callee_abs + 1].clone();
         let method_name_val = self.stack[callee_abs + 2].clone();
         let method_name = match &method_name_val {
-            Value::Str(s) => (**s).clone(),
+            Value::Str(s) => s.to_string(),
             _ => return Err(self.make_error("invoke: method name must be a string".to_string())),
         };
 
@@ -3281,7 +3375,7 @@ impl VM {
 
             if name_hash == map_hash && arg_count == 1 {
                 let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => return Err(self.make_error("map expects a function".to_string())),
                 };
                 let items = arr.borrow().clone();
@@ -3296,7 +3390,7 @@ impl VM {
 
             if name_hash == filter_hash && arg_count == 1 {
                 let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => return Err(self.make_error("filter expects a function".to_string())),
                 };
                 let items = arr.borrow().clone();
@@ -3313,7 +3407,7 @@ impl VM {
 
             if name_hash == reduce_hash && arg_count == 2 {
                 let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => return Err(self.make_error("reduce expects a function".to_string())),
                 };
                 let items = arr.borrow().clone();
@@ -3336,7 +3430,7 @@ impl VM {
 
             if name_hash == map_hash && arg_count == 1 {
                 let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => return Err(self.make_error("map expects a function".to_string())),
                 };
                 let items: Vec<Value> = {
@@ -3356,7 +3450,7 @@ impl VM {
 
             if name_hash == filter_hash && arg_count == 1 {
                 let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => return Err(self.make_error("filter expects a function".to_string())),
                 };
                 let items: Vec<Value> = {
@@ -3378,7 +3472,7 @@ impl VM {
 
             if name_hash == for_each_hash && arg_count == 1 {
                 let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => return Err(self.make_error("for_each expects a function".to_string())),
                 };
                 let items: Vec<Value> = {
@@ -3396,7 +3490,7 @@ impl VM {
 
             if name_hash == iter_field_hash && arg_count == 1 {
                 let field_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     _ => {
                         return Err(
                             self.make_error("iter_field expects a string field name".to_string())
@@ -3409,7 +3503,7 @@ impl VM {
                     None => {
                         return Err(self.make_error(format!(
                             "'{}' has no field '{}'",
-                            container.type_name, field_name
+                            container.layout.type_name, field_name
                         )));
                     }
                 };
@@ -3640,7 +3734,7 @@ impl VM {
             }
             (Value::Dict(dict), Value::Str(key)) => {
                 let dict = dict.borrow();
-                dict.get(key.as_str()).cloned().unwrap_or(Value::Null)
+                dict.get(&**key).cloned().unwrap_or(Value::Null)
             }
             #[cfg(feature = "mobile-aosoa")]
             (Value::AoSoA(container), idx_val @ (Value::I32(_) | Value::I64(_))) => {
@@ -3693,7 +3787,7 @@ impl VM {
             }
             (Value::Dict(dict), Value::Str(key)) => {
                 let mut dict = dict.borrow_mut();
-                dict.insert((**key).clone(), value);
+                dict.insert(key.to_string(), value);
             }
             #[cfg(feature = "mobile-aosoa")]
             (Value::AoSoA(container), idx_val @ (Value::I32(_) | Value::I64(_))) => {
@@ -3742,7 +3836,7 @@ impl VM {
         let struct_name = chunk
             .rc_strings()
             .get(name_idx as usize)
-            .map(|s| s.as_str().to_string())
+            .map(|s| s.to_string())
             .ok_or_else(|| self.make_error(format!("invalid struct name index {name_idx}")))?;
 
         let layout = self
@@ -3780,7 +3874,7 @@ impl VM {
         let class_name = chunk
             .rc_strings()
             .get(name_idx as usize)
-            .map(|s| s.as_str().to_string())
+            .map(|s| s.to_string())
             .ok_or_else(|| self.make_error(format!("invalid class name index {name_idx}")))?;
 
         let layout = self
@@ -3838,6 +3932,12 @@ impl VM {
                     .expect("transitive capture requires parent closure");
                 upvalues.push(parent_uv[desc.index as usize]);
             }
+        }
+
+        // Store upvalue indices in closure_map so that call_function / CallDirect can
+        // provide correct upvalues after the main chunk's stack has been cleared.
+        if func_idx < self.closure_map.len() {
+            self.closure_map[func_idx] = Some(upvalues.clone());
         }
 
         let abs_dst = base + dst as usize;
@@ -3942,7 +4042,7 @@ impl VM {
         let abs = base + src as usize;
         let val = &self.stack[abs];
         match val {
-            Value::Array(ref arr) => {
+            Value::Array(arr) => {
                 let elements = arr.borrow();
 
                 let first_type = match elements.first() {
@@ -4035,7 +4135,7 @@ impl VM {
                         Some(WaitCondition::OneFrame) => true,
                         Some(WaitCondition::Seconds { remaining }) => {
                             *remaining -= delta;
-                            *remaining <= 0.0
+                            *remaining <= 1e-6
                         }
                         Some(WaitCondition::Frames { remaining }) => {
                             if *remaining > 0 {

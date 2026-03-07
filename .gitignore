@@ -43,3 +43,6 @@ tarpaulin-report.html
 *.profraw
 lcov.info
 flamegraphs/
+
+# Misc
+crates/writ-bench/

@@ -34,7 +34,7 @@ pub fn register(vm: &mut VM) {
                     line.pop();
                 }
             }
-            Ok(Value::Str(Rc::new(line)))
+            Ok(Value::Str(Rc::from(line.as_str())))
         }),
     );
 

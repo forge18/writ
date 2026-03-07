@@ -48,11 +48,11 @@ impl WritObject for WritColor {
                 let b = (self.b.clamp(0.0, 1.0) * 255.0) as u8;
                 let a = (self.a.clamp(0.0, 1.0) * 255.0) as u8;
                 if a == 255 {
-                    Ok(Value::Str(Rc::new(format!("#{r:02X}{g:02X}{b:02X}"))))
+                    Ok(Value::Str(Rc::from(format!("#{r:02X}{g:02X}{b:02X}").as_str())))
                 } else {
-                    Ok(Value::Str(Rc::new(format!(
-                        "#{r:02X}{g:02X}{b:02X}{a:02X}"
-                    ))))
+                    Ok(Value::Str(Rc::from(
+                        format!("#{r:02X}{g:02X}{b:02X}{a:02X}").as_str()
+                    )))
                 }
             }
             "toHSV" => {

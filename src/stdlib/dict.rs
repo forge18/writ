@@ -16,7 +16,7 @@ pub fn register(vm: &mut VM) {
             let keys: Vec<Value> = dict
                 .borrow()
                 .keys()
-                .map(|k| Value::Str(Rc::new(k.clone())))
+                .map(|k| Value::Str(Rc::from(k.as_str())))
                 .collect();
             Ok(Value::Array(Rc::new(RefCell::new(keys))))
         }),
@@ -36,8 +36,8 @@ pub fn register(vm: &mut VM) {
         ValueTag::Dict,
         "has",
         Some("dictionary"),
-        mfn1(|dict: Dict, key: Rc<String>| -> Result<bool, String> {
-            Ok(dict.borrow().contains_key(key.as_str()))
+        mfn1(|dict: Dict, key: Rc<str>| -> Result<bool, String> {
+            Ok(dict.borrow().contains_key(&*key))
         }),
     );
 
@@ -45,10 +45,10 @@ pub fn register(vm: &mut VM) {
         ValueTag::Dict,
         "remove",
         Some("dictionary"),
-        mfn1(|dict: Dict, key: Rc<String>| -> Result<Value, String> {
+        mfn1(|dict: Dict, key: Rc<str>| -> Result<Value, String> {
             Ok(dict
                 .borrow_mut()
-                .remove(key.as_str())
+                .remove(&*key)
                 .unwrap_or(Value::Null))
         }),
     );

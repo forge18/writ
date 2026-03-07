@@ -56,7 +56,7 @@ pub fn register(vm: &mut VM) {
                 Value::Str(s) => s.clone(),
                 other => return Err(format!("noiseType expects string, got {:?}", other)),
             };
-            let nt = match name.as_str() {
+            let nt = match &*name {
                 "perlin" => NoiseType::Perlin,
                 "simplex" | "openSimplex2" => NoiseType::OpenSimplex2,
                 "openSimplex2S" => NoiseType::OpenSimplex2S,

@@ -25,7 +25,7 @@ impl WritObject for WritRegex {
 
     fn get_field(&self, name: &str) -> Result<Value, String> {
         match name {
-            "source" => Ok(Value::Str(Rc::new(self.source.clone()))),
+            "source" => Ok(Value::Str(Rc::from(self.source.as_str()))),
             _ => Err(format!("Regex has no field '{name}'")),
         }
     }
@@ -41,7 +41,7 @@ impl WritObject for WritRegex {
             "match" => {
                 let input = extract_str(args.first(), "match")?;
                 match self.pattern.find(&input) {
-                    Some(m) => Ok(Value::Str(Rc::new(m.as_str().to_string()))),
+                    Some(m) => Ok(Value::Str(Rc::from(m.as_str()))),
                     None => Ok(Value::Null),
                 }
             }
@@ -53,7 +53,7 @@ impl WritObject for WritRegex {
                 let matches: Vec<Value> = self
                     .pattern
                     .find_iter(&input)
-                    .map(|m| Value::Str(Rc::new(m.as_str().to_string())))
+                    .map(|m| Value::Str(Rc::from(m.as_str())))
                     .collect();
                 Ok(Value::Array(Rc::new(RefCell::new(matches))))
             }
@@ -63,8 +63,8 @@ impl WritObject for WritRegex {
             "replace" => {
                 let input = extract_str(args.first(), "replace: input")?;
                 let replacement = extract_str(args.get(1), "replace: replacement")?;
-                Ok(Value::Str(Rc::new(
-                    self.pattern.replacen(&input, 1, replacement.as_str()).to_string(),
+                Ok(Value::Str(Rc::from(
+                    self.pattern.replacen(&input, 1, replacement.as_str()).as_ref()
                 )))
             }
 
@@ -73,8 +73,8 @@ impl WritObject for WritRegex {
             "replaceAll" => {
                 let input = extract_str(args.first(), "replaceAll: input")?;
                 let replacement = extract_str(args.get(1), "replaceAll: replacement")?;
-                Ok(Value::Str(Rc::new(
-                    self.pattern.replace_all(&input, replacement.as_str()).to_string(),
+                Ok(Value::Str(Rc::from(
+                    self.pattern.replace_all(&input, replacement.as_str()).as_ref()
                 )))
             }
 
@@ -96,7 +96,7 @@ impl WritObject for WritRegex {
 
 fn extract_str(val: Option<&Value>, context: &str) -> Result<String, String> {
     match val {
-        Some(Value::Str(s)) => Ok((**s).clone()),
+        Some(Value::Str(s)) => Ok(s.to_string()),
         Some(other) => Err(format!("{context}: expected string, got {}", other.type_name())),
         None => Err(format!("{context}: missing string argument")),
     }
@@ -105,7 +105,7 @@ fn extract_str(val: Option<&Value>, context: &str) -> Result<String, String> {
 pub fn register(vm: &mut VM) {
     vm.register_type("Regex", |args| {
         let pattern = match args.first() {
-            Some(Value::Str(s)) => s.as_str().to_string(),
+            Some(Value::Str(s)) => s.to_string(),
             Some(other) => {
                 return Err(format!(
                     "Regex: expected string pattern, got {}",

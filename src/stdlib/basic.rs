@@ -8,7 +8,7 @@ pub fn register(vm: &mut VM) {
         "print",
         fn1(|v: Value| -> Result<(), String> {
             let output = match &v {
-                Value::Str(s) => (**s).clone(),
+                Value::Str(s) => s.to_string(),
                 other => other.to_string(),
             };
             println!("{output}");
@@ -21,7 +21,7 @@ pub fn register(vm: &mut VM) {
         fn2(|condition: bool, message: Value| -> Result<(), String> {
             if !condition {
                 let msg = match &message {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     other => other.to_string(),
                 };
                 return Err(format!("assertion failed: {msg}"));
@@ -32,6 +32,6 @@ pub fn register(vm: &mut VM) {
 
     vm.register_fn(
         "type",
-        fn1(|v: Value| -> Result<Value, String> { Ok(Value::Str(Rc::new(v.type_name_owned()))) }),
+        fn1(|v: Value| -> Result<Value, String> { Ok(Value::Str(Rc::from(v.type_name_owned().as_str()))) }),
     );
 }

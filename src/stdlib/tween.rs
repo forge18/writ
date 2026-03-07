@@ -95,7 +95,7 @@ impl WritObject for WritTween {
         match name {
             "setEasing" => match args.first() {
                 Some(Value::Str(s)) => {
-                    let f: Rc<dyn Fn(f64) -> f64> = match s.as_str() {
+                    let f: Rc<dyn Fn(f64) -> f64> = match &**s {
                         "linear" => Rc::new(|t| t),
                         "easeInQuad" => Rc::new(|t| t * t),
                         "easeOutQuad" => Rc::new(|t| 1.0 - (1.0 - t) * (1.0 - t)),
@@ -125,7 +125,7 @@ impl WritObject for WritTween {
             },
             "setLoop" => {
                 let mode = match args.first() {
-                    Some(Value::Str(s)) => match s.as_str() {
+                    Some(Value::Str(s)) => match &**s {
                         "none" => LoopMode::None,
                         "loop" => LoopMode::Loop,
                         "pingpong" => LoopMode::PingPong,

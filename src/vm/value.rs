@@ -36,7 +36,7 @@ pub enum Value {
     /// Boolean.
     Bool(bool),
     /// Reference-counted string.
-    Str(Rc<String>),
+    Str(Rc<str>),
     /// Null value.
     Null,
     /// Reference-counted mutable array.
@@ -221,7 +221,7 @@ impl PartialEq for Value {
             (Value::F64(a), Value::F32(b)) => a.to_bits() == (*b as f64).to_bits(),
             (Value::F64(a), Value::F64(b)) => a.to_bits() == b.to_bits(),
             (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => Rc::ptr_eq(a, b) || a == b,
             (Value::Null, Value::Null) => true,
             (Value::Array(a), Value::Array(b)) => Rc::ptr_eq(a, b),
             (Value::Dict(a), Value::Dict(b)) => Rc::ptr_eq(a, b),
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_display_string() {
-        let v = Value::Str(Rc::new("hello".to_string()));
+        let v = Value::Str(Rc::from("hello"));
         assert_eq!(v.to_string(), "hello");
     }
 
@@ -410,7 +410,7 @@ mod tests {
         assert!(Value::Bool(false).is_falsy());
         assert!(!Value::Bool(true).is_falsy());
         assert!(!Value::I32(0).is_falsy());
-        assert!(!Value::Str(Rc::new(String::new())).is_falsy());
+        assert!(!Value::Str(Rc::from("")).is_falsy());
     }
 
     #[test]
@@ -422,8 +422,8 @@ mod tests {
         assert_ne!(Value::I32(1), Value::F32(1.0));
         assert_eq!(Value::Null, Value::Null);
         assert_eq!(
-            Value::Str(Rc::new("hello".to_string())),
-            Value::Str(Rc::new("hello".to_string()))
+            Value::Str(Rc::from("hello")),
+            Value::Str(Rc::from("hello"))
         );
     }
 
@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(Value::F32(0.0).type_name(), "float");
         assert_eq!(Value::F64(0.0).type_name(), "float");
         assert_eq!(Value::Bool(true).type_name(), "bool");
-        assert_eq!(Value::Str(Rc::new(String::new())).type_name(), "string");
+        assert_eq!(Value::Str(Rc::from("")).type_name(), "string");
         assert_eq!(Value::Null.type_name(), "null");
     }
 

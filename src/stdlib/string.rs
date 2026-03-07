@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::vm::binding::{mfn0, mfn1, mfn2};
 use crate::vm::{VM, Value, ValueTag};
 
-type RcStr = Rc<String>;
+type RcStr = Rc<str>;
 type Arr = Rc<RefCell<Vec<Value>>>;
 
 pub fn register(vm: &mut VM) {
@@ -54,7 +54,7 @@ pub fn register(vm: &mut VM) {
         ValueTag::Str,
         "contains",
         Some("string"),
-        mfn1(|s: RcStr, needle: RcStr| -> Result<bool, String> { Ok(s.contains(needle.as_str())) }),
+        mfn1(|s: RcStr, needle: RcStr| -> Result<bool, String> { Ok(s.contains(&*needle)) }),
     );
 
     vm.register_method(
@@ -62,7 +62,7 @@ pub fn register(vm: &mut VM) {
         "startsWith",
         Some("string"),
         mfn1(|s: RcStr, prefix: RcStr| -> Result<bool, String> {
-            Ok(s.starts_with(prefix.as_str()))
+            Ok(s.starts_with(&*prefix))
         }),
     );
 
@@ -71,7 +71,7 @@ pub fn register(vm: &mut VM) {
         "endsWith",
         Some("string"),
         mfn1(|s: RcStr, suffix: RcStr| -> Result<bool, String> {
-            Ok(s.ends_with(suffix.as_str()))
+            Ok(s.ends_with(&*suffix))
         }),
     );
 
@@ -81,7 +81,7 @@ pub fn register(vm: &mut VM) {
         Some("string"),
         mfn2(
             |s: RcStr, old: RcStr, new: RcStr| -> Result<String, String> {
-                Ok(s.replace(old.as_str(), new.as_str()))
+                Ok(s.replace(&*old, &*new))
             },
         ),
     );
@@ -92,8 +92,8 @@ pub fn register(vm: &mut VM) {
         Some("string"),
         mfn1(|s: RcStr, separator: RcStr| -> Result<Value, String> {
             let parts: Vec<Value> = s
-                .split(separator.as_str())
-                .map(|part| Value::Str(Rc::new(part.to_string())))
+                .split(&*separator)
+                .map(|part| Value::Str(Rc::from(part)))
                 .collect();
             Ok(Value::Array(Rc::new(RefCell::new(parts))))
         }),
@@ -108,11 +108,11 @@ pub fn register(vm: &mut VM) {
             let parts: Vec<String> = items
                 .iter()
                 .map(|v| match v {
-                    Value::Str(s) => (**s).clone(),
+                    Value::Str(s) => s.to_string(),
                     other => other.to_string(),
                 })
                 .collect();
-            Ok(parts.join(separator.as_str()))
+            Ok(parts.join(&*separator))
         }),
     );
 
@@ -122,7 +122,7 @@ pub fn register(vm: &mut VM) {
         Some("string"),
         mfn1(|s: RcStr, idx: i64| -> Result<Value, String> {
             match s.chars().nth(idx as usize) {
-                Some(c) => Ok(Value::Str(Rc::new(c.to_string()))),
+                Some(c) => Ok(Value::Str(Rc::from(c.to_string().as_str()))),
                 None => Ok(Value::Null),
             }
         }),
@@ -133,7 +133,7 @@ pub fn register(vm: &mut VM) {
         "indexOf",
         Some("string"),
         mfn1(|s: RcStr, needle: RcStr| -> Result<i32, String> {
-            Ok(match s.find(needle.as_str()) {
+            Ok(match s.find(&*needle) {
                 Some(pos) => pos as i32,
                 None => -1,
             })

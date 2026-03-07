@@ -165,6 +165,7 @@ impl Writ {
         let stmts = parser.parse_program()?;
 
         let mut compiler = Compiler::new();
+        compiler.set_native_index(self.vm.native_fn_index_map().clone());
         compiler.pre_register_classes(&stmts);
         if self.type_check_enabled {
             let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
@@ -199,6 +200,7 @@ impl Writ {
         let stmts = parser.parse_program()?;
 
         let mut compiler = Compiler::new();
+        compiler.set_native_index(self.vm.native_fn_index_map().clone());
         compiler.pre_register_classes(&stmts);
         if self.type_check_enabled {
             let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
@@ -331,6 +333,7 @@ impl Writ {
         let stmts = parser.parse_program()?;
 
         let mut compiler = Compiler::new();
+        compiler.set_native_index(self.vm.native_fn_index_map().clone());
         compiler.pre_register_classes(&stmts);
         if self.type_check_enabled {
             let typed_stmts = self.type_checker.check_program_typed(&stmts)?;

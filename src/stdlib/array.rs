@@ -156,16 +156,16 @@ pub fn register(vm: &mut VM) {
         "join",
         Some("array"),
         mfn1(
-            |arr: Arr, separator: Rc<String>| -> Result<String, String> {
+            |arr: Arr, separator: Rc<str>| -> Result<String, String> {
                 let items = arr.borrow();
                 let parts: Vec<String> = items
                     .iter()
                     .map(|v| match v {
-                        Value::Str(s) => (**s).clone(),
+                        Value::Str(s) => s.to_string(),
                         other => other.to_string(),
                     })
                     .collect();
-                Ok(parts.join(separator.as_str()))
+                Ok(parts.join(&*separator))
             },
         ),
     );

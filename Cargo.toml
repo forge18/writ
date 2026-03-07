@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/writ-lsp"]
+members = ["crates/writ-lsp", "crates/writ-bench"]
 
 [workspace.package]
 version = "0.1.0"

@@ -213,7 +213,7 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Generate coverage
-        run: cargo tarpaulin --all-features --out xml --out lcov --verbose
+        run: cargo tarpaulin --all-features --features debug-hooks --out xml --out lcov --verbose
 
       - name: Extract coverage percentage
         id: coverage

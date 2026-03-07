@@ -27,7 +27,7 @@ pub struct Chunk {
     instruction_offsets: Vec<u32>,
     /// Number of logical instructions.
     instr_count: usize,
-    strings: Vec<Rc<String>>,
+    strings: Vec<Rc<str>>,
     /// O(1) deduplication index: string content → pool index.
     string_dedup: HashMap<String, u32>,
     /// 64-bit integer constant pool (for LoadConstInt).
@@ -74,7 +74,7 @@ impl Chunk {
             return index;
         }
         let index = self.strings.len() as u32;
-        let rc = Rc::new(s.to_string());
+        let rc: Rc<str> = Rc::from(s);
         self.strings.push(rc);
         self.string_dedup.insert(s.to_string(), index);
         index
@@ -160,15 +160,22 @@ impl Chunk {
         }
     }
 
-    /// Returns the string constant pool as `Rc<String>` references.
+    /// Returns the string constant pool as `Rc<str>` references.
     /// Use this from the VM to avoid cloning strings on LoadStr.
-    pub fn rc_strings(&self) -> &[Rc<String>] {
+    pub fn rc_strings(&self) -> &[Rc<str>] {
         &self.strings
+    }
+
+    /// Replaces all string pool entries with their interned equivalents.
+    pub fn intern_strings(&mut self, interner: &mut crate::vm::StringInterner) {
+        for s in &mut self.strings {
+            *s = interner.intern_rc(s);
+        }
     }
 
     /// Returns the string constant pool as string slices (for compiler/test use).
     pub fn strings(&self) -> Vec<&str> {
-        self.strings.iter().map(|s| s.as_str()).collect()
+        self.strings.iter().map(|s| &**s).collect()
     }
 
     /// Adds a 64-bit integer to the constant pool. Returns the index.

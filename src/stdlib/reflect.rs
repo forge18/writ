@@ -9,7 +9,7 @@ use crate::vm::{VM, Value};
 pub fn register(vm: &mut VM) {
     vm.register_fn(
         "typeof",
-        fn1(|v: Value| -> Result<Value, String> { Ok(Value::Str(Rc::new(v.type_name_owned()))) }),
+        fn1(|v: Value| -> Result<Value, String> { Ok(Value::Str(Rc::from(v.type_name_owned().as_str()))) }),
     );
 
     vm.register_fn(
@@ -79,12 +79,12 @@ pub fn register(vm: &mut VM) {
                 Value::Struct(s) => s
                     .public_field_names()
                     .into_iter()
-                    .map(|n| Value::Str(Rc::new(n)))
+                    .map(|n| Value::Str(Rc::from(n.as_str())))
                     .collect(),
                 Value::Dict(d) => d
                     .borrow()
                     .keys()
-                    .map(|k| Value::Str(Rc::new(k.clone())))
+                    .map(|k| Value::Str(Rc::from(k.as_str())))
                     .collect(),
                 _ => Vec::new(),
             };
@@ -99,7 +99,7 @@ pub fn register(vm: &mut VM) {
                 Value::Struct(s) => s
                     .public_method_names()
                     .into_iter()
-                    .map(|n| Value::Str(Rc::new(n)))
+                    .map(|n| Value::Str(Rc::from(n.as_str())))
                     .collect(),
                 _ => Vec::new(),
             };

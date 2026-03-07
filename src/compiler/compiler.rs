@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use crate::lexer::Span;
 
 use crate::parser::{
@@ -149,6 +149,8 @@ pub struct Compiler {
     function_index: std::collections::HashMap<String, u16>,
     /// Function name → return type for typed instruction emission after CallDirect.
     function_return_types: std::collections::HashMap<String, ExprType>,
+    /// Native function name → index in VM's `native_fn_vec` for `CallNative` dispatch.
+    native_index: HashMap<String, u32>,
     /// Next available register slot.
     next_reg: u8,
     /// High-water mark of registers used (becomes max_registers).
@@ -180,6 +182,7 @@ impl Compiler {
             reg_types: Vec::new(),
             function_index: std::collections::HashMap::new(),
             function_return_types: std::collections::HashMap::new(),
+            native_index: HashMap::new(),
             next_reg: 0,
             max_reg: 0,
             current_class: None,
@@ -229,6 +232,11 @@ impl Compiler {
     /// Returns a reference to the struct metadata.
     pub fn struct_metas(&self) -> &[StructMeta] {
         &self.struct_metas
+    }
+
+    /// Sets the native function index map from the VM, enabling `CallNative` emission.
+    pub fn set_native_index(&mut self, index: HashMap<String, u32>) {
+        self.native_index = index;
     }
 
     /// Emits a single instruction at the given source line.
@@ -640,6 +648,25 @@ impl Compiler {
             }
             ExprKind::Cast { expr, .. } => self.compile_expr(expr, dst),
             ExprKind::Super { method, args } => self.compile_super(method, args, &expr.span, dst),
+            ExprKind::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let d = self.dst_or_temp(dst, &expr.span)?;
+                let cond_reg = self.compile_expr(condition, None)?;
+                let else_jump = self
+                    .chunk
+                    .emit_jump(Instruction::JumpIfFalsy(cond_reg, 0), line);
+                self.maybe_free_temp(cond_reg, d);
+                self.compile_expr(then_expr, Some(d))?;
+                let end_jump = self.chunk.emit_jump(Instruction::Jump(0), line);
+                self.chunk.patch_jump(else_jump);
+                self.compile_expr(else_expr, Some(d))?;
+                self.chunk.patch_jump(end_jump);
+                self.set_reg_type(d, ExprType::Other);
+                Ok(d)
+            }
             other => Err(CompileError {
                 annotation: None,
                 message: format!("unsupported expression: {other:?}"),
@@ -651,6 +678,10 @@ impl Compiler {
     /// Free `reg` if it's a temporary (i.e., >= next_reg-1 and != keep).
     fn maybe_free_temp(&mut self, reg: u8, keep: u8) {
         if reg != keep && reg == self.next_reg - 1 {
+            // Don't free a register that belongs to a named local variable.
+            if self.locals.iter().any(|l| l.slot == reg) {
+                return;
+            }
             self.free_temp(reg);
         }
     }
@@ -1907,16 +1938,28 @@ impl Compiler {
 
         if let Some(slot) = predeclared_slot {
             if has_upvalues {
-                let func_idx = u16::try_from(func_idx).map_err(|_| CompileError {
+                let func_idx_u16 = u16::try_from(func_idx).map_err(|_| CompileError {
                     annotation: None,
                     message: "too many functions (max 65535)".to_string(),
                     span: span.clone(),
                 })?;
-                self.emit(Instruction::MakeClosure(slot, func_idx), line);
+                self.emit(Instruction::MakeClosure(slot, func_idx_u16), line);
             } else {
                 let index = self.chunk.add_string(&func.name);
                 self.emit(Instruction::LoadStr(slot, index), line);
             }
+        } else if has_upvalues {
+            // Top-level function captures upvalues — emit MakeClosure into a
+            // scratch register so the VM populates closure_map while the main
+            // chunk's stack is still live.
+            let scratch = self.alloc_temp(span)?;
+            let func_idx_u16 = u16::try_from(func_idx).map_err(|_| CompileError {
+                annotation: None,
+                message: "too many functions (max 65535)".to_string(),
+                span: span.clone(),
+            })?;
+            self.emit(Instruction::MakeClosure(scratch, func_idx_u16), line);
+            self.free_temp(scratch);
         }
 
         Ok(())
@@ -2121,6 +2164,74 @@ impl Compiler {
                     return Ok(d);
                 }
                 return Ok(base);
+            }
+        }
+
+        // Special coroutine suspension functions
+        if let ExprKind::Identifier(name) = &callee.kind {
+            match name.as_str() {
+                "waitForSeconds" => {
+                    if args.len() != 1 {
+                        return Err(CompileError {
+                            annotation: None,
+                            message: "waitForSeconds expects 1 argument".to_string(),
+                            span: span.clone(),
+                        });
+                    }
+                    self.has_yield = true;
+                    let r = self.compile_call_arg_to_reg(&args[0], span)?;
+                    let dst_reg = dst.unwrap_or(r);
+                    self.emit(Instruction::YieldSeconds(r), line);
+                    self.maybe_free_temp(r, dst_reg);
+                    return Ok(dst_reg);
+                }
+                "waitForFrames" => {
+                    if args.len() != 1 {
+                        return Err(CompileError {
+                            annotation: None,
+                            message: "waitForFrames expects 1 argument".to_string(),
+                            span: span.clone(),
+                        });
+                    }
+                    self.has_yield = true;
+                    let r = self.compile_call_arg_to_reg(&args[0], span)?;
+                    let dst_reg = dst.unwrap_or(r);
+                    self.emit(Instruction::YieldFrames(r), line);
+                    self.maybe_free_temp(r, dst_reg);
+                    return Ok(dst_reg);
+                }
+                _ => {}
+            }
+        }
+
+        // Native call: known host function → CallNative(base, idx, arity)
+        if let ExprKind::Identifier(name) = &callee.kind {
+            let is_local = self.resolve_local(name).is_some();
+            let is_upvalue = !is_local && self.resolve_upvalue(name).is_some();
+            if !is_local && !is_upvalue {
+                if let Some(&native_idx) = self.native_index.get(name.as_str()) {
+                    let base = self.next_reg;
+                    for arg in args {
+                        let arg_reg = self.alloc_temp(span)?;
+                        self.compile_call_arg(arg, Some(arg_reg))?;
+                    }
+                    let arity = u8::try_from(args.len()).map_err(|_| CompileError {
+                        annotation: None,
+                        message: "too many arguments (max 255)".to_string(),
+                        span: span.clone(),
+                    })?;
+                    self.emit(Instruction::CallNative(base, native_idx, arity), line);
+                    self.next_reg = base + 1;
+                    self.set_reg_type(base, ExprType::Other);
+                    if let Some(d) = dst {
+                        if d != base {
+                            self.emit(Instruction::Move(d, base), line);
+                            self.next_reg = base;
+                        }
+                        return Ok(d);
+                    }
+                    return Ok(base);
+                }
             }
         }
 

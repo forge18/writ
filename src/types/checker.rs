@@ -1305,7 +1305,14 @@ impl TypeChecker {
     }
 
     fn check_return(&mut self, value: Option<&Expr>, span: &Span) -> Result<(), TypeError> {
-        let expected = self.current_return_type.clone().unwrap_or(Type::Void);
+        // At top level (outside any function), current_return_type is None.
+        // Allow any return value there.
+        let Some(expected) = self.current_return_type.clone() else {
+            if let Some(expr) = value {
+                self.infer_expr(expr)?;
+            }
+            return Ok(());
+        };
 
         match value {
             Some(expr) => {
