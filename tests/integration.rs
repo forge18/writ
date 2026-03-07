@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use writ::{Value, ValueTag, Writ, WritError, WritObject, Type, fn0, fn1, fn2, mfn0, mfn1, mfn2};
+use writ::{Value, ValueTag, Writ, WritError, WritObject, Type, fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -2752,4 +2752,123 @@ fn test_value_type_name_owned() {
     assert_eq!(Value::Bool(true).type_name_owned(), "bool");
     assert_eq!(Value::Null.type_name_owned(), "null");
     assert_eq!(Value::Str(Rc::from("x")).type_name_owned(), "string");
+}
+
+// ── Value::is_null ────────────────────────────────────────────────────────────
+
+#[test]
+fn test_value_is_null_true() {
+    assert!(Value::Null.is_null());
+}
+
+#[test]
+fn test_value_is_null_false() {
+    assert!(!Value::I32(0).is_null());
+    assert!(!Value::Bool(false).is_null());
+    assert!(!Value::Str(Rc::from("")).is_null());
+}
+
+// ── Value::promote_float_pair_op ──────────────────────────────────────────────
+
+#[test]
+fn test_promote_float_pair_op_adds() {
+    let result = Value::promote_float_pair_op(&Value::F32(1.5), &Value::F64(2.5), |a, b| a + b);
+    assert!((result.as_f64() - 4.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_promote_float_pair_op_mixed_widths() {
+    let result = Value::promote_float_pair_op(&Value::F32(3.0), &Value::F64(4.0), |a, b| a * b);
+    assert!((result.as_f64() - 12.0).abs() < 1e-6);
+    // Mixed widths should promote to F64
+    assert!(matches!(result, Value::F64(_)));
+}
+
+// ── fn3 / mfn3 ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_fn3_callable() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.vm_mut().register_fn_in_module(
+        "clamp3",
+        "test",
+        fn3(|v: f64, lo: f64, hi: f64| -> Result<f64, String> { Ok(v.clamp(lo, hi)) }),
+    );
+    assert_eq!(
+        writ.run("return clamp3(5.0, 0.0, 3.0)").unwrap(),
+        Value::F64(3.0)
+    );
+}
+
+#[test]
+fn test_mfn3_callable() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_method(
+        ValueTag::Str,
+        "replace3",
+        None,
+        mfn3(|s: Rc<str>, from: Rc<str>, to: Rc<str>, n: i32| -> Result<String, String> {
+            let mut result = s.to_string();
+            for _ in 0..n {
+                result = result.replacen(from.as_ref(), to.as_ref(), 1);
+            }
+            Ok(result)
+        }),
+    );
+    assert_eq!(
+        writ.run(r#"return "aaa".replace3("a", "b", 2)"#).unwrap(),
+        Value::Str(Rc::from("bba"))
+    );
+}
+
+// ── type_checker_mut ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_type_checker_mut_register_host_function() {
+    let mut writ = Writ::new();
+    writ.type_checker_mut()
+        .register_host_function("my_typed_fn", vec![Type::Int], Type::Int);
+    assert!(writ.run("return my_typed_fn(\"oops\")").is_err());
+}
+
+// ── WritError variants ────────────────────────────────────────────────────────
+
+#[test]
+fn test_write_error_parse_on_invalid_syntax() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    assert!(matches!(writ.run("return return"), Err(WritError::Parse(_))));
+}
+
+#[test]
+fn test_write_error_io_on_missing_file() {
+    let mut writ = Writ::new();
+    assert!(matches!(
+        writ.load("/no/such/file_writ_test_io.writ"),
+        Err(WritError::Io(_))
+    ));
+}
+
+// ── Value::Dict variant ───────────────────────────────────────────────────────
+
+#[test]
+fn test_value_dict_constructed_and_passed_back() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let d = {\"x\": 1}\nreturn d").unwrap();
+    assert!(matches!(result, Value::Dict(_)));
+}
+
+// ── Value::CoroutineHandle variant ────────────────────────────────────────────
+
+#[test]
+fn test_value_coroutine_handle_from_start() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func spin() { while true { yield } }\nstart spin()")
+        .unwrap();
+    let id = writ.vm_mut().last_coroutine_id();
+    assert!(id.is_some(), "expected a coroutine to be started");
 }
