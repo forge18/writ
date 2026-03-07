@@ -120,7 +120,7 @@ impl VM {
     /// Creates a new VM with empty state.
     pub fn new() -> Self {
         Self {
-            stack: Vec::with_capacity(256),
+            stack: Vec::with_capacity(1024),
             frames: Vec::with_capacity(64),
             main_chunk: Chunk::new(),
             functions: Vec::new(),
@@ -1209,13 +1209,17 @@ impl VM {
                     }
                     // Write return value to caller's result register
                     self.stack[result_reg] = return_value;
-                    // Restore caller's stack
+                    // Clear Rc-bearing dead slots to prevent leaks, but
+                    // keep stack.len at high-water mark to avoid resize.
                     let caller = unsafe { self.frames.last().unwrap_unchecked() };
-                    let caller_top = caller.base + caller.max_registers as usize;
                     if frame.has_rc_values {
-                        self.stack.truncate(caller_top);
-                    } else {
-                        unsafe { self.stack.set_len(caller_top) };
+                        let caller_top = caller.base + caller.max_registers as usize;
+                        let frame_end = frame.base + frame.max_registers as usize;
+                        if frame_end > caller_top {
+                            for slot in &mut self.stack[caller_top..frame_end] {
+                                *slot = Value::Null;
+                            }
+                        }
                     }
                     base = caller.base;
                     chunk_id = caller.chunk_id;
@@ -1241,11 +1245,14 @@ impl VM {
                     }
                     self.stack[result_reg] = Value::Null;
                     let caller = unsafe { self.frames.last().unwrap_unchecked() };
-                    let caller_top = caller.base + caller.max_registers as usize;
                     if frame.has_rc_values {
-                        self.stack.truncate(caller_top);
-                    } else {
-                        unsafe { self.stack.set_len(caller_top) };
+                        let caller_top = caller.base + caller.max_registers as usize;
+                        let frame_end = frame.base + frame.max_registers as usize;
+                        if frame_end > caller_top {
+                            for slot in &mut self.stack[caller_top..frame_end] {
+                                *slot = Value::Null;
+                            }
+                        }
                     }
                     base = caller.base;
                     chunk_id = caller.chunk_id;
@@ -1275,8 +1282,41 @@ impl VM {
 
                 // ── Function calls ───────────────────────────────────
                 op::Call => {
-                    unsafe { self.frames.last_mut().unwrap_unchecked() }.pc = save_pc!();
-                    self.exec_call_reg(base, a, b)?;
+                    let callee_abs = base + a as usize;
+                    if let Value::Closure(data) = &self.stack[callee_abs] {
+                        let func_idx = data.func_idx;
+                        let upvalues = data.upvalues.clone();
+                        let func = &self.functions[func_idx];
+                        if func.arity != b {
+                            unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
+                                save_pc!();
+                            return Err(self.make_error(format!(
+                                "closure '{}' expects {} arguments, got {}",
+                                func.name, func.arity, b
+                            )));
+                        }
+                        let max_regs = func.max_registers;
+                        let new_base = callee_abs + 1;
+                        let needed = new_base + max_regs as usize;
+                        if self.stack.len() < needed {
+                            self.stack.resize(needed, Value::Null);
+                        }
+                        unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
+                            save_pc!();
+                        self.frames.push(CallFrame {
+                            chunk_id: ChunkId::Function(func_idx),
+                            pc: 0,
+                            base: new_base,
+                            result_reg: callee_abs,
+                            max_registers: max_regs,
+                            has_rc_values: true,
+                            upvalues: Some(upvalues),
+                        });
+                    } else {
+                        unsafe { self.frames.last_mut().unwrap_unchecked() }.pc =
+                            save_pc!();
+                        self.exec_call_reg(base, a, b)?;
+                    }
                     #[cfg(feature = "debug-hooks")]
                     if self.has_debug_hooks {
                         self.fire_call_hook();
@@ -3122,10 +3162,9 @@ impl VM {
                 let field_name = self
                     .field_names
                     .get(&name_hash)
-                    .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?
-                    .clone();
+                    .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?;
                 obj.borrow()
-                    .get_field(&field_name)
+                    .get_field_by_hash(name_hash, field_name)
                     .map_err(|e| self.make_error(e))?
             }
             Value::Struct(s) => s.get_field_by_hash(name_hash).cloned().ok_or_else(|| {
@@ -3187,10 +3226,9 @@ impl VM {
                 let field_name = self
                     .field_names
                     .get(&name_hash)
-                    .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?
-                    .clone();
+                    .ok_or_else(|| self.make_error(format!("unknown field (hash {name_hash})")))?;
                 obj.borrow_mut()
-                    .set_field(&field_name, value)
+                    .set_field_by_hash(name_hash, field_name, value)
                     .map_err(|e| self.make_error(e))?;
             }
             Value::Struct(_) => {

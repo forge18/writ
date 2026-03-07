@@ -82,6 +82,28 @@ impl WritObject for WritClassInstance {
             self.layout.type_name
         ))
     }
+
+    fn get_field_by_hash(&self, hash: u32, _name: &str) -> Result<Value, String> {
+        self.layout
+            .hash_to_index
+            .get(&hash)
+            .map(|&idx| self.fields[idx].clone())
+            .ok_or_else(|| {
+                format!("'{}' has no field (hash {hash})", self.layout.type_name)
+            })
+    }
+
+    fn set_field_by_hash(&mut self, hash: u32, _name: &str, value: Value) -> Result<(), String> {
+        if let Some(&idx) = self.layout.hash_to_index.get(&hash) {
+            self.fields[idx] = value;
+            Ok(())
+        } else {
+            Err(format!(
+                "'{}' has no field (hash {hash})",
+                self.layout.type_name
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
