@@ -12,7 +12,11 @@ pub(crate) enum ChunkId {
 /// In the register-based VM, each frame owns a window of the value stack
 /// `[base .. base + max_registers)`. Parameters occupy the first `arity`
 /// registers, locals follow, then temporaries.
-#[derive(Debug, Clone)]
+///
+/// Upvalue indices are stored in a parallel side table (`frame_upvalues`)
+/// on the VM, not inline here. This keeps CallFrame small and
+/// trivially-droppable for non-closure frames.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct CallFrame {
     /// Which chunk this frame is executing.
     pub chunk_id: ChunkId,
@@ -29,8 +33,6 @@ pub(crate) struct CallFrame {
     /// True if any register may hold an Rc-bearing value. When false, the
     /// return handler can use `set_len` instead of `truncate` (skips drops).
     pub has_rc_values: bool,
-    /// Indices into the VM's flat upvalue store. `None` for non-closure frames.
-    pub upvalues: Option<Vec<u32>>,
 }
 
 impl CallFrame {

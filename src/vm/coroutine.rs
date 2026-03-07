@@ -47,6 +47,8 @@ pub struct Coroutine {
     pub(crate) stack: Vec<Value>,
     /// The call stack (owned by this coroutine).
     pub(crate) frames: Vec<CallFrame>,
+    /// Upvalue index arrays parallel to `frames`.
+    pub(crate) frame_upvalues: Vec<Option<Vec<u32>>>,
     /// What this coroutine is waiting on (only meaningful when Suspended).
     pub(crate) wait: Option<WaitCondition>,
     /// Return value after completion.
@@ -72,6 +74,7 @@ mod tests {
             state: CoroutineState::Running,
             stack: Vec::new(),
             frames: Vec::new(),
+            frame_upvalues: Vec::new(),
             wait: None,
             return_value: None,
             owner_id: None,
@@ -91,6 +94,7 @@ mod tests {
             state: CoroutineState::Running,
             stack: Vec::new(),
             frames: Vec::new(),
+            frame_upvalues: Vec::new(),
             wait: None,
             return_value: None,
             owner_id: None,

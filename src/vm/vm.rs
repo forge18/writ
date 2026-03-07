@@ -77,6 +77,9 @@ pub struct VM {
     instruction_limit: Option<u64>,
 
     // ── Cache line 2: warm fields (closures) ─────────────────────
+    /// Upvalue index arrays for each call frame, kept in sync with `frames`.
+    /// `None` for non-closure frames, `Some(indices)` for closures.
+    frame_upvalues: Vec<Option<Vec<u32>>>,
     /// Open upvalues: indexed by absolute stack slot. `Some(idx)` when a
     /// local has been captured; the value is an index into `upvalue_store`.
     open_upvalues: Vec<Option<u32>>,
@@ -175,6 +178,7 @@ impl VM {
             last_line: 0,
             last_file: String::new(),
             has_debug_hooks: false,
+            frame_upvalues: Vec::with_capacity(64),
             open_upvalues: Vec::new(),
             upvalue_store: Vec::new(),
             closure_map: Vec::new(),
@@ -534,6 +538,7 @@ impl VM {
 
         self.stack.clear();
         self.frames.clear();
+        self.frame_upvalues.clear();
         self.instruction_count = 0;
         // Clone required: the VM quickens (mutates) this chunk in-place and
         // `rebuild_ip_cache` captures raw pointers into `main_chunk.code`.
@@ -552,8 +557,8 @@ impl VM {
             result_reg: 0,
             max_registers: main_max.max(16),
             has_rc_values: true,
-            upvalues: None,
         });
+        self.frame_upvalues.push(None);
 
         match self.run()? {
             RunResult::Return(value) => Ok(value),
@@ -592,16 +597,21 @@ impl VM {
 
         // Result goes into a temporary slot after the frame
         let result_slot = base; // We'll read it from R(0) after return
-        let upvalues = self.closure_map.get(func_idx).and_then(|e| e.clone());
+        let upvalues = if !self.functions[func_idx].upvalues.is_empty() {
+            self.closure_map.get(func_idx).and_then(|e| e.clone())
+        } else {
+            None
+        };
+        let has_upvalues = upvalues.is_some();
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base,
             result_reg: result_slot,
             max_registers: max_regs,
-            has_rc_values: self.functions[func_idx].has_rc_values || upvalues.is_some(),
-            upvalues,
+            has_rc_values: self.functions[func_idx].has_rc_values || has_upvalues,
         });
+        self.frame_upvalues.push(upvalues);
 
         match self.run_until(return_depth)? {
             RunResult::Return(value) => {
@@ -629,16 +639,21 @@ impl VM {
         }
         self.ensure_registers(base, max_regs);
 
-        let upvalues = self.closure_map.get(func_idx).and_then(|e| e.clone());
+        let upvalues = if !self.functions[func_idx].upvalues.is_empty() {
+            self.closure_map.get(func_idx).and_then(|e| e.clone())
+        } else {
+            None
+        };
+        let has_upvalues = upvalues.is_some();
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base,
             result_reg: base,
             max_registers: max_regs,
-            has_rc_values: self.functions[func_idx].has_rc_values || upvalues.is_some(),
-            upvalues,
+            has_rc_values: self.functions[func_idx].has_rc_values || has_upvalues,
         });
+        self.frame_upvalues.push(upvalues);
 
         match self.run_until(return_depth)? {
             RunResult::Return(value) => {
@@ -705,6 +720,7 @@ impl VM {
         // The compiler doesn't track max_registers for the main chunk (it's always the script body).
         let main_max = 128u8; // generous default for top-level scripts
         self.ensure_registers(0, main_max);
+        self.frame_upvalues.clear();
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Main,
             pc: 0,
@@ -712,8 +728,8 @@ impl VM {
             result_reg: 0,
             max_registers: main_max,
             has_rc_values: true,
-            upvalues: None,
         });
+        self.frame_upvalues.push(None);
 
         match self.run()? {
             RunResult::Return(value) => Ok(value),
@@ -806,6 +822,16 @@ impl VM {
     #[inline(always)]
     fn current_frame(&self) -> &CallFrame {
         self.frames.last().expect("call stack is empty")
+    }
+
+    /// Write a value to a stack slot WITHOUT dropping the old value.
+    ///
+    /// # Safety
+    /// Caller must ensure the old value at `slot` has no drop glue
+    /// (i.e., it is I32, I64, F32, F64, Bool, Null, or CoroutineHandle).
+    #[inline(always)]
+    unsafe fn write_stack_nodrop(&mut self, slot: usize, value: Value) {
+        unsafe { std::ptr::write(self.stack.as_mut_ptr().add(slot), value) };
     }
 
     /// Ensures the stack is large enough for the given frame.
@@ -1161,7 +1187,7 @@ impl VM {
                         Value::I64(v) => Value::F64(*v as f64),
                         _ => unreachable!("IntToFloat: compiler guarantees int operand"),
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
 
                 // ── Comparison (generic, quickenable) ────────────────
@@ -1341,8 +1367,14 @@ impl VM {
                     if self.has_debug_hooks {
                         self.fire_return_hook();
                     }
-                    let return_value = self.stack[base + src as usize].cheap_clone();
                     let frame = unsafe { self.frames.pop().unwrap_unchecked() };
+                    self.frame_upvalues.pop();
+                    // For scalar-only frames, use ptr::read (bitwise copy, no match dispatch).
+                    let return_value = if !frame.has_rc_values {
+                        unsafe { std::ptr::read(self.stack.as_ptr().add(base + src as usize)) }
+                    } else {
+                        self.stack[base + src as usize].cheap_clone()
+                    };
                     if self.has_open_upvalues {
                         self.close_upvalues_above(frame.base);
                     }
@@ -1379,6 +1411,7 @@ impl VM {
                         self.fire_return_hook();
                     }
                     let frame = unsafe { self.frames.pop().unwrap_unchecked() };
+                    self.frame_upvalues.pop();
                     if self.has_open_upvalues {
                         self.close_upvalues_above(frame.base);
                     }
@@ -1456,8 +1489,8 @@ impl VM {
                             result_reg: callee_abs,
                             max_registers: max_regs,
                             has_rc_values: true,
-                            upvalues: Some(upvalues),
                         });
+                        self.frame_upvalues.push(Some(upvalues));
                     } else {
                         unsafe { self.frames.last_mut().unwrap_unchecked() }.pc = save_pc!();
                         self.exec_call_reg(base, a, b)?;
@@ -1485,9 +1518,13 @@ impl VM {
                     let func_arity = self.functions[func_idx].arity;
                     let result_reg = base + base_reg as usize;
 
-                    // Resolve upvalues via closure_map (populated by MakeClosure during main chunk).
+                    // Only look up closure_map for functions that actually have upvalue descriptors.
                     let call_upvalues: Option<Vec<u32>> =
-                        self.closure_map.get(func_idx).and_then(|e| e.clone());
+                        if !self.functions[func_idx].upvalues.is_empty() {
+                            self.closure_map.get(func_idx).and_then(|e| e.clone())
+                        } else {
+                            None
+                        };
 
                     if func_is_variadic {
                         let min_args = func_arity.saturating_sub(1);
@@ -1515,8 +1552,8 @@ impl VM {
                             result_reg,
                             max_registers: max_regs,
                             has_rc_values: true,
-                            upvalues: call_upvalues,
                         });
+                        self.frame_upvalues.push(call_upvalues);
                     } else {
                         if func_arity != arg_count {
                             return Err(self.make_error(format!(
@@ -1529,6 +1566,7 @@ impl VM {
                         } else {
                             base + base_reg as usize
                         };
+                        let has_upvalues = call_upvalues.is_some();
                         self.ensure_registers(new_base, max_regs);
                         self.frames.push(CallFrame {
                             chunk_id: ChunkId::Function(func_idx),
@@ -1536,9 +1574,9 @@ impl VM {
                             base: new_base,
                             result_reg,
                             max_registers: max_regs,
-                            has_rc_values: func_has_rc || call_upvalues.is_some(),
-                            upvalues: call_upvalues,
+                            has_rc_values: func_has_rc || has_upvalues,
                         });
+                        self.frame_upvalues.push(call_upvalues);
                     }
 
                     #[cfg(feature = "debug-hooks")]
@@ -1589,6 +1627,10 @@ impl VM {
                     frame.max_registers = max_regs;
                     frame.has_rc_values = func_has_rc;
                     // frame.base and frame.result_reg stay the same
+                    // Clear upvalues for the tail-called function
+                    if let Some(last) = self.frame_upvalues.last_mut() {
+                        *last = None;
+                    }
 
                     self.ensure_registers(base, max_regs);
 
@@ -1852,9 +1894,9 @@ impl VM {
                 // ── Closures ─────────────────────────────────────────
                 op::LoadUpvalue => {
                     let uv_idx = self
-                        .current_frame()
-                        .upvalues
-                        .as_ref()
+                        .frame_upvalues
+                        .last()
+                        .and_then(|o| o.as_ref())
                         .expect("LoadUpvalue in non-closure frame")[b as usize];
                     self.stack[base + a as usize] =
                         self.upvalue_store[uv_idx as usize].cheap_clone();
@@ -1862,9 +1904,9 @@ impl VM {
                 op::StoreUpvalue => {
                     let val = self.stack[base + a as usize].cheap_clone();
                     let uv_idx = self
-                        .current_frame()
-                        .upvalues
-                        .as_ref()
+                        .frame_upvalues
+                        .last()
+                        .and_then(|o| o.as_ref())
                         .expect("StoreUpvalue in non-closure frame")[b as usize]
                         as usize;
                     self.upvalue_store[uv_idx] = val.cheap_clone();
@@ -1915,7 +1957,7 @@ impl VM {
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::AddFloat => {
                     let result = Value::promote_float_pair_op(
@@ -1923,7 +1965,7 @@ impl VM {
                         &self.stack[base + c as usize],
                         |x, y| x + y,
                     );
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::SubInt => {
                     let abs_b = base + b as usize;
@@ -1941,7 +1983,7 @@ impl VM {
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::SubFloat => {
                     let result = Value::promote_float_pair_op(
@@ -1949,7 +1991,7 @@ impl VM {
                         &self.stack[base + c as usize],
                         |x, y| x - y,
                     );
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::MulInt => {
                     let abs_b = base + b as usize;
@@ -1972,7 +2014,7 @@ impl VM {
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::MulFloat => {
                     let result = Value::promote_float_pair_op(
@@ -1980,7 +2022,7 @@ impl VM {
                         &self.stack[base + c as usize],
                         |x, y| x * y,
                     );
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::DivInt => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -2002,7 +2044,7 @@ impl VM {
                             Value::I64(r)
                         }
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::DivFloat => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -2014,7 +2056,7 @@ impl VM {
                         &self.stack[base + c as usize],
                         |x, y| x / y,
                     );
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
 
                 // ── Immediate arithmetic ────────────────────────────────
@@ -2034,7 +2076,7 @@ impl VM {
                         ),
                         _ => unreachable!(),
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
                 op::SubIntImm => {
                     let w1 = unsafe { *ip };
@@ -2052,65 +2094,65 @@ impl VM {
                         ),
                         _ => unreachable!(),
                     };
-                    self.stack[base + a as usize] = result;
+                    unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
 
                 // ── Typed comparison ─────────────────────────────────────
                 op::LtInt => {
                     let r = self.stack[base + b as usize].as_i64()
                         < self.stack[base + c as usize].as_i64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::LtFloat => {
                     let r = self.stack[base + b as usize].as_f64()
                         < self.stack[base + c as usize].as_f64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::LeInt => {
                     let r = self.stack[base + b as usize].as_i64()
                         <= self.stack[base + c as usize].as_i64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::LeFloat => {
                     let r = self.stack[base + b as usize].as_f64()
                         <= self.stack[base + c as usize].as_f64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::GtInt => {
                     let r = self.stack[base + b as usize].as_i64()
                         > self.stack[base + c as usize].as_i64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::GtFloat => {
                     let r = self.stack[base + b as usize].as_f64()
                         > self.stack[base + c as usize].as_f64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::GeInt => {
                     let r = self.stack[base + b as usize].as_i64()
                         >= self.stack[base + c as usize].as_i64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::GeFloat => {
                     let r = self.stack[base + b as usize].as_f64()
                         >= self.stack[base + c as usize].as_f64();
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::EqInt => {
                     let r = self.stack[base + b as usize] == self.stack[base + c as usize];
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::EqFloat => {
                     let r = self.stack[base + b as usize] == self.stack[base + c as usize];
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::NeInt => {
                     let r = self.stack[base + b as usize] != self.stack[base + c as usize];
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
                 op::NeFloat => {
                     let r = self.stack[base + b as usize] != self.stack[base + c as usize];
-                    self.stack[base + a as usize] = Value::Bool(r);
+                    unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
 
                 // ── Fused compare-and-jump (int) ────────────────────────
@@ -2233,7 +2275,7 @@ impl VM {
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + a as usize] = result;
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Add;
@@ -2246,8 +2288,8 @@ impl VM {
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
                     if lhs.is_float() && rhs.is_float() {
-                        self.stack[base + a as usize] =
-                            Value::promote_float_pair_op(lhs, rhs, |x, y| x + y);
+                        let result = Value::promote_float_pair_op(lhs, rhs, |x, y| x + y);
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Add;
@@ -2273,7 +2315,7 @@ impl VM {
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + a as usize] = result;
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Sub;
@@ -2296,8 +2338,8 @@ impl VM {
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
                     if lhs.is_float() && rhs.is_float() {
-                        self.stack[base + a as usize] =
-                            Value::promote_float_pair_op(lhs, rhs, |x, y| x - y);
+                        let result = Value::promote_float_pair_op(lhs, rhs, |x, y| x - y);
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Sub;
@@ -2333,7 +2375,7 @@ impl VM {
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + a as usize] = result;
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Mul;
@@ -2356,8 +2398,8 @@ impl VM {
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
                     if lhs.is_float() && rhs.is_float() {
-                        self.stack[base + a as usize] =
-                            Value::promote_float_pair_op(lhs, rhs, |x, y| x * y);
+                        let result = Value::promote_float_pair_op(lhs, rhs, |x, y| x * y);
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Mul;
@@ -2397,7 +2439,7 @@ impl VM {
                                 Value::I64(r)
                             }
                         };
-                        self.stack[base + a as usize] = result;
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Div;
@@ -2414,8 +2456,8 @@ impl VM {
                         if rhs.as_f64() == 0.0 {
                             return Err(self.make_error("division by zero".to_string()));
                         }
-                        self.stack[base + a as usize] =
-                            Value::promote_float_pair_op(lhs, rhs, |x, y| x / y);
+                        let result = Value::promote_float_pair_op(lhs, rhs, |x, y| x / y);
+                        unsafe { self.write_stack_nodrop(base + a as usize, result) };
                     } else {
                         unsafe {
                             *(ip.sub(1) as *mut u8) = op::Div;
@@ -3104,8 +3146,8 @@ impl VM {
                 result_reg: callee_abs,
                 max_registers: max_regs,
                 has_rc_values: true, // closures may capture Rc-bearing values
-                upvalues: Some(upvalues),
             });
+            self.frame_upvalues.push(Some(upvalues));
 
             return Ok(());
         }
@@ -3134,9 +3176,13 @@ impl VM {
             let max_regs = self.functions[func_idx].max_registers;
             let func_has_rc = self.functions[func_idx].has_rc_values;
 
-            // Resolve upvalues via closure_map (populated by MakeClosure during main chunk).
+            // Only look up closure_map for functions that actually have upvalue descriptors.
             let call_upvalues: Option<Vec<u32>> =
-                self.closure_map.get(func_idx).and_then(|e| e.clone());
+                if !self.functions[func_idx].upvalues.is_empty() {
+                    self.closure_map.get(func_idx).and_then(|e| e.clone())
+                } else {
+                    None
+                };
 
             if is_variadic {
                 let min_args = expected_arity.saturating_sub(1);
@@ -3170,8 +3216,8 @@ impl VM {
                     result_reg: callee_abs,
                     max_registers: max_regs,
                     has_rc_values: true, // variadic creates Array
-                    upvalues: call_upvalues,
                 });
+                self.frame_upvalues.push(call_upvalues);
             } else {
                 if expected_arity != arg_count {
                     return Err(self.make_error(format!(
@@ -3186,15 +3232,16 @@ impl VM {
                     self.stack.resize(needed, Value::Null);
                 }
 
+                let has_upvalues = call_upvalues.is_some();
                 self.frames.push(CallFrame {
                     chunk_id: ChunkId::Function(func_idx),
                     pc: 0,
                     base: new_base,
                     result_reg: callee_abs,
                     max_registers: max_regs,
-                    has_rc_values: func_has_rc || call_upvalues.is_some(),
-                    upvalues: call_upvalues,
+                    has_rc_values: func_has_rc || has_upvalues,
                 });
+                self.frame_upvalues.push(call_upvalues);
             }
 
             return Ok(());
@@ -3925,9 +3972,9 @@ impl VM {
                 upvalues.push(idx);
             } else {
                 let parent_uv = self
-                    .current_frame()
-                    .upvalues
-                    .as_ref()
+                    .frame_upvalues
+                    .last()
+                    .and_then(|o| o.as_ref())
                     .expect("transitive capture requires parent closure");
                 upvalues.push(parent_uv[desc.index as usize]);
             }
@@ -4000,14 +4047,14 @@ impl VM {
         let id = self.next_coroutine_id;
         self.next_coroutine_id += 1;
 
+        let has_upvalues = closure_upvalues.is_some();
         let frame = CallFrame {
             chunk_id: ChunkId::Function(func_idx),
             pc: 0,
             base: 0,
             result_reg: 0,
             max_registers: func.max_registers,
-            has_rc_values: func.has_rc_values || closure_upvalues.is_some(),
-            upvalues: closure_upvalues,
+            has_rc_values: func.has_rc_values || has_upvalues,
         };
 
         let coro = Coroutine {
@@ -4015,6 +4062,7 @@ impl VM {
             state: CoroutineState::Running,
             stack: coro_stack,
             frames: vec![frame],
+            frame_upvalues: vec![closure_upvalues],
             wait: None,
             return_value: None,
             owner_id: None,
@@ -4246,6 +4294,7 @@ impl VM {
 
         std::mem::swap(&mut self.stack, &mut coro.stack);
         std::mem::swap(&mut self.frames, &mut coro.frames);
+        std::mem::swap(&mut self.frame_upvalues, &mut coro.frame_upvalues);
         std::mem::swap(&mut self.open_upvalues, &mut coro.open_upvalues);
         std::mem::swap(&mut self.upvalue_store, &mut coro.upvalue_store);
         self.active_coroutine = Some(idx);
@@ -4255,6 +4304,7 @@ impl VM {
         let coro = &mut self.coroutines[idx];
         std::mem::swap(&mut self.stack, &mut coro.stack);
         std::mem::swap(&mut self.frames, &mut coro.frames);
+        std::mem::swap(&mut self.frame_upvalues, &mut coro.frame_upvalues);
         std::mem::swap(&mut self.open_upvalues, &mut coro.open_upvalues);
         std::mem::swap(&mut self.upvalue_store, &mut coro.upvalue_store);
         self.active_coroutine = None;
@@ -4313,11 +4363,13 @@ impl VM {
 
         let saved_stack = std::mem::take(&mut self.stack);
         let saved_frames = std::mem::take(&mut self.frames);
+        let saved_frame_upvalues = std::mem::take(&mut self.frame_upvalues);
         let saved_upvalues = std::mem::take(&mut self.open_upvalues);
         let saved_active = self.active_coroutine;
         self.active_coroutine = None;
 
         let max_regs = self.functions[func_idx].max_registers;
+        let has_upvalues = closure_upvalues.is_some();
         self.stack.resize(max_regs as usize, Value::Null);
         self.frames.push(CallFrame {
             chunk_id: ChunkId::Function(func_idx),
@@ -4325,14 +4377,15 @@ impl VM {
             base: 0,
             result_reg: 0,
             max_registers: max_regs,
-            has_rc_values: self.functions[func_idx].has_rc_values || closure_upvalues.is_some(),
-            upvalues: closure_upvalues,
+            has_rc_values: self.functions[func_idx].has_rc_values || has_upvalues,
         });
+        self.frame_upvalues.push(closure_upvalues);
 
         let result = self.run();
 
         self.stack = saved_stack;
         self.frames = saved_frames;
+        self.frame_upvalues = saved_frame_upvalues;
         self.open_upvalues = saved_upvalues;
         self.active_coroutine = saved_active;
 
