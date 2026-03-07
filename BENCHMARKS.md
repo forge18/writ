@@ -28,13 +28,13 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 
 | Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | VM Only (Round 11) | VM Only (Round 12) | VM Only (Round 13) | VM Only (Round 14) | VM Only (Round 15) | VM Only (Round 16) | Current | Total Improvement |
 | --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------- | ----------------- |
-| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | 30.2 ms | 25.3 ms | 26.4 ms | 26.9 ms | **47.7 ms** | -69% |
-| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | 37.2 ms | 26.1 ms | 26.9 ms | 26.2 ms | **33.6 ms** | -75% |
-| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | 31.5 ms | 24.7 ms | 25.4 ms | 24.9 ms | **42.4 ms** | -73% |
-| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | 14.8 ms | 14.9 ms | 15.3 ms | 15.3 ms | **16.5 ms** | -75% |
-| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | 0.471 ms | 0.451 ms | 0.483 ms | 0.499 ms | **0.551 ms** | -72% |
-| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | 4.08 ms | 3.89 ms | 3.82 ms | 3.75 ms | **4.20 ms** | -76% |
-| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | 0.139 ms | 0.139 ms | 0.154 ms | 0.153 ms | **0.177 ms** | -77% |
+| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | 30.2 ms | 25.3 ms | 26.4 ms | 26.9 ms | **27.9 ms** | -82% |
+| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | 37.2 ms | 26.1 ms | 26.9 ms | 26.2 ms | **27.8 ms** | -79% |
+| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | 31.5 ms | 24.7 ms | 25.4 ms | 24.9 ms | **26.0 ms** | -84% |
+| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | 14.8 ms | 14.9 ms | 15.3 ms | 15.3 ms | **15.9 ms** | -76% |
+| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | 0.471 ms | 0.451 ms | 0.483 ms | 0.499 ms | **0.523 ms** | -74% |
+| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | 4.08 ms | 3.89 ms | 3.82 ms | 3.75 ms | **4.05 ms** | -77% |
+| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | 0.139 ms | 0.139 ms | 0.154 ms | 0.153 ms | **0.165 ms** | -79% |
 
 ## Compilation Pipeline Results
 
@@ -48,19 +48,19 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 | arithmetic | 216 ns | — | — | — |
 | interpolation | 668 ns | — | — | — |
 
-### Current (post-Round 16 + crate flattening)
+### Current (post-Round 16 + crate flattening + string interning)
 
 | Benchmark | Lexer | Parser | Compiler | Pipeline (full) | VM Only | vs Round 16 |
 | --------- | ----- | ------ | -------- | --------------- | ------- | ----------- |
-| fibonacci_28 | 920 ns | 1.59 µs | 1.18 µs | — | 47.7 ms | **+77%** |
-| binary_trees | — | — | — | — | 33.6 ms | **+28%** |
-| permute_9 | — | — | — | — | 42.4 ms | **+70%** |
-| mandelbrot_100 | — | — | — | — | 16.5 ms | +8% |
-| sieve_5000 | — | — | — | — | 0.551 ms | +10% |
-| queens_8 | — | — | — | — | 4.20 ms | +12% |
-| loop_sum | — | — | — | — | 0.177 ms | +16% |
+| fibonacci_28 | 920 ns | 1.59 µs | 1.18 µs | — | 27.9 ms | +4% |
+| binary_trees | — | — | — | — | 27.8 ms | +6% |
+| permute_9 | — | — | — | — | 26.0 ms | +4% |
+| mandelbrot_100 | — | — | — | — | 15.9 ms | +4% |
+| sieve_5000 | — | — | — | — | 0.523 ms | +5% |
+| queens_8 | — | — | — | — | 4.05 ms | +8% |
+| loop_sum | — | — | — | — | 0.165 ms | +8% |
 
-**Regression detected.** Since Round 16, major structural changes have been applied: crate flattening (lexer/parser/compiler/types consolidated into main crate), typed IR, user-defined generics, string interning, and compiler bug fixes (maybe_free_temp). Call-heavy benchmarks (fib +77%, permute +70%) regressed most significantly, suggesting the regression is in call/return overhead or VM struct layout. Arithmetic-heavy benchmarks (mandelbrot +8%) are within normal noise. Profiling is needed to identify the root cause.
+Includes crate flattening, typed IR, user-defined generics, string interning, and compiler bug fixes. A prior regression (+77% fib, +70% permute) was traced via profiling to an unconditional `String::clone()` on every `CallDirect` in the dispatch loop — the function name was cloned for error messages that never fired. Removing the clone recovered all call-heavy benchmarks to within noise of Round 16. Remaining ~4-8% variance is within normal run-to-run noise across these structural changes.
 
 Pipeline numbers include lex + parse + compile + VM execution. Compiler and lexer are measured in isolation on the same source programs.
 
@@ -75,7 +75,7 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 | Ruby 3.0 | ~23 ms | YARV bytecode VM |
 | Wren 0.4 | ~30 ms | NaN-boxed single-pass compiler |
 | Python 3.11 | ~31 ms | Specializing adaptive interpreter |
-| **Writ** | **48 ms** | Register-based VM (no NaN-boxing) — regressed, profiling in progress |
+| **Writ** | **28 ms** | Register-based VM (no NaN-boxing) |
 | Rhai | ~225 ms | Rust-embeddable, AST-walking (estimated) |
 
 ### Key Observations

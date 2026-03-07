@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use writ::{Value, Writ, WritError, WritObject, fn0, fn1, fn2};
+use writ::{Value, ValueTag, Writ, WritError, WritObject, Type, fn0, fn1, fn2, mfn0, mfn1, mfn2};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

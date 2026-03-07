@@ -1483,7 +1483,6 @@ impl VM {
                     let func_has_rc = self.functions[func_idx].has_rc_values;
                     let func_is_variadic = self.functions[func_idx].is_variadic;
                     let func_arity = self.functions[func_idx].arity;
-                    let func_name = self.functions[func_idx].name.clone();
                     let result_reg = base + base_reg as usize;
 
                     // Resolve upvalues via closure_map (populated by MakeClosure during main chunk).
@@ -1495,7 +1494,7 @@ impl VM {
                         if arg_count < min_args {
                             return Err(self.make_error(format!(
                                 "function '{}' expects at least {} arguments, got {}",
-                                func_name, min_args, arg_count
+                                self.functions[func_idx].name, min_args, arg_count
                             )));
                         }
                         let fixed_count = min_args as usize;
@@ -1522,7 +1521,7 @@ impl VM {
                         if func_arity != arg_count {
                             return Err(self.make_error(format!(
                                 "function '{}' expects {} arguments, got {}",
-                                func_name, func_arity, arg_count
+                                self.functions[func_idx].name, func_arity, arg_count
                             )));
                         }
                         let new_base = if n == 0 {
