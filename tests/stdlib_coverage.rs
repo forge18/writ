@@ -1220,3 +1220,138 @@ fn test_interpolation_remap() {
         .unwrap();
     assert!(matches!(&r, Value::F32(_) | Value::F64(_)) && (r.as_f64() - 50.0).abs() < 0.1);
 }
+
+// ── Noise configuration ───────────────────────────────────────────────────────
+
+#[test]
+fn test_noise_seed_changes_output() {
+    let r1 = w().run("noiseSeed(1.0)\nreturn noise2D(0.5, 0.5)").unwrap();
+    let r2 = w().run("noiseSeed(999.0)\nreturn noise2D(0.5, 0.5)").unwrap();
+    assert_ne!(r1, r2);
+}
+
+#[test]
+fn test_noise_frequency_ok() {
+    assert!(w().run("noiseFrequency(4.0)\nreturn noise2D(0.5, 0.5)").is_ok());
+}
+
+#[test]
+fn test_noise_type_perlin_ok() {
+    assert!(w().run("noiseType(\"perlin\")\nreturn noise2D(0.1, 0.1)").is_ok());
+}
+
+#[test]
+fn test_noise_fractal_ok() {
+    assert!(w().run("noiseFractal(4.0, 2.0, 0.5)\nreturn noise2D(0.1, 0.1)").is_ok());
+}
+
+// ── Tween update / setEasing ──────────────────────────────────────────────────
+
+#[test]
+fn test_tween_update_advances_value() {
+    let r = w()
+        .run("let t = Tween(0.0, 100.0, 1.0)\nt.update(0.5)\nreturn t.value()")
+        .unwrap();
+    assert!(matches!(&r, Value::F64(_)) && r.as_f64() > 1.0);
+}
+
+#[test]
+fn test_tween_update_completes() {
+    let r = w()
+        .run("let t = Tween(0.0, 100.0, 1.0)\nt.update(2.0)\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(true));
+}
+
+#[test]
+fn test_tween_set_easing_ok() {
+    assert!(w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeInOut\")\nreturn t.value()")
+        .is_err()); // "easeInOut" is not a valid easing name — only "easeInOutQuad" etc. are
+}
+
+#[test]
+fn test_tween_set_easing_ease_in_quad_ok() {
+    let r = w()
+        .run("let t = Tween(0.0, 100.0, 1.0)\nt.setEasing(\"easeInQuad\")\nt.update(0.5)\nreturn t.value()")
+        .unwrap();
+    assert!(matches!(&r, Value::F64(_)) && (r.as_f64() - 25.0).abs() < 1.0);
+}
+
+// ── Transform missing methods ─────────────────────────────────────────────────
+
+#[test]
+fn test_transform2d_transform_point_ok() {
+    assert!(w()
+        .run("let t = Transform2D()\nlet p = Vector2(1.0, 2.0)\nreturn t.transformPoint(p)")
+        .is_ok());
+}
+
+#[test]
+fn test_transform3d_to_matrix_ok() {
+    assert!(w().run("let t = Transform3D()\nreturn t.toMatrix()").is_ok());
+}
+
+#[test]
+fn test_transform3d_inverse_ok() {
+    assert!(w().run("let t = Transform3D()\nreturn t.inverse()").is_ok());
+}
+
+// ── IO readFile ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_io_read_file_after_write() {
+    use std::rc::Rc;
+    let dir = std::env::temp_dir().join("writ_read_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("data.txt");
+    let path_str = path.to_str().unwrap().replace('\\', "/");
+    w().run(&format!(r#"writeFile("{path_str}", "hello writ")"#))
+        .unwrap();
+    let r = w()
+        .run(&format!(r#"return readFile("{path_str}")"#))
+        .unwrap();
+    assert_eq!(r, Value::Str(Rc::from("hello writ")));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn test_io_read_nonexistent_errors() {
+    assert!(w().run(r#"return readFile("/no/such/file_writ_test.txt")"#).is_err());
+}
+
+// ── Interpolation easing functions ────────────────────────────────────────────
+
+#[test]
+fn test_ease_in_quad_at_half() {
+    let r = w().run("return easeInQuad(0.5)").unwrap();
+    assert!(matches!(&r, Value::F64(_)) && (r.as_f64() - 0.25).abs() < 0.01);
+}
+
+#[test]
+fn test_ease_out_quad_at_half() {
+    let r = w().run("return easeOutQuad(0.5)").unwrap();
+    assert!(matches!(&r, Value::F64(_)) && r.as_f64() > 0.5);
+}
+
+#[test]
+fn test_ease_in_cubic_boundary_values() {
+    let r0 = w().run("return easeInCubic(0.0)").unwrap();
+    let r1 = w().run("return easeInCubic(1.0)").unwrap();
+    assert!(r0.as_f64().abs() < 0.001);
+    assert!((r1.as_f64() - 1.0).abs() < 0.001);
+}
+
+#[test]
+fn test_ease_in_out_sine_midpoint() {
+    let r = w().run("return easeInOutSine(0.5)").unwrap();
+    assert!(matches!(&r, Value::F64(_)) && (r.as_f64() - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn test_smoothstep_boundary_values() {
+    let r0 = w().run("return smoothstep(0.0, 1.0, 0.0)").unwrap();
+    let r1 = w().run("return smoothstep(0.0, 1.0, 1.0)").unwrap();
+    assert!(r0.as_f64().abs() < 0.001);
+    assert!((r1.as_f64() - 1.0).abs() < 0.001);
+}

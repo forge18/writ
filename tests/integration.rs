@@ -2381,3 +2381,375 @@ fn test_class_two_level_inheritance() {
         .unwrap();
     assert_eq!(result, Value::I32(10));
 }
+
+// ── Host type for register_type tests ─────────────────────────────────────────
+
+#[derive(Debug)]
+struct Counter {
+    count: i32,
+}
+
+impl WritObject for Counter {
+    fn type_name(&self) -> &str {
+        "Counter"
+    }
+
+    fn get_field(&self, name: &str) -> Result<Value, String> {
+        match name {
+            "count" => Ok(Value::I32(self.count)),
+            _ => Err(format!("Counter has no field '{name}'")),
+        }
+    }
+
+    fn set_field(&mut self, name: &str, value: Value) -> Result<(), String> {
+        if name == "count" {
+            self.count = value.as_i64() as i32;
+            Ok(())
+        } else {
+            Err(format!("Counter has no field '{name}'"))
+        }
+    }
+
+    fn call_method(&mut self, name: &str, _args: &[Value]) -> Result<Value, String> {
+        match name {
+            "increment" => {
+                self.count += 1;
+                Ok(Value::I32(self.count))
+            }
+            _ => Err(format!("Counter has no method '{name}'")),
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+fn counter_factory(args: &[Value]) -> Result<Box<dyn WritObject>, String> {
+    let start = if let Some(Value::I32(v)) = args.first() { *v } else { 0 };
+    Ok(Box::new(Counter { count: start }))
+}
+
+// ── register_host_fn (typed) ───────────────────────────────────────────────────
+
+#[test]
+fn test_register_host_fn_typed_no_args() {
+    let mut writ = Writ::new();
+    writ.register_host_fn(
+        "magic",
+        vec![],
+        Type::Int,
+        fn0(|| -> Result<Value, String> { Ok(Value::I32(99)) }),
+    );
+    assert_eq!(writ.run("return magic()").unwrap(), Value::I32(99));
+}
+
+#[test]
+fn test_register_host_fn_typed_with_param() {
+    let mut writ = Writ::new();
+    writ.register_host_fn(
+        "double",
+        vec![Type::Int],
+        Type::Int,
+        fn1(|x: i32| -> Result<Value, String> { Ok(Value::I32(x * 2)) }),
+    );
+    assert_eq!(writ.run("return double(7)").unwrap(), Value::I32(14));
+}
+
+#[test]
+fn test_register_host_fn_type_checker_rejects_wrong_arg() {
+    let mut writ = Writ::new();
+    writ.register_host_fn(
+        "take_int",
+        vec![Type::Int],
+        Type::Int,
+        fn1(|x: i32| -> Result<Value, String> { Ok(Value::I32(x)) }),
+    );
+    assert!(writ.run("return take_int(\"hello\")").is_err());
+}
+
+// ── register_host_fn_untyped ───────────────────────────────────────────────────
+
+#[test]
+fn test_register_host_fn_untyped_callable() {
+    let mut writ = Writ::new();
+    writ.register_host_fn_untyped(
+        "dyn_fn",
+        fn1(|x: i32| -> Result<Value, String> { Ok(Value::I32(x + 1)) }),
+    );
+    assert_eq!(writ.run("return dyn_fn(41)").unwrap(), Value::I32(42));
+}
+
+#[test]
+fn test_register_host_fn_untyped_type_checker_allows() {
+    let mut writ = Writ::new();
+    writ.register_host_fn_untyped(
+        "anything",
+        fn0(|| -> Result<Value, String> { Ok(Value::Bool(true)) }),
+    );
+    assert!(writ.run("return anything()").is_ok());
+}
+
+// ── register_method + mfn0 / mfn1 / mfn2 ─────────────────────────────────────
+
+#[test]
+fn test_register_method_mfn0_on_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_method(
+        ValueTag::Str,
+        "shout",
+        None,
+        mfn0(|s: Rc<str>| -> Result<String, String> { Ok(format!("{}!", s.to_uppercase())) }),
+    );
+    assert_eq!(
+        writ.run(r#"return "hello".shout()"#).unwrap(),
+        Value::Str(Rc::from("HELLO!"))
+    );
+}
+
+#[test]
+fn test_register_method_mfn1_on_int() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_method(
+        ValueTag::Int,
+        "add_n",
+        None,
+        mfn1(|x: i32, y: i32| -> Result<i32, String> { Ok(x + y) }),
+    );
+    assert_eq!(writ.run("return 10.add_n(5)").unwrap(), Value::I32(15));
+}
+
+#[test]
+fn test_register_method_mfn2_on_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_method(
+        ValueTag::Str,
+        "repeat_sep",
+        None,
+        mfn2(|s: Rc<str>, n: i32, sep: Rc<str>| -> Result<String, String> {
+            Ok((0..n).map(|_| s.as_ref()).collect::<Vec<_>>().join(sep.as_ref()))
+        }),
+    );
+    assert_eq!(
+        writ.run(r#"return "a".repeat_sep(3, "-")"#).unwrap(),
+        Value::Str(Rc::from("a-a-a"))
+    );
+}
+
+#[test]
+fn test_register_method_with_module_disable() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_method(
+        ValueTag::Int,
+        "triple",
+        Some("custom"),
+        mfn0(|x: i32| -> Result<i32, String> { Ok(x * 3) }),
+    );
+    assert_eq!(writ.run("return 5.triple()").unwrap(), Value::I32(15));
+    writ.disable_module("custom");
+    assert!(writ.run("return 5.triple()").is_err());
+}
+
+// ── register_type ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_register_type_field_access() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_type("Counter", counter_factory);
+    assert_eq!(
+        writ.run("let c = Counter(10)\nreturn c.count").unwrap(),
+        Value::I32(10)
+    );
+}
+
+#[test]
+fn test_register_type_method_call() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_type("Counter", counter_factory);
+    let r = writ
+        .run("var c = Counter(0)\nc.increment()\nc.increment()\nreturn c.count")
+        .unwrap();
+    assert_eq!(r, Value::I32(2));
+}
+
+#[test]
+fn test_register_type_set_field() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_type("Counter", |_| Ok(Box::new(Counter { count: 0 })));
+    let r = writ
+        .run("var c = Counter()\nc.count = 99\nreturn c.count")
+        .unwrap();
+    assert_eq!(r, Value::I32(99));
+}
+
+// ── enable_type_checking ───────────────────────────────────────────────────────
+
+#[test]
+fn test_enable_type_checking_rejects_type_errors() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.enable_type_checking();
+    assert!(writ.run("let x: int = \"hello\"\nreturn x").is_err());
+}
+
+#[test]
+fn test_enable_type_checking_accepts_valid_code() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.enable_type_checking();
+    assert_eq!(writ.run("let x: int = 42\nreturn x").unwrap(), Value::I32(42));
+}
+
+// ── reset_script_types ────────────────────────────────────────────────────────
+
+#[test]
+fn test_reset_script_types_removes_defined_funcs() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func foo() -> int { return 1 }").unwrap();
+    writ.reset_script_types();
+    assert!(writ.run("return foo()").is_err());
+}
+
+#[test]
+fn test_reset_script_types_allows_redefine() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func foo() -> int { return 1 }").unwrap();
+    writ.reset_script_types();
+    // After reset the type checker no longer knows about 'foo', so redefining works without error
+    let result = writ.run("func foo() -> int { return 2 }\nreturn foo()").unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+// ── codegen_rust ──────────────────────────────────────────────────────────────
+
+#[test]
+fn test_codegen_rust_produces_output_for_class() {
+    let mut writ = Writ::new();
+    let out = writ
+        .codegen_rust("class Point {\n    public x: int\n    public y: int\n}")
+        .unwrap();
+    assert!(out.contains("Point"));
+}
+
+#[test]
+fn test_codegen_rust_lex_error() {
+    let mut writ = Writ::new();
+    assert!(writ.codegen_rust("return 5 & 3").is_err());
+}
+
+// ── WritError::Lex ────────────────────────────────────────────────────────────
+
+#[test]
+fn test_lex_error_single_ampersand() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    assert!(matches!(writ.run("return 5 & 3"), Err(WritError::Lex(_))));
+}
+
+#[test]
+fn test_lex_error_unterminated_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    assert!(matches!(writ.run("return \"unterminated"), Err(WritError::Lex(_))));
+}
+
+// ── VM methods via vm_mut() ───────────────────────────────────────────────────
+
+#[test]
+fn test_register_fn_in_module_callable() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.vm_mut().register_fn_in_module(
+        "custom_add",
+        "mymod",
+        fn2(|a: i32, b: i32| -> Result<i32, String> { Ok(a + b) }),
+    );
+    assert_eq!(writ.run("return custom_add(3, 4)").unwrap(), Value::I32(7));
+}
+
+#[test]
+fn test_register_fn_in_module_disable_blocks_it() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.vm_mut()
+        .register_fn_in_module("my_fn", "mymod", fn0(|| -> Result<i32, String> { Ok(1) }));
+    writ.disable_module("mymod");
+    assert!(writ.run("return my_fn()").is_err());
+}
+
+#[test]
+fn test_last_coroutine_id_some_after_start() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func spin() { while true { yield } }\nstart spin()").unwrap();
+    writ.tick(0.016).unwrap();
+    assert!(writ.vm_mut().last_coroutine_id().is_some());
+}
+
+#[test]
+fn test_set_coroutine_owner_and_cancel_for() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func spin() { while true { yield } }\nstart spin()").unwrap();
+    writ.tick(0.016).unwrap();
+    let id = writ.vm_mut().last_coroutine_id().unwrap();
+    writ.vm_mut().set_coroutine_owner(id, 42);
+    writ.vm_mut().cancel_coroutines_for(42);
+    writ.tick(0.016).unwrap();
+    assert_eq!(writ.vm_mut().active_coroutine_count(), 0);
+}
+
+#[test]
+fn test_cancel_coroutines_for_wrong_owner_is_noop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func spin() { while true { yield } }\nstart spin()").unwrap();
+    writ.tick(0.016).unwrap();
+    let id = writ.vm_mut().last_coroutine_id().unwrap();
+    writ.vm_mut().set_coroutine_owner(id, 42);
+    writ.vm_mut().cancel_coroutines_for(999);
+    assert_eq!(writ.vm_mut().active_coroutine_count(), 1);
+}
+
+// ── Value methods ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_value_is_numeric_true_for_all_numeric_variants() {
+    assert!(Value::I32(1).is_numeric());
+    assert!(Value::I64(1).is_numeric());
+    assert!(Value::F32(1.0).is_numeric());
+    assert!(Value::F64(1.0).is_numeric());
+}
+
+#[test]
+fn test_value_is_numeric_false_for_non_numeric() {
+    assert!(!Value::Bool(true).is_numeric());
+    assert!(!Value::Null.is_numeric());
+    assert!(!Value::Str(Rc::from("1")).is_numeric());
+}
+
+#[test]
+fn test_value_cheap_clone_equals_original() {
+    assert_eq!(Value::I32(42).cheap_clone(), Value::I32(42));
+    assert_eq!(Value::F64(3.14).cheap_clone(), Value::F64(3.14));
+    assert_eq!(Value::Bool(true).cheap_clone(), Value::Bool(true));
+    assert_eq!(Value::Null.cheap_clone(), Value::Null);
+}
+
+#[test]
+fn test_value_type_name_owned() {
+    assert_eq!(Value::I32(0).type_name_owned(), "int");
+    assert_eq!(Value::F64(0.0).type_name_owned(), "float");
+    assert_eq!(Value::Bool(true).type_name_owned(), "bool");
+    assert_eq!(Value::Null.type_name_owned(), "null");
+    assert_eq!(Value::Str(Rc::from("x")).type_name_owned(), "string");
+}
