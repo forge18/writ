@@ -142,6 +142,8 @@ pub struct VM {
     last_file: String,
     /// String interner for deduplicating `Rc<str>` across chunks.
     interner: super::intern::StringInterner,
+    /// Reusable scratch buffer for string concatenation (avoids malloc/free per Concat).
+    concat_buf: String,
 }
 
 impl VM {
@@ -185,6 +187,7 @@ impl VM {
             has_open_upvalues: false,
             func_ip_cache: Vec::new(),
             interner: super::intern::StringInterner::new(),
+            concat_buf: String::with_capacity(256),
         }
     }
 
@@ -1682,19 +1685,22 @@ impl VM {
 
                 // ── String concatenation ─────────────────────────────
                 op::Concat => {
-                    // Fast path: Str + Str avoids Display formatting.
+                    // Fast path: Str + Str uses a reusable scratch buffer,
+                    // avoiding a String allocation per concat.
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
                     let result: Rc<str> = match (lhs, rhs) {
                         (Value::Str(a_str), Value::Str(b_str)) => {
-                            let mut s = String::with_capacity(a_str.len() + b_str.len());
-                            s.push_str(a_str);
-                            s.push_str(b_str);
-                            Rc::from(s)
+                            self.concat_buf.clear();
+                            self.concat_buf.push_str(a_str);
+                            self.concat_buf.push_str(b_str);
+                            Rc::from(self.concat_buf.as_str())
                         }
                         _ => {
-                            let s = format!("{lhs}{rhs}");
-                            Rc::from(s)
+                            use std::fmt::Write;
+                            self.concat_buf.clear();
+                            let _ = write!(self.concat_buf, "{lhs}{rhs}");
+                            Rc::from(self.concat_buf.as_str())
                         }
                     };
                     self.stack[base + a as usize] = Value::Str(result);
