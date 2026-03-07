@@ -1649,16 +1649,18 @@ impl VM {
                     let callee_abs = base + a as usize;
                     let arg_start = callee_abs;
                     let native = unsafe { self.native_fn_vec.get_unchecked(native_idx) };
-                    if let Some(ref module) = native.module.clone() {
-                        if self.disabled_modules.contains(module.as_str()) {
+                    if let Some(module) = native.module.as_deref() {
+                        if self.disabled_modules.contains(module) {
                             self.frames.last_mut().unwrap().pc = save_pc!();
                             return Err(self.make_error(format!("module '{module}' is disabled")));
                         }
                     }
-                    let body = Rc::clone(&native.body);
+                    // Use raw pointer to body to avoid Rc::clone refcount bump.
+                    // SAFETY: native_fn_vec is not modified during run_until.
+                    let body: *const dyn Fn(&[Value]) -> Result<Value, String> = &*native.body;
                     let result = {
                         let args = &self.stack[arg_start..arg_start + arg_count];
-                        body(args).map_err(|msg| {
+                        (unsafe { &*body })(args).map_err(|msg| {
                             self.frames.last_mut().unwrap().pc = save_pc!();
                             self.make_error(msg)
                         })?
@@ -1680,10 +1682,22 @@ impl VM {
 
                 // ── String concatenation ─────────────────────────────
                 op::Concat => {
+                    // Fast path: Str + Str avoids Display formatting.
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
-                    let result = format!("{lhs}{rhs}");
-                    self.stack[base + a as usize] = Value::Str(Rc::from(result.as_str()));
+                    let result: Rc<str> = match (lhs, rhs) {
+                        (Value::Str(a_str), Value::Str(b_str)) => {
+                            let mut s = String::with_capacity(a_str.len() + b_str.len());
+                            s.push_str(a_str);
+                            s.push_str(b_str);
+                            Rc::from(s)
+                        }
+                        _ => {
+                            let s = format!("{lhs}{rhs}");
+                            Rc::from(s)
+                        }
+                    };
+                    self.stack[base + a as usize] = Value::Str(result);
                 }
 
                 // ── Collections ──────────────────────────────────────
@@ -1725,27 +1739,35 @@ impl VM {
                 op::GetIndex => {
                     // Inline Array+Int fast path; fallback to generic helper
                     // GetIndex(dst, obj, idx) = a=dst, b=obj, c=idx
-                    if let Value::Array(arr) = &self.stack[base + b as usize] {
-                        let arr_rc = Rc::clone(arr);
-                        let idx_val = &self.stack[base + c as usize];
-                        let i = match idx_val {
-                            Value::I32(v) => *v as i64,
-                            Value::I64(v) => *v,
-                            _ => {
-                                self.frames.last_mut().unwrap().pc = save_pc!();
-                                self.exec_get_index_reg(base, a, b, c)?;
-                                continue;
-                            }
-                        };
-                        let arr = arr_rc.borrow();
-                        if i < 0 || i as usize >= arr.len() {
+                    // Read index as scalar first, then extract Rc ptr without
+                    // Rc::clone (avoids refcount bump on the fast path).
+                    let idx_slot = base + c as usize;
+                    let obj_slot = base + b as usize;
+                    let i: i64 = match &self.stack[idx_slot] {
+                        Value::I32(v) => *v as i64,
+                        Value::I64(v) => *v,
+                        _ => {
                             self.frames.last_mut().unwrap().pc = save_pc!();
-                            return Err(self.make_error(format!(
-                                "array index {i} out of bounds (length {})",
-                                arr.len()
-                            )));
+                            self.exec_get_index_reg(base, a, b, c)?;
+                            continue;
                         }
-                        self.stack[base + a as usize] = arr[i as usize].clone();
+                    };
+                    if let Value::Array(arr) = &self.stack[obj_slot] {
+                        let arr_ptr: *const RefCell<Vec<Value>> = &**arr;
+                        // SAFETY: arr_ptr is valid for the duration of this block.
+                        // We only write to self.stack[dst] after releasing the borrow.
+                        let val = {
+                            let arr = unsafe { &*arr_ptr }.borrow();
+                            if i < 0 || i as usize >= arr.len() {
+                                self.frames.last_mut().unwrap().pc = save_pc!();
+                                return Err(self.make_error(format!(
+                                    "array index {i} out of bounds (length {})",
+                                    arr.len()
+                                )));
+                            }
+                            arr[i as usize].cheap_clone()
+                        };
+                        self.stack[base + a as usize] = val;
                     } else {
                         self.frames.last_mut().unwrap().pc = save_pc!();
                         self.exec_get_index_reg(base, a, b, c)?;
@@ -1754,20 +1776,23 @@ impl VM {
                 op::SetIndex => {
                     // Inline Array+Int fast path; fallback to generic helper
                     // SetIndex(obj, idx, val) = a=obj, b=idx, c=val
-                    if let Value::Array(arr) = &self.stack[base + a as usize] {
-                        let arr_rc = Rc::clone(arr);
-                        let idx_val = &self.stack[base + b as usize];
-                        let i = match idx_val {
-                            Value::I32(v) => *v as i64,
-                            Value::I64(v) => *v,
-                            _ => {
-                                self.frames.last_mut().unwrap().pc = save_pc!();
-                                self.exec_set_index_reg(base, a, b, c)?;
-                                continue;
-                            }
-                        };
-                        let value = self.stack[base + c as usize].clone();
-                        let mut arr = arr_rc.borrow_mut();
+                    // Read index scalar and value before borrowing array mutably.
+                    let idx_slot = base + b as usize;
+                    let i: i64 = match &self.stack[idx_slot] {
+                        Value::I32(v) => *v as i64,
+                        Value::I64(v) => *v,
+                        _ => {
+                            self.frames.last_mut().unwrap().pc = save_pc!();
+                            self.exec_set_index_reg(base, a, b, c)?;
+                            continue;
+                        }
+                    };
+                    let obj_slot = base + a as usize;
+                    if let Value::Array(arr) = &self.stack[obj_slot] {
+                        let arr_ptr: *const RefCell<Vec<Value>> = &**arr;
+                        let value = self.stack[base + c as usize].cheap_clone();
+                        // SAFETY: arr_ptr is valid; we only read from it.
+                        let mut arr = unsafe { &*arr_ptr }.borrow_mut();
                         if i < 0 || i as usize >= arr.len() {
                             self.frames.last_mut().unwrap().pc = save_pc!();
                             return Err(self.make_error(format!(
@@ -3402,12 +3427,13 @@ impl VM {
                 )));
             }
 
-            let body = Rc::clone(&method.body);
-            // Pass a direct slice of the stack — no Vec allocation.
+            // Use raw pointer to body to avoid Rc::clone refcount bump.
+            // SAFETY: methods table is not modified during execution.
+            let body: *const dyn Fn(&Value, &[Value]) -> Result<Value, String> = &*method.body;
             let arg_start = receiver_abs + 1;
             let result = {
                 let args = &self.stack[arg_start..arg_start + n];
-                (body)(&receiver, args).map_err(|msg| self.make_error(msg))?
+                (unsafe { &*body })(&receiver, args).map_err(|msg| self.make_error(msg))?
             };
             self.stack[receiver_abs] = result;
             return Ok(());
