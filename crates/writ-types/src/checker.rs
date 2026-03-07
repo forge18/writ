@@ -1372,6 +1372,15 @@ impl TypeChecker {
                 params,
                 return_type,
             } => {
+                // Untyped sentinel: a single Unknown param signals "accept any args".
+                // Used by register_host_fn_untyped — still infers arg exprs for
+                // undefined-variable detection but skips arity and type checks.
+                if params.len() == 1 && params[0] == Type::Unknown {
+                    for arg in args {
+                        self.infer_expr(call_arg_expr(arg))?;
+                    }
+                    return Ok(*return_type);
+                }
                 if args.len() != params.len() {
                     return Err(TypeError::simple(
                         format!(

@@ -7,7 +7,7 @@ use crate::value::Value;
 /// Implement this trait on Rust types that need to be accessible
 /// from Writ scripts via `VM::register_type`. Scripts can read/write
 /// fields and call methods on objects implementing this trait.
-pub trait WritObject: std::fmt::Debug {
+pub trait WritObject: std::fmt::Debug + 'static {
     /// Returns the type name as seen by scripts (e.g. `"Player"`).
     fn type_name(&self) -> &str;
 

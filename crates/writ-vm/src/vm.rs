@@ -3339,12 +3339,15 @@ impl VM {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("map expects a function".to_string())),
                 };
-                let len = container.borrow().len();
-                let mut result = Vec::with_capacity(len);
-                for i in 0..len {
-                    let elem = container.borrow().get(i).unwrap();
-                    let item = Value::Struct(Box::new(elem));
-                    let val = self.call_function(&fn_name, std::slice::from_ref(&item))?;
+                let items: Vec<Value> = {
+                    let b = container.borrow();
+                    (0..b.len())
+                        .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
+                        .collect()
+                };
+                let mut result = Vec::with_capacity(items.len());
+                for item in &items {
+                    let val = self.call_function(&fn_name, std::slice::from_ref(item))?;
                     result.push(val);
                 }
                 self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
@@ -3356,11 +3359,14 @@ impl VM {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("filter expects a function".to_string())),
                 };
-                let len = container.borrow().len();
+                let items: Vec<Value> = {
+                    let b = container.borrow();
+                    (0..b.len())
+                        .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
+                        .collect()
+                };
                 let mut result = Vec::new();
-                for i in 0..len {
-                    let elem = container.borrow().get(i).unwrap();
-                    let item = Value::Struct(Box::new(elem));
+                for item in items {
                     let keep = self.call_function(&fn_name, std::slice::from_ref(&item))?;
                     if !keep.is_falsy() {
                         result.push(item);
@@ -3375,11 +3381,14 @@ impl VM {
                     Value::Str(s) => (**s).clone(),
                     _ => return Err(self.make_error("for_each expects a function".to_string())),
                 };
-                let len = container.borrow().len();
-                for i in 0..len {
-                    let elem = container.borrow().get(i).unwrap();
-                    let item = Value::Struct(Box::new(elem));
-                    self.call_function(&fn_name, std::slice::from_ref(&item))?;
+                let items: Vec<Value> = {
+                    let b = container.borrow();
+                    (0..b.len())
+                        .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
+                        .collect()
+                };
+                for item in &items {
+                    self.call_function(&fn_name, std::slice::from_ref(item))?;
                 }
                 self.stack[receiver_abs] = Value::Null;
                 return Ok(());

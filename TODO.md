@@ -66,18 +66,18 @@ Architecture review findings from 2026-03-07. Ordered by priority.
 
 ## Low
 
-- [ ] **Provide default implementations for `WritObject` hash methods**
-  `WritObject` requires 6 methods including `get_field_by_hash`, `set_field_by_hash`, and `as_any`. The hash variants are a performance optimization, not a semantic requirement. Default implementations (hash variants delegate to string variants) would make simple host type implementations much less verbose.
+- [x] **Provide default implementations for `WritObject` hash methods**
+  Hash method defaults (`get_field_by_hash`, `set_field_by_hash`) already existed and delegate to the string variants. Added `'static` supertrait bound to `WritObject` to enforce that host types are `'static`, which is required for `Any` downcasting. Note: `as_any()` cannot have a default implementation — it requires vtable dispatch on `dyn WritObject`, and Rust's `where Self: Sized` guard would exclude it from the vtable.
   _File: `crates/writ-vm/src/object.rs`_
 
-- [ ] **Make `disable_type_checking()` more surgical**
-  The current escape hatch disables all type checking. A better option: `register_host_fn_untyped(name, handler)` that registers the function as `Unknown → Unknown`, letting the checker still run on everything else while treating that specific call as pass-through.
-  _File: `src/lib.rs:292`_
+- [x] **Make `disable_type_checking()` more surgical**
+  Added `Writ::register_host_fn_untyped(name, handler)` that registers with a single `Type::Unknown` param (sentinel). In `infer_call`, a guard before the arity check short-circuits to "accept any args, infer arg exprs for undefined-variable detection only". All other type checking continues normally.
+  _Files: `src/lib.rs`, `crates/writ-types/src/checker.rs`_
 
-- [ ] **Fix `codegen_rust()` to use existing `TypeChecker` state**
-  `Writ::codegen_rust()` re-runs the full lexer/parser/type checker from scratch on the provided source, ignoring any modules already loaded via `load()`. It should use `self.type_checker` so codegen sees the full registered type context.
-  _File: `src/lib.rs:321-332`_
+- [x] **Fix `codegen_rust()` to use existing `TypeChecker` state**
+  Changed `check_program` to `check_program_typed` — consistent with the pipeline used in `run()`/`load()`. The shared `self.type_checker` accumulates state from all prior `load()` calls; the typed stmts return is discarded since codegen reads directly from `registry()`.
+  _File: `src/lib.rs`_
 
-- [ ] **Investigate `Rc<RefCell<...>>` overhead for arrays/dicts in tight loops**
-  Every array element access incurs a `RefCell::borrow()` call. For tight loops over large arrays this is O(n) runtime borrow overhead. The `mobile-aosoa` feature flag suggests awareness of this — evaluate whether a default-on optimization path is warranted.
-  _File: `crates/writ-vm/src/value.rs`_
+- [x] **Investigate `Rc<RefCell<...>>` overhead for arrays/dicts in tight loops**
+  Investigated 2026-03-07. `Rc<RefCell<...>>` overhead is O(1) per access and unavoidable — shared-reference semantics require it. No default-on change to `Value` warranted. Fixed concrete bug found: AoSoA `map`/`filter`/`for_each` called `container.borrow()` on every loop iteration (N borrow-checks for N elements). Fixed by snapshotting elements into a `Vec` before the loop, releasing the borrow before `call_function` runs.
+  _File: `crates/writ-vm/src/vm.rs`_

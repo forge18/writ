@@ -252,6 +252,25 @@ impl Writ {
         self
     }
 
+    /// Registers a host function without type information.
+    ///
+    /// The type checker treats calls to this function as valid regardless of
+    /// argument count or types. All other type checking continues normally.
+    /// Argument expressions are still checked for undefined variable references.
+    ///
+    /// Prefer [`register_host_fn`](Self::register_host_fn) when type information
+    /// is available. Use this only for dynamic dispatch functions or FFI wrappers
+    /// whose signatures cannot be expressed in the Writ type system.
+    pub fn register_host_fn_untyped<H>(&mut self, name: &str, handler: H) -> &mut Self
+    where
+        H: writ_vm::binding::IntoNativeHandler,
+    {
+        self.type_checker
+            .register_host_function(name, vec![Type::Unknown], Type::Unknown);
+        self.vm.register_fn(name, handler);
+        self
+    }
+
     /// Registers a method on a value type that scripts can call.
     pub fn register_method<H>(
         &mut self,
@@ -460,7 +479,7 @@ impl Writ {
         let mut parser = Parser::new(tokens);
         let stmts = parser.parse_program()?;
 
-        self.type_checker.check_program(&stmts)?;
+        self.type_checker.check_program_typed(&stmts)?;
 
         let codegen = writ_codegen::RustCodegen::new();
         Ok(codegen.generate(self.type_checker.registry()))
