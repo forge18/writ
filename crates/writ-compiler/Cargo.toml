@@ -9,3 +9,4 @@ mobile-aosoa = []
 [dependencies]
 writ-lexer = { path = "../writ-lexer" }
 writ-parser = { path = "../writ-parser" }
+writ-types = { path = "../writ-types" }

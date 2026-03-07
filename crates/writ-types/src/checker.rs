@@ -15,6 +15,7 @@ use crate::registry::{
     ClassInfo, EnumInfo, FieldInfo, MethodInfo, StructInfo, TraitInfo, TypeRegistry,
 };
 use crate::suggestions;
+use crate::typed_ast::TypedStmt;
 use crate::types::Type;
 
 /// Type checker for the Writ language.
@@ -200,6 +201,56 @@ impl TypeChecker {
         }
 
         result
+    }
+
+    /// Type-checks a program and returns type-annotated statement wrappers.
+    ///
+    /// Each [`TypedStmt`] carries the checker-inferred type of the statement's
+    /// primary expression. The bytecode compiler consumes this to seed register
+    /// types without re-inferring, eliminating drift between the two type systems.
+    ///
+    /// Returns `Err` on the first type error (same behaviour as [`check_program`](Self::check_program)).
+    pub fn check_program_typed(&mut self, stmts: &[Stmt]) -> Result<Vec<TypedStmt>, TypeError> {
+        // Pass 1: Register all type declarations (signatures only).
+        for stmt in stmts {
+            self.register_type_if_decl(stmt)?;
+        }
+        // Pass 2: Full type checking + annotation.
+        let mut typed = Vec::with_capacity(stmts.len());
+        for stmt in stmts {
+            let expr_type = self.check_stmt_typed(stmt)?;
+            typed.push(TypedStmt {
+                stmt: stmt.clone(),
+                expr_type,
+            });
+        }
+        Ok(typed)
+    }
+
+    /// Type-checks a statement and returns the inferred type of its primary expression.
+    ///
+    /// For `Let`/`Var`/`Const` the returned type is the initializer's type.
+    /// For `ExprStmt` it is the expression's type. All other statements return
+    /// [`Type::Void`].
+    fn check_stmt_typed(&mut self, stmt: &Stmt) -> Result<Type, TypeError> {
+        match &stmt.kind {
+            StmtKind::Let { initializer, .. } | StmtKind::Var { initializer, .. } => {
+                self.check_stmt(stmt)?;
+                self.infer_expr(initializer)
+            }
+            StmtKind::Const { initializer, .. } => {
+                self.check_stmt(stmt)?;
+                self.infer_expr(initializer)
+            }
+            StmtKind::ExprStmt(expr) => {
+                self.check_stmt(stmt)?;
+                self.infer_expr(expr)
+            }
+            _ => {
+                self.check_stmt(stmt)?;
+                Ok(Type::Void)
+            }
+        }
     }
 
     /// Type-checks a single statement.
@@ -592,10 +643,7 @@ impl TypeChecker {
 
     /// Substitutes type-parameter references in a `TypeExpr` given a binding map.
     /// e.g. if bindings = {"T": "int"}, `Simple("T")` becomes `Simple("int")`.
-    fn substitute_type_expr(
-        type_expr: &TypeExpr,
-        bindings: &HashMap<String, String>,
-    ) -> TypeExpr {
+    fn substitute_type_expr(type_expr: &TypeExpr, bindings: &HashMap<String, String>) -> TypeExpr {
         match type_expr {
             TypeExpr::Simple(name) => {
                 if let Some(bound) = bindings.get(name) {
@@ -691,8 +739,7 @@ impl TypeChecker {
                 };
                 let mut params = Vec::new();
                 for param in &method.params {
-                    let subst =
-                        Self::substitute_type_expr(&param.type_annotation, &bindings);
+                    let subst = Self::substitute_type_expr(&param.type_annotation, &bindings);
                     params.push(self.resolve_type_expr(&subst, span)?);
                 }
                 methods.push(MethodInfo {
@@ -769,8 +816,7 @@ impl TypeChecker {
                 };
                 let mut params = Vec::new();
                 for param in &method.params {
-                    let subst =
-                        Self::substitute_type_expr(&param.type_annotation, &bindings);
+                    let subst = Self::substitute_type_expr(&param.type_annotation, &bindings);
                     params.push(self.resolve_type_expr(&subst, span)?);
                 }
                 methods.push(MethodInfo {
@@ -3295,7 +3341,9 @@ mod tests {
             }],
             methods: vec![],
         };
-        checker.generic_classes.insert("Stack".to_string(), template);
+        checker
+            .generic_classes
+            .insert("Stack".to_string(), template);
 
         // Instantiate Stack<string>
         let result = checker.resolve_type_expr(

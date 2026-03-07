@@ -6,6 +6,7 @@ mod error;
 mod module_registry;
 mod registry;
 pub mod suggestions;
+mod typed_ast;
 mod types;
 
 pub use checker::TypeChecker;
@@ -14,4 +15,5 @@ pub use error::TypeError;
 pub use module_registry::ModuleRegistry;
 pub use registry::{ClassInfo, EnumInfo, FieldInfo, MethodInfo, TraitInfo, TypeRegistry};
 pub use suggestions::Suggestion;
+pub use typed_ast::TypedStmt;
 pub use types::Type;

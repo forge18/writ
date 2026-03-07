@@ -24,6 +24,21 @@ enum RunResult {
     Yield(WaitCondition),
 }
 
+/// Bundled operation function pointers for binary arithmetic helpers.
+struct ArithOps {
+    i32_op: fn(i32, i32) -> Option<i32>,
+    i64_op: fn(i64, i64) -> Option<i64>,
+    f64_op: fn(f64, f64) -> f64,
+    method_name: &'static str,
+}
+
+/// Bundled comparison function pointers for comparison helpers.
+struct CmpOps {
+    i64_cmp: fn(&i64, &i64) -> bool,
+    f64_cmp: fn(&f64, &f64) -> bool,
+    method_name: &'static str,
+}
+
 /// The Writ bytecode virtual machine.
 ///
 /// Executes compiled bytecode chunks produced by the Writ compiler.
@@ -339,6 +354,14 @@ impl VM {
     /// Only function bodies are swapped; the main chunk is not replaced
     /// (it has already executed). If compilation fails, the existing
     /// bytecode is preserved and the error is returned.
+    ///
+    /// # Deprecation
+    ///
+    /// This method bypasses the type checker. Use [`Writ::reload`] instead,
+    /// which runs the full lex → parse → type-check → compile pipeline before
+    /// swapping bytecode. If you must call the VM directly, use
+    /// [`reload_compiled`](VM::reload_compiled) with pre-compiled output.
+    #[deprecated(note = "bypasses type checking; use Writ::reload or VM::reload_compiled instead")]
     pub fn reload(&mut self, file: &str, source: &str) -> Result<(), String> {
         let mut lexer = writ_lexer::Lexer::new(source);
         let tokens = lexer.tokenize().map_err(|e| format!("{e}"))?;
@@ -361,6 +384,48 @@ impl VM {
         }
 
         for mut new_func in new_functions {
+            new_func.chunk.set_file(file);
+            if let Some(&idx) = self.function_map.get(&new_func.name) {
+                self.functions[idx] = new_func;
+            } else {
+                let idx = self.functions.len();
+                self.function_map.insert(new_func.name.clone(), idx);
+                self.functions.push(new_func);
+            }
+        }
+
+        self.build_layouts();
+        self.rebuild_ip_cache();
+
+        Ok(())
+    }
+
+    /// Swaps function bytecode from a pre-compiled reload.
+    ///
+    /// This is the hot-reload counterpart to [`load_module`](VM::load_module).
+    /// It replaces existing functions by name and upserts new ones, but does
+    /// not execute the main chunk (hot reload preserves existing VM state).
+    ///
+    /// Callers are responsible for running lex → parse → type-check → compile
+    /// before calling this method. Use [`Writ::reload`] rather than calling
+    /// this directly when an embedder-level type check is needed.
+    pub fn reload_compiled(
+        &mut self,
+        file: &str,
+        _chunk: &Chunk,
+        functions: &[CompiledFunction],
+        struct_metas: &[StructMeta],
+        class_metas: &[ClassMeta],
+    ) -> Result<(), RuntimeError> {
+        for meta in struct_metas {
+            self.struct_metas.insert(meta.name.clone(), meta.clone());
+        }
+
+        for meta in class_metas {
+            self.class_metas.insert(meta.name.clone(), meta.clone());
+        }
+
+        for mut new_func in functions.iter().cloned() {
             new_func.chunk.set_file(file);
             if let Some(&idx) = self.function_map.get(&new_func.name) {
                 self.functions[idx] = new_func;
@@ -421,6 +486,9 @@ impl VM {
         self.stack.clear();
         self.frames.clear();
         self.instruction_count = 0;
+        // Clone required: the VM quickens (mutates) this chunk in-place and
+        // `rebuild_ip_cache` captures raw pointers into `main_chunk.code`.
+        // Do not remove this clone. See `Chunk` doc comment for details.
         self.main_chunk = chunk.clone();
 
         self.rebuild_ip_cache();
@@ -558,7 +626,7 @@ impl VM {
         self.next_coroutine_id = 1;
         self.active_coroutine = None;
 
-        // Load the main chunk and functions
+        // Clone required: same quickening invariant as load_module. See `Chunk` doc.
         self.main_chunk = chunk.clone();
         self.functions = functions.to_vec();
 
@@ -931,10 +999,12 @@ impl VM {
                         base + a as usize,
                         base + b as usize,
                         base + c as usize,
-                        i32::checked_sub,
-                        i64::checked_sub,
-                        |x, y| x - y,
-                        "subtract",
+                        ArithOps {
+                            i32_op: i32::checked_sub,
+                            i64_op: i64::checked_sub,
+                            f64_op: |x, y| x - y,
+                            method_name: "subtract",
+                        },
                     )?;
                 }
                 op::Mul => {
@@ -954,10 +1024,12 @@ impl VM {
                         base + a as usize,
                         base + b as usize,
                         base + c as usize,
-                        i32::checked_mul,
-                        i64::checked_mul,
-                        |x, y| x * y,
-                        "multiply",
+                        ArithOps {
+                            i32_op: i32::checked_mul,
+                            i64_op: i64::checked_mul,
+                            f64_op: |x, y| x * y,
+                            method_name: "multiply",
+                        },
                     )?;
                 }
                 op::Div => {
@@ -1072,7 +1144,17 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y, "lt")?;
+                    self.exec_comparison_reg(
+                        base,
+                        a,
+                        b,
+                        c,
+                        CmpOps {
+                            i64_cmp: |x, y| x < y,
+                            f64_cmp: |x, y| x < y,
+                            method_name: "lt",
+                        },
+                    )?;
                 }
                 op::Le => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -1087,7 +1169,17 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y, "le")?;
+                    self.exec_comparison_reg(
+                        base,
+                        a,
+                        b,
+                        c,
+                        CmpOps {
+                            i64_cmp: |x, y| x <= y,
+                            f64_cmp: |x, y| x <= y,
+                            method_name: "le",
+                        },
+                    )?;
                 }
                 op::Gt => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -1102,7 +1194,17 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y, "gt")?;
+                    self.exec_comparison_reg(
+                        base,
+                        a,
+                        b,
+                        c,
+                        CmpOps {
+                            i64_cmp: |x, y| x > y,
+                            f64_cmp: |x, y| x > y,
+                            method_name: "gt",
+                        },
+                    )?;
                 }
                 op::Ge => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -1117,7 +1219,17 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y, "ge")?;
+                    self.exec_comparison_reg(
+                        base,
+                        a,
+                        b,
+                        c,
+                        CmpOps {
+                            i64_cmp: |x, y| x >= y,
+                            f64_cmp: |x, y| x >= y,
+                            method_name: "ge",
+                        },
+                    )?;
                 }
 
                 // ── Logical ──────────────────────────────────────────
@@ -2081,10 +2193,12 @@ impl VM {
                             base + a as usize,
                             base + b as usize,
                             base + c as usize,
-                            i32::checked_sub,
-                            i64::checked_sub,
-                            |x, y| x - y,
-                            "subtract",
+                            ArithOps {
+                                i32_op: i32::checked_sub,
+                                i64_op: i64::checked_sub,
+                                f64_op: |x, y| x - y,
+                                method_name: "subtract",
+                            },
                         )?;
                     }
                 }
@@ -2103,10 +2217,12 @@ impl VM {
                             base + a as usize,
                             base + b as usize,
                             base + c as usize,
-                            i32::checked_sub,
-                            i64::checked_sub,
-                            |x, y| x - y,
-                            "subtract",
+                            ArithOps {
+                                i32_op: i32::checked_sub,
+                                i64_op: i64::checked_sub,
+                                f64_op: |x, y| x - y,
+                                method_name: "subtract",
+                            },
                         )?;
                     }
                 }
@@ -2137,10 +2253,12 @@ impl VM {
                             base + a as usize,
                             base + b as usize,
                             base + c as usize,
-                            i32::checked_mul,
-                            i64::checked_mul,
-                            |x, y| x * y,
-                            "multiply",
+                            ArithOps {
+                                i32_op: i32::checked_mul,
+                                i64_op: i64::checked_mul,
+                                f64_op: |x, y| x * y,
+                                method_name: "multiply",
+                            },
                         )?;
                     }
                 }
@@ -2159,10 +2277,12 @@ impl VM {
                             base + a as usize,
                             base + b as usize,
                             base + c as usize,
-                            i32::checked_mul,
-                            i64::checked_mul,
-                            |x, y| x * y,
-                            "multiply",
+                            ArithOps {
+                                i32_op: i32::checked_mul,
+                                i64_op: i64::checked_mul,
+                                f64_op: |x, y| x * y,
+                                method_name: "multiply",
+                            },
                         )?;
                     }
                 }
@@ -2226,7 +2346,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Lt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y, "lt")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x < y,
+                                f64_cmp: |x, y| x < y,
+                                method_name: "lt",
+                            },
+                        )?;
                     }
                 }
                 op::QLtFloat => {
@@ -2239,7 +2369,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Lt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y, "lt")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x < y,
+                                f64_cmp: |x, y| x < y,
+                                method_name: "lt",
+                            },
+                        )?;
                     }
                 }
                 op::QLeInt => {
@@ -2252,7 +2392,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Le;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y, "le")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x <= y,
+                                f64_cmp: |x, y| x <= y,
+                                method_name: "le",
+                            },
+                        )?;
                     }
                 }
                 op::QLeFloat => {
@@ -2265,7 +2415,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Le;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y, "le")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x <= y,
+                                f64_cmp: |x, y| x <= y,
+                                method_name: "le",
+                            },
+                        )?;
                     }
                 }
                 op::QGtInt => {
@@ -2278,7 +2438,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Gt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y, "gt")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x > y,
+                                f64_cmp: |x, y| x > y,
+                                method_name: "gt",
+                            },
+                        )?;
                     }
                 }
                 op::QGtFloat => {
@@ -2291,7 +2461,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Gt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y, "gt")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x > y,
+                                f64_cmp: |x, y| x > y,
+                                method_name: "gt",
+                            },
+                        )?;
                     }
                 }
                 op::QGeInt => {
@@ -2304,7 +2484,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Ge;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y, "ge")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x >= y,
+                                f64_cmp: |x, y| x >= y,
+                                method_name: "ge",
+                            },
+                        )?;
                     }
                 }
                 op::QGeFloat => {
@@ -2317,7 +2507,17 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Ge;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y, "ge")?;
+                        self.exec_comparison_reg(
+                            base,
+                            a,
+                            b,
+                            c,
+                            CmpOps {
+                                i64_cmp: |x, y| x >= y,
+                                f64_cmp: |x, y| x >= y,
+                                method_name: "ge",
+                            },
+                        )?;
                     }
                 }
                 op::QEqInt => {
@@ -2399,11 +2599,9 @@ impl VM {
     ) -> Result<Value, String> {
         match i32_op(a, b) {
             Some(r) => Ok(Value::I32(r)),
-            None => {
-                i64_op(a as i64, b as i64)
-                    .map(Value::I64)
-                    .ok_or_else(|| err_msg.to_string())
-            }
+            None => i64_op(a as i64, b as i64)
+                .map(Value::I64)
+                .ok_or_else(|| err_msg.to_string()),
         }
     }
 
@@ -2591,11 +2789,14 @@ impl VM {
         dst_abs: usize,
         a_abs: usize,
         b_abs: usize,
-        i32_op: fn(i32, i32) -> Option<i32>,
-        i64_op: fn(i64, i64) -> Option<i64>,
-        f64_op: fn(f64, f64) -> f64,
-        method_name: &'static str,
+        ops: ArithOps,
     ) -> Result<(), RuntimeError> {
+        let ArithOps {
+            i32_op,
+            i64_op,
+            f64_op,
+            method_name,
+        } = ops;
         let a_ref = &self.stack[a_abs];
         let b_ref = &self.stack[b_abs];
         let result = match (a_ref, b_ref) {
@@ -2720,10 +2921,13 @@ impl VM {
         dst: u8,
         a: u8,
         b: u8,
-        i64_cmp: fn(&i64, &i64) -> bool,
-        f64_cmp: fn(&f64, &f64) -> bool,
-        method_name: &'static str,
+        ops: CmpOps,
     ) -> Result<(), RuntimeError> {
+        let CmpOps {
+            i64_cmp,
+            f64_cmp,
+            method_name,
+        } = ops;
         let a_ref = &self.stack[base + a as usize];
         let b_ref = &self.stack[base + b as usize];
         let result = match (a_ref, b_ref) {

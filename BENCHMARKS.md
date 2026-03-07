@@ -36,7 +36,9 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 | queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | 4.08 ms | 3.89 ms | -78% |
 | loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | 0.139 ms | 0.139 ms | -82% |
 
-## Compilation Pipeline Results (Round 9)
+## Compilation Pipeline Results
+
+### Round 9 (baseline)
 
 | Benchmark | Lexer | Parser | Compiler | Pipeline (full) |
 | --------- | ----- | ------ | -------- | --------------- |
@@ -45,6 +47,20 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 | loop | — | 817 ns | 388 ns | — |
 | arithmetic | 216 ns | — | — | — |
 | interpolation | 668 ns | — | — | — |
+
+### Current (post-Round 14 + reload fix)
+
+| Benchmark | Lexer | Parser | Compiler | Pipeline (full) | VM Only |
+| --------- | ----- | ------ | -------- | --------------- | ------- |
+| fibonacci_28 | 920 ns | 1.59 µs | 1.18 µs | 26.8 ms | 26.1 ms |
+| binary_trees | — | — | — | 27.2 ms | 26.7 ms |
+| permute_9 | — | — | — | 25.7 ms | 25.7 ms |
+| mandelbrot_100 | — | — | — | 15.4 ms | 15.2 ms |
+| sieve_5000 | — | — | — | 495 µs | 483 µs |
+| queens_8 | — | — | — | 3.82 ms | 3.89 ms |
+| loop_sum | — | — | — | 156 µs | 156 µs |
+
+Pipeline overhead above raw VM execution is now <5% on all benchmarks. The `reload()` fix (removing a redundant `check_program()` call that ran the type checker twice) was the primary driver. Lexer/parser/compiler isolation numbers from Round 9 remain representative — those stages were not changed.
 
 Pipeline numbers include lex + parse + compile + VM execution. Compiler and lexer are measured in isolation on the same source programs.
 

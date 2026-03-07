@@ -8,6 +8,17 @@ use crate::opcode::INSTR_WORDS;
 ///
 /// Each chunk represents the bytecode for a single compilation unit
 /// (a top-level script or, in later phases, a function body).
+///
+/// # Ownership and Quickening
+///
+/// The VM mutates `code` in-place during quickening (runtime instruction
+/// specialization). Each `VM` instance must own its own deep clone of every
+/// `Chunk` it executes — never share a single `Chunk` between multiple VMs.
+/// `VM::execute_program` and `VM::load_module` both call `chunk.clone()`
+/// before storing in `self.main_chunk`. Do not remove that clone as an
+/// "optimization": the raw pointers captured by `rebuild_ip_cache` point
+/// into the owned `main_chunk.code` and are only valid while that owned
+/// copy lives in the VM.
 #[derive(Debug, Clone)]
 pub struct Chunk {
     /// Compact u32-encoded bytecode.

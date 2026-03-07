@@ -13,6 +13,7 @@ edition.workspace = true
 
 [features]
 mobile-aosoa = ["writ-vm/mobile-aosoa"]
+debug-hooks = ["writ-vm/debug-hooks"]
 
 [dependencies]
 writ-lexer = { path = "crates/writ-lexer" }

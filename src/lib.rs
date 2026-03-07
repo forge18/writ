@@ -31,6 +31,8 @@ pub use writ_types::{Type, TypeError};
 pub use writ_vm::{Fn0, Fn1, Fn2, Fn3, MFn0, MFn1, MFn2, MFn3};
 pub use writ_vm::{RuntimeError, StackFrame, StackTrace, Value, ValueTag, WritObject};
 pub use writ_vm::{fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
+#[cfg(feature = "debug-hooks")]
+pub use writ_vm::{BreakpointAction, BreakpointContext};
 
 // Re-export codegen for embedders that want Rust source output.
 pub use writ_codegen::RustCodegen;
@@ -154,13 +156,16 @@ impl Writ {
         let mut parser = Parser::new(tokens);
         let stmts = parser.parse_program()?;
 
-        if self.type_check_enabled {
-            self.type_checker.check_program(&stmts)?;
-        }
-
         let mut compiler = Compiler::new();
-        for stmt in &stmts {
-            compiler.compile_stmt(stmt)?;
+        if self.type_check_enabled {
+            let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
+            for typed in &typed_stmts {
+                compiler.compile_typed_stmt(typed)?;
+            }
+        } else {
+            for stmt in &stmts {
+                compiler.compile_stmt(stmt)?;
+            }
         }
         let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
 
@@ -184,13 +189,16 @@ impl Writ {
         let mut parser = Parser::new(tokens);
         let stmts = parser.parse_program()?;
 
-        if self.type_check_enabled {
-            self.type_checker.check_program(&stmts)?;
-        }
-
         let mut compiler = Compiler::new();
-        for stmt in &stmts {
-            compiler.compile_stmt(stmt)?;
+        if self.type_check_enabled {
+            let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
+            for typed in &typed_stmts {
+                compiler.compile_typed_stmt(typed)?;
+            }
+        } else {
+            for stmt in &stmts {
+                compiler.compile_stmt(stmt)?;
+            }
         }
         let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
 
@@ -215,6 +223,31 @@ impl Writ {
     where
         H: writ_vm::binding::IntoNativeHandler,
     {
+        self.vm.register_fn(name, handler);
+        self
+    }
+
+    /// Registers a host function in both the VM and the type checker atomically.
+    ///
+    /// This is the preferred way to expose host functions to scripts. Calling
+    /// [`register_fn`](Self::register_fn) alone leaves the type checker unaware
+    /// of the function, causing type errors in type-checked scripts. Calling
+    /// [`type_checker_mut`](Self::type_checker_mut) alone registers the
+    /// signature without the runtime handler.
+    ///
+    /// `params` and `return_type` are [`Type`] values from `writ_types`. Use
+    /// `Type::Any` for parameters that accept any value.
+    pub fn register_host_fn<H>(
+        &mut self,
+        name: &str,
+        params: Vec<Type>,
+        return_type: Type,
+        handler: H,
+    ) -> &mut Self
+    where
+        H: writ_vm::binding::IntoNativeHandler,
+    {
+        self.type_checker.register_host_function(name, params, return_type);
         self.vm.register_fn(name, handler);
         self
     }
@@ -251,16 +284,39 @@ impl Writ {
         self
     }
 
-    /// Reloads a script file, recompiling it and swapping the bytecode
-    /// in place. Existing object state is preserved where possible.
+    /// Reloads a script file through the full pipeline (lex → parse →
+    /// type-check → compile) and swaps function bytecode in place.
+    ///
+    /// Existing VM state (globals, live coroutines) is preserved. Only
+    /// function bodies are updated; the main chunk is discarded because it
+    /// has already executed.
+    ///
+    /// Type checking honours [`disable_type_checking`](Self::disable_type_checking).
     pub fn reload(&mut self, file: &str) -> Result<(), WritError> {
         let source = fs::read_to_string(file)?;
-        self.vm.reload(file, &source).map_err(|msg| {
-            WritError::Runtime(RuntimeError {
-                message: msg,
-                trace: StackTrace { frames: vec![] },
-            })
-        })
+
+        let mut lexer = Lexer::with_file(&source, file);
+        let tokens = lexer.tokenize()?;
+
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program()?;
+
+        let mut compiler = Compiler::new();
+        if self.type_check_enabled {
+            let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
+            for typed in &typed_stmts {
+                compiler.compile_typed_stmt(typed)?;
+            }
+        } else {
+            for stmt in &stmts {
+                compiler.compile_stmt(stmt)?;
+            }
+        }
+        let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
+
+        self.vm
+            .reload_compiled(file, &chunk, &functions, &struct_metas, &class_metas)
+            .map_err(WritError::from)
     }
 
     /// Cancels all coroutines owned by the given object ID.
@@ -301,14 +357,93 @@ impl Writ {
         self
     }
 
-    /// Returns a mutable reference to the underlying VM for advanced
-    /// configuration (breakpoints, debug hooks, etc.).
+    /// Resets the type checker to an empty state, discarding all
+    /// script-defined types and functions accumulated across prior
+    /// [`run`](Self::run) and [`load`](Self::load) calls.
+    ///
+    /// Host-registered functions and types (added via
+    /// [`register_host_fn`](Self::register_host_fn) and
+    /// [`register_type`](Self::register_type)) are also cleared; re-register
+    /// them after calling this method if type checking is enabled.
+    ///
+    /// Use this when you need strict per-invocation isolation — for example,
+    /// when executing untrusted or user-supplied scripts where previously
+    /// accumulated definitions should not be visible.
+    pub fn reset_script_types(&mut self) -> &mut Self {
+        self.type_checker = TypeChecker::new();
+        self
+    }
+
+    /// Registers a breakpoint at the given source file and line number.
+    #[cfg(feature = "debug-hooks")]
+    pub fn set_breakpoint(&mut self, file: &str, line: u32) -> &mut Self {
+        self.vm.set_breakpoint(file, line);
+        self
+    }
+
+    /// Removes a previously registered breakpoint.
+    #[cfg(feature = "debug-hooks")]
+    pub fn remove_breakpoint(&mut self, file: &str, line: u32) -> &mut Self {
+        self.vm.remove_breakpoint(file, line);
+        self
+    }
+
+    /// Registers a callback invoked when a breakpoint is hit.
+    #[cfg(feature = "debug-hooks")]
+    pub fn on_breakpoint<F>(&mut self, handler: F) -> &mut Self
+    where
+        F: Fn(&writ_vm::BreakpointContext) -> writ_vm::BreakpointAction + 'static,
+    {
+        self.vm.on_breakpoint(handler);
+        self
+    }
+
+    /// Registers a hook called before each new source line executes.
+    #[cfg(feature = "debug-hooks")]
+    pub fn on_line<F>(&mut self, handler: F) -> &mut Self
+    where
+        F: Fn(&str, u32) + 'static,
+    {
+        self.vm.on_line(handler);
+        self
+    }
+
+    /// Registers a hook called when any function is entered.
+    #[cfg(feature = "debug-hooks")]
+    pub fn on_call<F>(&mut self, handler: F) -> &mut Self
+    where
+        F: Fn(&str, &str, u32) + 'static,
+    {
+        self.vm.on_call(handler);
+        self
+    }
+
+    /// Registers a hook called when any function returns.
+    #[cfg(feature = "debug-hooks")]
+    pub fn on_return<F>(&mut self, handler: F) -> &mut Self
+    where
+        F: Fn(&str, &str, u32) + 'static,
+    {
+        self.vm.on_return(handler);
+        self
+    }
+
+    /// Returns a mutable reference to the underlying VM.
+    ///
+    /// Prefer the dedicated methods on [`Writ`] for common operations
+    /// (breakpoints, debug hooks, function registration). Use this only when
+    /// you need VM capabilities not yet exposed on `Writ`.
+    #[doc(hidden)]
     pub fn vm_mut(&mut self) -> &mut VM {
         &mut self.vm
     }
 
-    /// Returns a mutable reference to the type checker for registering
-    /// host type signatures.
+    /// Returns a mutable reference to the type checker.
+    ///
+    /// Prefer [`register_host_fn`](Self::register_host_fn) and
+    /// [`register_host_type`](Self::register_type) for host type registration.
+    /// Use this only for advanced type checker access not yet exposed on `Writ`.
+    #[doc(hidden)]
     pub fn type_checker_mut(&mut self) -> &mut TypeChecker {
         &mut self.type_checker
     }

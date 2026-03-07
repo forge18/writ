@@ -6,6 +6,7 @@ use writ_parser::{
     FuncDecl, InterpolationSegment, Literal, Stmt, StmtKind, StructDecl, UnaryOp, Visibility,
     WhenBody, WhenPattern,
 };
+use writ_types::TypedStmt;
 
 use crate::chunk::Chunk;
 use crate::error::CompileError;
@@ -107,6 +108,16 @@ fn type_expr_to_expr_type(ty: &writ_parser::TypeExpr) -> ExprType {
             "bool" => ExprType::Bool,
             _ => ExprType::Other,
         },
+        _ => ExprType::Other,
+    }
+}
+
+/// Convert a checker-inferred [`writ_types::Type`] to the compiler's `ExprType` tag.
+fn checked_type_to_expr_type(ty: &writ_types::Type) -> ExprType {
+    match ty {
+        writ_types::Type::Int => ExprType::Int,
+        writ_types::Type::Float => ExprType::Float,
+        writ_types::Type::Bool => ExprType::Bool,
         _ => ExprType::Other,
     }
 }
@@ -302,6 +313,42 @@ impl Compiler {
             // No Pop needed — register is just freed
             self.next_reg = slot; // reclaim register
         }
+    }
+
+    /// Compiles a type-annotated statement produced by the type checker.
+    ///
+    /// For `Let` / `Var` / `Const` initializers, the checker-inferred type from
+    /// [`TypedStmt::expr_type`] seeds the register type table directly, replacing
+    /// the post-hoc read-back from [`compile_stmt`](Self::compile_stmt). This
+    /// ensures the compiler and type checker agree on every local variable's type
+    /// without the compiler re-inferring independently.
+    ///
+    /// All other statement kinds delegate to [`compile_stmt`](Self::compile_stmt).
+    pub fn compile_typed_stmt(&mut self, typed: &TypedStmt) -> Result<(), CompileError> {
+        match &typed.stmt.kind {
+            StmtKind::Let {
+                name, initializer, ..
+            }
+            | StmtKind::Var {
+                name, initializer, ..
+            } => {
+                let slot = self.add_local(name, &typed.stmt.span)?;
+                self.compile_expr(initializer, Some(slot))?;
+                let checked = checked_type_to_expr_type(&typed.expr_type);
+                self.locals.last_mut().unwrap().type_tag = expr_type_to_tag(checked);
+                self.set_reg_type(slot, checked);
+            }
+            StmtKind::Const { name, initializer } => {
+                let slot = self.add_local(name, &typed.stmt.span)?;
+                self.compile_expr(initializer, Some(slot))?;
+                let checked = checked_type_to_expr_type(&typed.expr_type);
+                self.set_reg_type(slot, checked);
+            }
+            _ => {
+                self.compile_stmt(&typed.stmt)?;
+            }
+        }
+        Ok(())
     }
 
     fn compile_block(&mut self, stmts: &[Stmt], line: u32) -> Result<(), CompileError> {
