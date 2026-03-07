@@ -413,6 +413,10 @@ impl WritObject for MockPlayer {
             _ => Err(format!("Player has no method '{name}'")),
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // ── Host interop tests (Phase 12) ────────────────────────────────

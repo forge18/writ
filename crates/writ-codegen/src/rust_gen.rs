@@ -320,6 +320,11 @@ impl RustCodegen {
             "        Err(format!(\"'{}' has no native method '{{}}'\", name))\n",
             info.name
         ));
+        out.push_str("    }\n\n");
+
+        // as_any()
+        out.push_str("    fn as_any(&self) -> &dyn std::any::Any {\n");
+        out.push_str("        self\n");
         out.push_str("    }\n");
 
         out.push_str("}\n\n");

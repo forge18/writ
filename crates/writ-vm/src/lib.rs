@@ -27,7 +27,7 @@ pub use coroutine::{Coroutine, CoroutineId, CoroutineState, WaitCondition};
 pub use debug::{BreakpointAction, BreakpointContext};
 pub use error::{RuntimeError, StackFrame, StackTrace};
 pub use field_layout::FieldLayout;
-pub use native::{NativeFunction, NativeMethod};
+pub use native::{NativeFn, NativeFunction, NativeMethod};
 pub use object::WritObject;
 pub use value::{ClosureData, Value, ValueTag};
 pub use vm::VM;

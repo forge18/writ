@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::value::Value;
 
 /// Trait for host-owned types exposed to Writ scripts.
@@ -29,6 +31,9 @@ pub trait WritObject: std::fmt::Debug {
     fn set_field_by_hash(&mut self, _hash: u32, name: &str, value: Value) -> Result<(), String> {
         self.set_field(name, value)
     }
+
+    /// Returns self as `&dyn Any` for downcasting to concrete types.
+    fn as_any(&self) -> &dyn Any;
 }
 
 impl WritObject for Box<dyn WritObject> {
@@ -49,5 +54,8 @@ impl WritObject for Box<dyn WritObject> {
     }
     fn set_field_by_hash(&mut self, hash: u32, name: &str, value: Value) -> Result<(), String> {
         (**self).set_field_by_hash(hash, name, value)
+    }
+    fn as_any(&self) -> &dyn Any {
+        (**self).as_any()
     }
 }

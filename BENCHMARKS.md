@@ -224,11 +224,7 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks with the register-
 
 ### Remaining Optimization Opportunities
 
-1. **`WritObject::get_field_by_hash` trait method (high impact)** — Add `fn get_field_by_hash(&self, hash: u32) -> Option<Value>` to `WritObject` with a default that falls back to `get_field`. Override in `WritClassInstance` to use the existing `hash_to_index` map directly. The VM's `exec_get_field_reg` can then call `obj.borrow().get_field_by_hash(name_hash)` for Object values, skipping the `field_names` lookup + String clone + re-hash. **Est. -20-25% binary_trees.**
-
-2. **Pre-allocated stack with high-water mark (high impact)** — Replace `ensure_registers(base, max_regs)` with a pre-allocated stack (e.g. 4096 slots) and track a stack pointer. Function calls check `sp + max_regs <= capacity` and only resize on overflow (rare). Eliminates per-call `Vec::len()` comparison + `Vec::resize()`. **Est. -10-15% fib/permute, -5-10% queens.**
-
-3. **Inline closure call path (medium impact)** — `exec_call_reg` for closures (6% queens) does a function call + pattern match. Inlining the `Value::Closure` fast path directly in the `Call` dispatch arm (similar to the Round 13 GetIndex inline) would eliminate the function call overhead. **Est. -3-5% queens.**
+At this point, most remaining time is in fundamental interpreter overhead: instruction dispatch (the `match` + pointer advance), `Value::clone`/`cheap_clone` for Rc types, and `Rc::drop_slow` for reference-counted object deallocation. These are near the theoretical ceiling for an interpreted VM without NaN-boxing or JIT compilation.
 
 ### Previous Bottlenecks (Fixed)
 
@@ -240,6 +236,9 @@ Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks with the register-
 - ~~**Generic array indexing dispatch (54% sieve)**~~ — **Fixed in Round 13.** Inline Array+Int fast path in GetIndex/SetIndex + CallMethod stack-slice dispatch.
 - ~~**Debug hooks per-instruction branch (6-10% broad)**~~ — **Fixed in Round 13.** `debug-hooks` cargo feature compiles out all checks in production builds.
 - ~~**Rc<RefCell<Value>> upvalue cells (24% queens)**~~ — **Fixed in Round 13.** Flat `Vec<Value>` store with `u32` index replaces Rc/RefCell indirection.
+- ~~**`exec_get_field_reg` double HashMap + String clone (31% binary_trees)**~~ — **Fixed in Round 14.** `WritObject::get_field_by_hash` trait method eliminates string round-trip.
+- ~~**`ensure_registers` stack resize on every Call (17% fib, 16% permute)**~~ — **Fixed in Round 14.** High-water-mark stack: len only grows, never shrinks mid-execution.
+- ~~**`exec_call_reg` closure indirection (6% queens)**~~ — **Fixed in Round 14.** Inline `Value::Closure` fast path in `op::Call` dispatch.
 
 ## Design Constraints
 

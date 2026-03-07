@@ -284,7 +284,7 @@ impl Instruction {
     /// Encode this instruction into one or two u32 words.
     /// Returns `(word0, Some(word1))` for 2-word instructions, `(word0, None)` for 1-word.
     pub fn encode(&self) -> (u32, Option<u32>) {
-        use crate::opcode::{abc, abx, ab_w, a_w, op, z};
+        use crate::opcode::{a_w, ab_w, abc, abx, op, z};
         match *self {
             // ── Load/Store ──
             Instruction::LoadInt(d, v) => (a_w(op::LoadInt, d), Some(v as u32)),
@@ -389,7 +389,6 @@ impl Instruction {
             Instruction::ReturnNull => (z(op::ReturnNull), None),
 
             // ── Function calls ──
-            // CallDirect/TailCallDirect: encode func_idx as u32 (was u16, fits fine)
             Instruction::Call(base, arity) => (abc(op::Call, base, arity, 0), None),
             Instruction::CallDirect(base, func_idx, arity) => {
                 (ab_w(op::CallDirect, base, arity), Some(func_idx as u32))

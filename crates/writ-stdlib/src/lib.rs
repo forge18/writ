@@ -2,13 +2,24 @@
 
 mod array;
 mod basic;
+mod color;
 mod dict;
+mod input;
+mod interpolation;
 mod io;
 mod math;
+pub(crate) mod matrix;
+mod noise;
+mod quaternion;
 mod random;
+mod rect;
 mod reflect;
 mod string;
 mod time;
+mod timer;
+mod transform;
+mod tween;
+pub(crate) mod vector;
 
 use writ_vm::VM;
 
@@ -23,12 +34,25 @@ pub fn register_all(vm: &mut VM) {
     time::register(vm);
     random::register(vm);
     reflect::register(vm);
+    vector::register(vm);
+    matrix::register(vm);
+    quaternion::register(vm);
+    transform::register(vm);
+    rect::register(vm);
+    color::register(vm);
+    interpolation::register(vm);
+    noise::register(vm);
+    tween::register(vm);
+    timer::register(vm);
+    input::register(vm);
 }
 
 /// Registers all standard library modules except the ones listed in `excluded`.
 ///
 /// Module names: `"basic"`, `"math"`, `"string"`, `"array"`, `"dictionary"`,
-/// `"io"`, `"time"`, `"random"`, `"reflection"`.
+/// `"io"`, `"time"`, `"random"`, `"reflection"`, `"vector"`, `"matrix"`,
+/// `"quaternion"`, `"transform"`, `"rectangle"`, `"color"`, `"interpolation"`,
+/// `"noise"`, `"tween"`, `"timer"`, `"input"`.
 pub fn register_except(vm: &mut VM, excluded: &[&str]) {
     type ModuleEntry = (&'static str, fn(&mut VM));
     let modules: &[ModuleEntry] = &[
@@ -41,6 +65,17 @@ pub fn register_except(vm: &mut VM, excluded: &[&str]) {
         ("time", time::register),
         ("random", random::register),
         ("reflection", reflect::register),
+        ("vector", vector::register),
+        ("matrix", matrix::register),
+        ("quaternion", quaternion::register),
+        ("transform", transform::register),
+        ("rectangle", rect::register),
+        ("color", color::register),
+        ("interpolation", interpolation::register),
+        ("noise", noise::register),
+        ("tween", tween::register),
+        ("timer", timer::register),
+        ("input", input::register),
     ];
     for (name, register_fn) in modules {
         if !excluded.contains(name) {
