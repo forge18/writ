@@ -32,6 +32,9 @@ pub struct TypeChecker {
     /// The expected return type of the function currently being checked.
     /// `None` when outside any function body.
     current_return_type: Option<Type>,
+    /// The class whose method body is currently being type-checked.
+    /// Used to resolve `super.method(...)` calls.
+    current_class: Option<String>,
     /// Uninstantiated generic class templates, keyed by name.
     generic_classes: HashMap<String, ClassDecl>,
     /// Uninstantiated generic struct templates, keyed by name.
@@ -53,6 +56,7 @@ impl TypeChecker {
             module_registry: ModuleRegistry::new(),
             namespace_aliases: HashMap::new(),
             current_return_type: None,
+            current_class: None,
             generic_classes: HashMap::new(),
             generic_structs: HashMap::new(),
         }
@@ -541,6 +545,8 @@ impl TypeChecker {
                 // For now, treat as Unknown (full coroutine type checking is future work).
                 Ok(Type::Unknown)
             }
+
+            ExprKind::Super { method, args } => self.infer_super(method, args, &expr.span),
         }
     }
 
@@ -1247,6 +1253,26 @@ impl TypeChecker {
         self.current_return_type = Some(return_type.clone());
 
         self.env.push_scope();
+
+        // Validate `where` clauses and bind type params to their constraint type in the body scope.
+        // This lets the type checker resolve trait method calls on type parameters.
+        for clause in &func.where_clauses {
+            if self.registry.get_trait(&clause.trait_name).is_none() {
+                return Err(TypeError::simple(
+                    format!("unknown trait '{}' in where clause", clause.trait_name),
+                    span.clone(),
+                ));
+            }
+            // Bind the type param name to its constraint trait type so method calls resolve.
+            self.env.define(
+                &clause.type_param,
+                VarInfo {
+                    ty: Type::Trait(clause.trait_name.clone()),
+                    mutability: Mutability::Immutable,
+                },
+            );
+        }
+
         for (param, ty) in func.params.iter().zip(param_types.into_iter()) {
             self.env.define(
                 &param.name,
@@ -1411,6 +1437,71 @@ impl TypeChecker {
                 callee.span.clone(),
             )),
         }
+    }
+
+    fn infer_super(
+        &mut self,
+        method: &str,
+        args: &[CallArg],
+        span: &Span,
+    ) -> Result<Type, TypeError> {
+        // Resolve the enclosing class and its parent.
+        let class_name = self.current_class.clone().ok_or_else(|| {
+            TypeError::simple("'super' used outside of a class method".to_string(), span.clone())
+        })?;
+        let parent_name = self
+            .registry
+            .get_class(&class_name)
+            .and_then(|c| c.parent.clone())
+            .ok_or_else(|| {
+                TypeError::simple(
+                    format!("'super' used in '{class_name}' which has no parent class"),
+                    span.clone(),
+                )
+            })?;
+
+        // Find the method on the parent class (searches the full parent chain).
+        let method_info = self
+            .registry
+            .all_methods(&parent_name)
+            .into_iter()
+            .find(|m| m.name == method)
+            .ok_or_else(|| {
+                TypeError::simple(
+                    format!("parent class '{parent_name}' has no method '{method}'"),
+                    span.clone(),
+                )
+            })?;
+
+        // Type-check arguments against the parent method's parameter types.
+        // Skip the implicit `self` parameter (first param in the method info is self's type,
+        // but MethodInfo.params only stores explicit params — consistent with infer_call).
+        let params = &method_info.params;
+        if args.len() != params.len() {
+            return Err(TypeError::simple(
+                format!(
+                    "super.{method}() expects {} argument(s), found {}",
+                    params.len(),
+                    args.len()
+                ),
+                span.clone(),
+            ));
+        }
+        for (i, (arg, expected)) in args.iter().zip(params.iter()).enumerate() {
+            let arg_expr = call_arg_expr(arg);
+            let actual = self.infer_expr(arg_expr)?;
+            if !self.types_compatible(expected, &actual) {
+                return Err(TypeError::simple(
+                    format!(
+                        "super.{method}() argument {} type mismatch: expected {expected}, found {actual}",
+                        i + 1
+                    ),
+                    arg_expr.span.clone(),
+                ));
+            }
+        }
+
+        Ok(method_info.return_type.clone())
     }
 
     fn infer_error_propagate(&mut self, inner: &Expr, span: &Span) -> Result<Type, TypeError> {
@@ -1756,6 +1847,16 @@ impl TypeChecker {
 
         let class_name = &decl.name;
 
+        // Verify parent exists if extends is specified (checked in pass 2 to allow forward refs).
+        if let Some(parent) = &decl.extends
+            && self.registry.get_class(parent).is_none()
+        {
+            return Err(TypeError::simple(
+                format!("unknown parent class '{parent}'"),
+                span.clone(),
+            ));
+        }
+
         // Validate field defaults match their type annotations.
         for field in &decl.fields {
             if let Some(default_expr) = &field.default {
@@ -1774,6 +1875,8 @@ impl TypeChecker {
         }
 
         // Type-check methods.
+        let prev_class = self.current_class.take();
+        self.current_class = Some(class_name.clone());
         for method in &decl.methods {
             self.env.push_scope();
 
@@ -1839,6 +1942,7 @@ impl TypeChecker {
             self.env.pop_scope();
             self.current_return_type = prev_return_type;
         }
+        self.current_class = prev_class;
 
         // Validate trait implementations.
         self.validate_trait_implementations(decl, span)?;
@@ -2918,16 +3022,6 @@ impl TypeChecker {
             return Ok(());
         }
 
-        // Verify parent exists if extends is specified.
-        if let Some(parent) = &decl.extends
-            && self.registry.get_class(parent).is_none()
-        {
-            return Err(TypeError::simple(
-                format!("unknown parent class '{parent}'"),
-                span.clone(),
-            ));
-        }
-
         let mut fields = Vec::new();
         for field in &decl.fields {
             let ty = self.resolve_type_expr(&field.type_annotation, span)?;
@@ -3349,6 +3443,7 @@ mod tests {
                 setter: None,
             }],
             methods: vec![],
+            where_clauses: vec![],
         };
         checker
             .generic_classes

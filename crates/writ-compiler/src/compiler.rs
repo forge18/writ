@@ -153,6 +153,8 @@ pub struct Compiler {
     next_reg: u8,
     /// High-water mark of registers used (becomes max_registers).
     max_reg: u8,
+    /// The class whose methods are currently being compiled (used for super dispatch).
+    current_class: Option<String>,
 }
 
 impl Default for Compiler {
@@ -180,6 +182,7 @@ impl Compiler {
             function_return_types: std::collections::HashMap::new(),
             next_reg: 0,
             max_reg: 0,
+            current_class: None,
         }
     }
 
@@ -455,6 +458,9 @@ impl Compiler {
             StmtKind::Class(decl) => {
                 self.compile_class_decl(decl, &stmt.span)?;
             }
+            StmtKind::Trait(_) | StmtKind::Enum(_) | StmtKind::Import(_) | StmtKind::WildcardImport(_) => {
+                // Type-checker-only constructs; no bytecode emitted.
+            }
             other => {
                 return Err(CompileError {
                     annotation: None,
@@ -633,6 +639,7 @@ impl Compiler {
                 Ok(d)
             }
             ExprKind::Cast { expr, .. } => self.compile_expr(expr, dst),
+            ExprKind::Super { method, args } => self.compile_super(method, args, &expr.span, dst),
             other => Err(CompileError {
                 annotation: None,
                 message: format!("unsupported expression: {other:?}"),
@@ -2474,19 +2481,26 @@ impl Compiler {
         let line = span.line;
         let class_name = &decl.name;
 
-        let parent_field_names: Vec<String> = if let Some(parent) = &decl.extends {
-            self.class_metas
-                .iter()
-                .find(|m| m.name == *parent)
-                .map(|m| m.field_names.clone())
-                .unwrap_or_default()
-        } else {
-            vec![]
-        };
-
-        let own_field_names: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
-        let mut all_field_names = parent_field_names;
-        all_field_names.extend(own_field_names.clone());
+        // Use pre-registered field names when available (supports forward declarations).
+        // Pre-registration via pre_register_classes() resolves the full inheritance chain.
+        let (all_field_names, own_field_names) =
+            if let Some(pre) = self.class_metas.iter().find(|m| m.name == *class_name) {
+                (pre.field_names.clone(), pre.own_field_names.clone())
+            } else {
+                let parent_field_names: Vec<String> = if let Some(parent) = &decl.extends {
+                    self.class_metas
+                        .iter()
+                        .find(|m| m.name == *parent)
+                        .map(|m| m.field_names.clone())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
+                let own: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
+                let mut all = parent_field_names;
+                all.extend(own.clone());
+                (all, own)
+            };
 
         let public_fields: HashSet<String> = decl
             .fields
@@ -2495,13 +2509,16 @@ impl Compiler {
             .map(|f| f.name.clone())
             .collect();
 
-        // Compile methods
+        // Compile methods (track current class for super dispatch)
+        let prev_class = self.current_class.take();
+        self.current_class = Some(class_name.clone());
         let mut public_methods = HashSet::new();
         for method in &decl.methods {
             let qualified_name = format!("{}::{}", class_name, method.name);
             public_methods.insert(method.name.clone());
             self.compile_method_body(&qualified_name, &method.params, &method.body, span, true)?;
         }
+        self.current_class = prev_class;
 
         // Compile constructor
         {
@@ -2554,16 +2571,92 @@ impl Compiler {
             });
         }
 
-        self.class_metas.push(ClassMeta {
+        // Update or insert the class meta (update if pre-registered, insert otherwise).
+        let meta = ClassMeta {
             name: class_name.clone(),
             field_names: all_field_names,
             own_field_names,
             public_fields,
             public_methods,
             parent: decl.extends.clone(),
-        });
+        };
+        if let Some(existing) = self.class_metas.iter_mut().find(|m| m.name == *class_name) {
+            *existing = meta;
+        } else {
+            self.class_metas.push(meta);
+        }
 
         Ok(())
+    }
+
+    /// Pre-registers all class shapes from a statement list before full compilation.
+    ///
+    /// This allows child classes to appear before their parent in source order.
+    /// Pass 1: register each class with only its own fields.
+    /// Pass 2: resolve inheritance by prepending parent field lists.
+    pub fn pre_register_classes(&mut self, stmts: &[Stmt]) {
+        // Pass 1: register all classes with their own fields only.
+        for stmt in stmts {
+            let decl = match &stmt.kind {
+                StmtKind::Class(d) => d,
+                StmtKind::Export(inner) => match &inner.kind {
+                    StmtKind::Class(d) => d,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            if !decl.type_params.is_empty() {
+                continue;
+            }
+            // Skip if already registered (e.g. from a previous load call).
+            if self.class_metas.iter().any(|m| m.name == decl.name) {
+                continue;
+            }
+            let own_field_names: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
+            let public_fields: HashSet<String> = decl
+                .fields
+                .iter()
+                .filter(|f| f.visibility == Visibility::Public)
+                .map(|f| f.name.clone())
+                .collect();
+            let public_methods: HashSet<String> =
+                decl.methods.iter().map(|m| m.name.clone()).collect();
+            self.class_metas.push(ClassMeta {
+                name: decl.name.clone(),
+                field_names: own_field_names.clone(), // temporary — resolved in pass 2
+                own_field_names,
+                public_fields,
+                public_methods,
+                parent: decl.extends.clone(),
+            });
+        }
+
+        // Pass 2: resolve field_names to include inherited fields (parent fields first).
+        // Iterate until stable (handles multi-level inheritance).
+        let names: Vec<String> = self.class_metas.iter().map(|m| m.name.clone()).collect();
+        for name in &names {
+            let resolved = self.resolve_inherited_fields(name);
+            if let Some(meta) = self.class_metas.iter_mut().find(|m| m.name == *name) {
+                meta.field_names = resolved;
+            }
+        }
+    }
+
+    /// Resolves the complete field list for a class by walking the inheritance chain.
+    fn resolve_inherited_fields(&self, class_name: &str) -> Vec<String> {
+        let Some(meta) = self.class_metas.iter().find(|m| m.name == class_name) else {
+            return Vec::new();
+        };
+        let own = meta.own_field_names.clone();
+        let parent = meta.parent.clone();
+        match parent {
+            None => own,
+            Some(parent_name) => {
+                let mut fields = self.resolve_inherited_fields(&parent_name);
+                fields.extend(own);
+                fields
+            }
+        }
     }
 
     /// Helper to compile a method body (struct or class method).
@@ -2617,6 +2710,8 @@ impl Compiler {
             }
         })?;
 
+        let method_idx = self.functions.len() as u16;
+        self.function_index.insert(qualified_name.to_string(), method_idx);
         self.functions.push(CompiledFunction {
             name: qualified_name.to_string(),
             arity,
@@ -2629,6 +2724,71 @@ impl Compiler {
         });
 
         Ok(())
+    }
+
+    /// Compile `super.method(args)` — directly calls the parent class's method
+    /// implementation, bypassing the VM's runtime method lookup.
+    fn compile_super(
+        &mut self,
+        method: &str,
+        args: &[CallArg],
+        span: &Span,
+        dst: Option<u8>,
+    ) -> Result<u8, CompileError> {
+        let line = span.line;
+
+        // Find the parent class name from the current class meta.
+        let parent_name = self
+            .current_class
+            .as_ref()
+            .and_then(|cls| self.class_metas.iter().find(|m| m.name == *cls))
+            .and_then(|m| m.parent.clone())
+            .ok_or_else(|| CompileError {
+                annotation: None,
+                message: "'super' used outside of a class method with a parent".to_string(),
+                span: span.clone(),
+            })?;
+
+        // Build the qualified method name and look it up in the function index.
+        let qualified = format!("{parent_name}::{method}");
+        let func_idx = self.function_index.get(&qualified).copied().ok_or_else(|| CompileError {
+            annotation: None,
+            message: format!("parent class '{parent_name}' has no compiled method '{method}'"),
+            span: span.clone(),
+        })?;
+
+        // Emit: [self, arg0, arg1, ...] in consecutive registers, then CallDirect.
+        // `self` is always register 0 in a method body.
+        let base = self.next_reg;
+        let self_reg = self.alloc_temp(span)?;
+        // Load `self` (local 0) into the call's base register.
+        self.emit(Instruction::Move(self_reg, 0), line);
+
+        for arg in args {
+            let arg_reg = self.alloc_temp(span)?;
+            self.compile_call_arg(arg, Some(arg_reg))?;
+        }
+
+        let arity = u8::try_from(args.len() + 1).map_err(|_| CompileError {
+            annotation: None,
+            message: "too many arguments for super call (max 254)".to_string(),
+            span: span.clone(),
+        })?;
+
+        self.emit(Instruction::CallDirect(base, func_idx, arity), line);
+
+        // Result is in `base`; free arg temps.
+        self.next_reg = base + 1;
+        self.set_reg_type(base, ExprType::Other);
+
+        if let Some(d) = dst {
+            if d != base {
+                self.emit(Instruction::Move(d, base), line);
+                self.next_reg = base;
+            }
+            return Ok(d);
+        }
+        Ok(base)
     }
 
     fn compile_start(&mut self, expr: &Expr, span: &Span) -> Result<(), CompileError> {

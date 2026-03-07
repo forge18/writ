@@ -14,6 +14,7 @@ mod quaternion;
 mod random;
 mod rect;
 mod reflect;
+mod regex;
 mod string;
 mod time;
 mod timer;
@@ -45,6 +46,7 @@ pub fn register_all(vm: &mut VM) {
     tween::register(vm);
     timer::register(vm);
     input::register(vm);
+    regex::register(vm);
 }
 
 /// Registers all standard library modules except the ones listed in `excluded`.
@@ -52,7 +54,7 @@ pub fn register_all(vm: &mut VM) {
 /// Module names: `"basic"`, `"math"`, `"string"`, `"array"`, `"dictionary"`,
 /// `"io"`, `"time"`, `"random"`, `"reflection"`, `"vector"`, `"matrix"`,
 /// `"quaternion"`, `"transform"`, `"rectangle"`, `"color"`, `"interpolation"`,
-/// `"noise"`, `"tween"`, `"timer"`, `"input"`.
+/// `"noise"`, `"tween"`, `"timer"`, `"input"`, `"regex"`.
 pub fn register_except(vm: &mut VM, excluded: &[&str]) {
     type ModuleEntry = (&'static str, fn(&mut VM));
     let modules: &[ModuleEntry] = &[
@@ -76,6 +78,7 @@ pub fn register_except(vm: &mut VM, excluded: &[&str]) {
         ("tween", tween::register),
         ("timer", timer::register),
         ("input", input::register),
+        ("regex", regex::register),
     ];
     for (name, register_fn) in modules {
         if !excluded.contains(name) {

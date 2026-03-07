@@ -99,6 +99,8 @@ pub enum TokenKind {
     Is,
     As,
     SelfKeyword,
+    Super,
+    Where,
     Start,
     Yield,
     True,

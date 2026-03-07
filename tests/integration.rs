@@ -1292,3 +1292,177 @@ fn test_generic_class_parser_accepts_type_params() {
     );
     assert!(result.is_ok());
 }
+
+// ── Test: Multi-return destructuring at call site ─────────────────────
+
+#[test]
+fn test_let_destructure_from_function_call() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "func getPoint() -> (float, float) {\n\
+             return (3.0, 4.0)\n\
+         }\n\
+         let (x, y) = getPoint()\n\
+         return x + y",
+    );
+    assert_eq!(result.unwrap(), Value::F32(7.0));
+}
+
+// ── Test: Forward declarations (mutual type references) ───────────────
+
+#[test]
+fn test_forward_declarations_mutual_reference() {
+    let mut writ = Writ::new();
+
+    // Child declared before parent — should compile without error
+    let result = writ.run(
+        "class Child extends Parent {\n\
+             public value: int\n\
+         }\n\
+         class Parent {\n\
+             public base: int\n\
+         }\n\
+         let c = Child(10, 42)\n\
+         let p = Parent(10)",
+    );
+    assert!(result.is_ok(), "forward declaration failed: {:?}", result);
+}
+
+// ── Test: super() calls parent method ────────────────────────────────
+
+#[test]
+fn test_super_calls_parent_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "class Animal {\n\
+             public name: string\n\
+             public func speak() -> string {\n\
+                 return \"...\"\n\
+             }\n\
+         }\n\
+         class Dog extends Animal {\n\
+             public func speak() -> string {\n\
+                 let base = super.speak()\n\
+                 return \"Woof! \" .. base\n\
+             }\n\
+         }\n\
+         let d = Dog(\"Rex\")\n\
+         return d.speak()",
+    );
+    assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::new("Woof! ...".to_string())));
+}
+
+// ── Test: Generic constraints (where T : Trait) ───────────────────────
+
+#[test]
+fn test_where_clause_parsed_and_accepted() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    // Parser-level test: where clause on a generic function
+    let result = writ.run(
+        "trait Printable {\n\
+             func print()\n\
+         }\n\
+         func printAll<T>(item: T) where T : Printable {\n\
+         }\n\
+         return 1",
+    );
+    assert!(result.is_ok(), "where clause parse failed: {:?}", result);
+}
+
+#[test]
+fn test_where_clause_on_generic_class() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "trait Comparable {\n\
+             func lessThan(other: int) -> bool\n\
+         }\n\
+         class Container<T> where T : Comparable {\n\
+             public value: int\n\
+         }\n\
+         return 1",
+    );
+    assert!(result.is_ok(), "where clause on class parse failed: {:?}", result);
+}
+
+// ── Test: Regex stdlib ────────────────────────────────────────────────
+
+#[test]
+fn test_regex_test_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "let r = Regex(\"\\\\d+\")\n\
+         return r.test(\"abc123\")",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_regex_match_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "let r = Regex(\"\\\\d+\")\n\
+         return r.match(\"abc123def456\")",
+    );
+    assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::new("123".to_string())));
+}
+
+#[test]
+fn test_regex_match_all_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "let r = Regex(\"\\\\d+\")\n\
+         let matches = r.matchAll(\"abc123def456\")\n\
+         return matches.len()",
+    );
+    assert_eq!(result.unwrap(), Value::I32(2));
+}
+
+#[test]
+fn test_regex_replace_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "let r = Regex(\"\\\\d+\")\n\
+         return r.replace(\"abc123def456\", \"NUM\")",
+    );
+    assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::new("abcNUMdef456".to_string())));
+}
+
+#[test]
+fn test_regex_replace_all_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "let r = Regex(\"\\\\d+\")\n\
+         return r.replaceAll(\"abc123def456\", \"NUM\")",
+    );
+    assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::new("abcNUMdefNUM".to_string())));
+}
+
+#[test]
+fn test_regex_no_match_returns_null() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let result = writ.run(
+        "let r = Regex(\"\\\\d+\")\n\
+         return r.match(\"no digits here\")",
+    );
+    assert_eq!(result.unwrap(), Value::Null);
+}

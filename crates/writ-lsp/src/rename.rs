@@ -306,7 +306,10 @@ fn collect_from_expr(
             collect_from_expr(object, old_name, new_name, edits);
             collect_from_expr(index, old_name, new_name, edits);
         }
-        ExprKind::NamespaceAccess { .. } | ExprKind::Literal(_) | ExprKind::Yield(None) => {}
+        ExprKind::NamespaceAccess { .. }
+        | ExprKind::Literal(_)
+        | ExprKind::Yield(None)
+        | ExprKind::Super { .. } => {}
     }
 }
 

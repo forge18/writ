@@ -157,6 +157,7 @@ impl Writ {
         let stmts = parser.parse_program()?;
 
         let mut compiler = Compiler::new();
+        compiler.pre_register_classes(&stmts);
         if self.type_check_enabled {
             let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
             for typed in &typed_stmts {
@@ -190,6 +191,7 @@ impl Writ {
         let stmts = parser.parse_program()?;
 
         let mut compiler = Compiler::new();
+        compiler.pre_register_classes(&stmts);
         if self.type_check_enabled {
             let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
             for typed in &typed_stmts {
@@ -321,6 +323,7 @@ impl Writ {
         let stmts = parser.parse_program()?;
 
         let mut compiler = Compiler::new();
+        compiler.pre_register_classes(&stmts);
         if self.type_check_enabled {
             let typed_stmts = self.type_checker.check_program_typed(&stmts)?;
             for typed in &typed_stmts {

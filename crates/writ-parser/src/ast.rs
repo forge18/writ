@@ -137,6 +137,13 @@ pub enum ExprKind {
     /// `None` = bare yield (suspend one frame). `Some(expr)` = yield with argument.
     Yield(Option<Box<Expr>>),
 
+    /// Super method call: `super.methodName(args)`.
+    /// Only valid inside a class method that has a parent class.
+    Super {
+        method: String,
+        args: Vec<CallArg>,
+    },
+
     /// `when` used as an expression — each arm yields a value.
     When {
         subject: Option<Box<Expr>>,
@@ -403,7 +410,17 @@ pub enum DeclKind {
     Stmt(Stmt),
 }
 
-/// Function declaration: `func name[<T>](params) -> Type { body }`.
+/// A constraint on a type parameter: `T : TraitName`.
+/// Used in `where` clauses on generic functions and classes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhereClause {
+    /// The type parameter being constrained (e.g., `"T"`).
+    pub type_param: String,
+    /// The trait that the type parameter must implement (e.g., `"Updatable"`).
+    pub trait_name: String,
+}
+
+/// Function declaration: `func name[<T>](params) -> Type [where T : Trait] { body }`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncDecl {
     pub name: String,
@@ -413,9 +430,11 @@ pub struct FuncDecl {
     pub body: Vec<Stmt>,
     pub is_static: bool,
     pub visibility: Visibility,
+    /// Generic constraints: `where T : Trait, U : OtherTrait`.
+    pub where_clauses: Vec<WhereClause>,
 }
 
-/// Class declaration: `class Name<T, U> extends Parent with Trait1, Trait2 { ... }`.
+/// Class declaration: `class Name<T, U> [where T : Trait] extends Parent with Trait1, Trait2 { ... }`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDecl {
     pub name: String,
@@ -424,6 +443,8 @@ pub struct ClassDecl {
     pub traits: Vec<String>,
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<FuncDecl>,
+    /// Generic constraints on the class's type parameters.
+    pub where_clauses: Vec<WhereClause>,
 }
 
 /// A field in a class or enum: `[visibility] name: Type [= default] [set(param) { ... }]`.

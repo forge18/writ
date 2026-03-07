@@ -9,5 +9,6 @@ writ-compiler = { path = "../writ-compiler" }
 writ-lexer = { path = "../writ-lexer" }
 writ-parser = { path = "../writ-parser" }
 rand = "0.8"
+regex = "1"
 glam = "0.29"
 fastnoise-lite = "1"

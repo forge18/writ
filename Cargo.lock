@@ -1027,6 +1027,7 @@ dependencies = [
  "fastnoise-lite",
  "glam",
  "rand",
+ "regex",
  "writ-compiler",
  "writ-lexer",
  "writ-parser",

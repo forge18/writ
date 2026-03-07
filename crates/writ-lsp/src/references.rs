@@ -316,7 +316,10 @@ fn collect_from_expr(
             collect_from_expr(object, name, uri, locations);
             collect_from_expr(index, name, uri, locations);
         }
-        ExprKind::NamespaceAccess { .. } | ExprKind::Literal(_) | ExprKind::Yield(None) => {}
+        ExprKind::NamespaceAccess { .. }
+        | ExprKind::Literal(_)
+        | ExprKind::Yield(None)
+        | ExprKind::Super { .. } => {}
     }
 }
 

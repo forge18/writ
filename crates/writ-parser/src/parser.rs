@@ -4,7 +4,8 @@ use crate::ast::{
     ArrayElement, AssignOp, BinaryOp, CallArg, ClassDecl, Decl, DeclKind, DictElement, ElseBranch,
     EnumDecl, EnumVariant, Expr, ExprKind, FieldDecl, FuncDecl, FuncParam, ImportDecl,
     InterpolationSegment, LambdaBody, Literal, Setter, Stmt, StmtKind, StructDecl, TraitDecl,
-    TraitMethod, TypeExpr, UnaryOp, Visibility, WhenArm, WhenBody, WhenPattern, WildcardImportDecl,
+    TraitMethod, TypeExpr, UnaryOp, Visibility, WhenArm, WhenBody, WhenPattern, WhereClause,
+    WildcardImportDecl,
 };
 use crate::error::ParseError;
 
@@ -365,6 +366,29 @@ impl Parser {
                 Ok(Expr {
                     kind: ExprKind::Identifier("self".to_string()),
                     span: token.span,
+                })
+            }
+
+            TokenKind::Super => {
+                let span = self.advance().span; // consume `super`
+                self.expect(&TokenKind::Dot)?;
+                let (method, _) = self.expect_identifier()?;
+                self.expect(&TokenKind::LeftParen)?;
+                self.skip_newlines();
+                let mut args = Vec::new();
+                if self.peek() != &TokenKind::RightParen {
+                    args.push(self.parse_call_arg()?);
+                    while self.peek() == &TokenKind::Comma {
+                        self.advance(); // consume `,`
+                        self.skip_newlines();
+                        args.push(self.parse_call_arg()?);
+                    }
+                }
+                self.skip_newlines();
+                self.expect(&TokenKind::RightParen)?;
+                Ok(Expr {
+                    kind: ExprKind::Super { method, args },
+                    span,
                 })
             }
 
@@ -1297,7 +1321,30 @@ impl Parser {
         Ok(params)
     }
 
-    /// Parses `func name[<T>](params) [-> Type] { body }`.
+    /// Parses optional `where T : Trait, U : OtherTrait` clause.
+    /// Returns an empty vec if `where` does not follow.
+    fn parse_where_clauses(&mut self) -> Result<Vec<WhereClause>, ParseError> {
+        if self.peek() != &TokenKind::Where {
+            return Ok(Vec::new());
+        }
+        self.advance(); // consume `where`
+        let mut clauses = Vec::new();
+        loop {
+            let (type_param, _) = self.expect_identifier()?;
+            self.expect(&TokenKind::Colon)?;
+            let (trait_name, _) = self.expect_identifier()?;
+            clauses.push(WhereClause { type_param, trait_name });
+            if self.peek() == &TokenKind::Comma {
+                self.advance(); // consume `,`
+                self.skip_newlines();
+            } else {
+                break;
+            }
+        }
+        Ok(clauses)
+    }
+
+    /// Parses `func name[<T>](params) [-> Type] [where T : Trait] { body }`.
     fn parse_func_decl(
         &mut self,
         is_static: bool,
@@ -1317,6 +1364,7 @@ impl Parser {
             None
         };
 
+        let where_clauses = self.parse_where_clauses()?;
         let body = self.parse_block()?;
 
         Ok(FuncDecl {
@@ -1327,6 +1375,7 @@ impl Parser {
             body,
             is_static,
             visibility,
+            where_clauses,
         })
     }
 
@@ -1562,7 +1611,7 @@ impl Parser {
 
     // ── Class declarations ────────────────────────────────────────────
 
-    /// Parses `class Name[<T, U>] [extends Parent] [with Trait1, Trait2] { body }`.
+    /// Parses `class Name[<T, U>] [extends Parent] [with Trait1, Trait2] [where T : Trait] { body }`.
     fn parse_class_decl(&mut self) -> Result<ClassDecl, ParseError> {
         self.expect(&TokenKind::Class)?; // consume `class`
         let (name, _) = self.expect_identifier()?;
@@ -1589,6 +1638,9 @@ impl Parser {
                 traits.push(trait_name);
             }
         }
+
+        // Optional `where T : Trait, U : OtherTrait`
+        let where_clauses = self.parse_where_clauses()?;
 
         // Parse body: { fields and methods }
         self.expect(&TokenKind::LeftBrace)?;
@@ -1633,6 +1685,7 @@ impl Parser {
             traits,
             fields,
             methods,
+            where_clauses,
         })
     }
 

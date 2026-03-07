@@ -161,6 +161,25 @@ func takeDamage(amount: float) {
 }
 ```
 
+### 6.4 super
+
+`super.method(args)` calls the parent class's implementation of a method. Only valid inside a method in a class that has a parent via `extends`.
+
+```writ
+class Animal {
+    func speak() -> string {
+        return "..."
+    }
+}
+
+class Dog extends Animal {
+    func speak() -> string {
+        let base = super.speak()
+        return base + " Woof!"
+    }
+}
+```
+
 ---
 
 ## 7. Traits

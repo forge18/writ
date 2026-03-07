@@ -155,6 +155,31 @@ class Stack<T> {
 
 Each unique instantiation (e.g. `Stack<int>`, `Stack<string>`) is treated as a distinct concrete type by the compiler and VM. Generic templates themselves are not compiled — only their monomorphic instantiations are.
 
+### 5.1 Generic Constraints (`where` clauses)
+
+Type parameters can be constrained to require a trait implementation using `where` clauses. This allows calling trait methods on generic type parameters inside the function or class body.
+
+```writ
+trait Printable {
+    func print()
+}
+
+func printAll<T>(item: T) where T : Printable {
+    item.print()
+}
+
+class Container<T> where T : Printable {
+    value: T
+
+    func show() {
+        value.print()
+    }
+}
+```
+
+- Multiple constraints are separated by commas: `where T : Trait1, U : Trait2`
+- Constraints are validated at type-check time; the type checker enforces that each named trait exists
+
 ---
 
 ## 6. Traits
