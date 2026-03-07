@@ -403,10 +403,11 @@ pub enum DeclKind {
     Stmt(Stmt),
 }
 
-/// Function declaration: `func name(params) -> Type { body }`.
+/// Function declaration: `func name[<T>](params) -> Type { body }`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncDecl {
     pub name: String,
+    pub type_params: Vec<String>,
     pub params: Vec<FuncParam>,
     pub return_type: Option<TypeExpr>,
     pub body: Vec<Stmt>,
@@ -414,10 +415,11 @@ pub struct FuncDecl {
     pub visibility: Visibility,
 }
 
-/// Class declaration: `class Name extends Parent with Trait1, Trait2 { ... }`.
+/// Class declaration: `class Name<T, U> extends Parent with Trait1, Trait2 { ... }`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDecl {
     pub name: String,
+    pub type_params: Vec<String>,
     pub extends: Option<String>,
     pub traits: Vec<String>,
     pub fields: Vec<FieldDecl>,
@@ -473,11 +475,12 @@ pub struct EnumVariant {
     pub value: Option<Expr>,
 }
 
-/// Struct declaration: `struct Name { fields; methods }`.
+/// Struct declaration: `struct Name<T> { fields; methods }`.
 /// Value type — no inheritance, no traits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDecl {
     pub name: String,
+    pub type_params: Vec<String>,
     pub fields: Vec<FieldDecl>,
     pub methods: Vec<FuncDecl>,
 }

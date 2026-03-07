@@ -140,7 +140,20 @@ Optional<float>
 Result<float>
 ```
 
-No user-defined generic types in the initial implementation. Generics are used by built-in types only.
+User-defined generic classes and structs are supported via monomorphization at type-check time.
+
+```writ
+struct Pair<A, B> {
+    first: A
+    second: B
+}
+
+class Stack<T> {
+    top: T
+}
+```
+
+Each unique instantiation (e.g. `Stack<int>`, `Stack<string>`) is treated as a distinct concrete type by the compiler and VM. Generic templates themselves are not compiled — only their monomorphic instantiations are.
 
 ---
 

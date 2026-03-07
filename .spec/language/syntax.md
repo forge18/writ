@@ -470,7 +470,35 @@ func attack(target: enemy::Enemy) {
 | `0..10`  | Exclusive (0 to 9)  |
 | `0..=10` | Inclusive (0 to 10) |
 
-Operator overloading is handled by the Rust binding layer. Not available in the scripting language itself.
+Operator overloading uses a named-method convention. Define methods with the following names on a class or struct to overload the corresponding operator:
+
+| Operator | Method name |
+|----------|-------------|
+| `+`      | `add`       |
+| `-`      | `subtract`  |
+| `*`      | `multiply`  |
+| `/`      | `divide`    |
+| `%`      | `modulo`    |
+| `<`      | `lt`        |
+| `<=`     | `le`        |
+| `>`      | `gt`        |
+| `>=`     | `ge`        |
+
+```writ
+struct Vec2 {
+    x: float
+    y: float
+    func add(other: Vec2) -> Vec2 {
+        return Vec2(self.x + other.x, self.y + other.y)
+    }
+}
+
+let a = Vec2(1.0, 2.0)
+let b = Vec2(3.0, 4.0)
+let c = a + b  // calls a.add(b)
+```
+
+The method is dispatched at runtime. If no matching method is found, a runtime error is produced.
 
 ---
 

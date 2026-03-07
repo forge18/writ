@@ -2331,6 +2331,11 @@ impl Compiler {
     // ── Struct compilation ───────────────────────────────────────
 
     fn compile_struct_decl(&mut self, decl: &StructDecl, span: &Span) -> Result<(), CompileError> {
+        // Generic templates are not compiled — only their monomorphic instantiations are.
+        if !decl.type_params.is_empty() {
+            return Ok(());
+        }
+
         let line = span.line;
         let struct_name = &decl.name;
 
@@ -2414,6 +2419,11 @@ impl Compiler {
     // ── Class compilation ──────────────────────────────────────
 
     fn compile_class_decl(&mut self, decl: &ClassDecl, span: &Span) -> Result<(), CompileError> {
+        // Generic templates are not compiled — only their monomorphic instantiations are.
+        if !decl.type_params.is_empty() {
+            return Ok(());
+        }
+
         let line = span.line;
         let class_name = &decl.name;
 

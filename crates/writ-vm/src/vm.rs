@@ -934,6 +934,7 @@ impl VM {
                         i32::checked_sub,
                         i64::checked_sub,
                         |x, y| x - y,
+                        "subtract",
                     )?;
                 }
                 op::Mul => {
@@ -956,6 +957,7 @@ impl VM {
                         i32::checked_mul,
                         i64::checked_mul,
                         |x, y| x * y,
+                        "multiply",
                     )?;
                 }
                 op::Div => {
@@ -1070,7 +1072,7 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y, "lt")?;
                 }
                 op::Le => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -1085,7 +1087,7 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y, "le")?;
                 }
                 op::Gt => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -1100,7 +1102,7 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y, "gt")?;
                 }
                 op::Ge => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -1115,7 +1117,7 @@ impl VM {
                         },
                         _ => {}
                     }
-                    self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y)?;
+                    self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y, "ge")?;
                 }
 
                 // ── Logical ──────────────────────────────────────────
@@ -2082,6 +2084,7 @@ impl VM {
                             i32::checked_sub,
                             i64::checked_sub,
                             |x, y| x - y,
+                            "subtract",
                         )?;
                     }
                 }
@@ -2103,6 +2106,7 @@ impl VM {
                             i32::checked_sub,
                             i64::checked_sub,
                             |x, y| x - y,
+                            "subtract",
                         )?;
                     }
                 }
@@ -2136,6 +2140,7 @@ impl VM {
                             i32::checked_mul,
                             i64::checked_mul,
                             |x, y| x * y,
+                            "multiply",
                         )?;
                     }
                 }
@@ -2157,6 +2162,7 @@ impl VM {
                             i32::checked_mul,
                             i64::checked_mul,
                             |x, y| x * y,
+                            "multiply",
                         )?;
                     }
                 }
@@ -2220,7 +2226,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Lt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y, "lt")?;
                     }
                 }
                 op::QLtFloat => {
@@ -2233,7 +2239,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Lt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x < y, |x, y| x < y, "lt")?;
                     }
                 }
                 op::QLeInt => {
@@ -2246,7 +2252,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Le;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y, "le")?;
                     }
                 }
                 op::QLeFloat => {
@@ -2259,7 +2265,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Le;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x <= y, |x, y| x <= y, "le")?;
                     }
                 }
                 op::QGtInt => {
@@ -2272,7 +2278,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Gt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y, "gt")?;
                     }
                 }
                 op::QGtFloat => {
@@ -2285,7 +2291,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Gt;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x > y, |x, y| x > y, "gt")?;
                     }
                 }
                 op::QGeInt => {
@@ -2298,7 +2304,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Ge;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y, "ge")?;
                     }
                 }
                 op::QGeFloat => {
@@ -2311,7 +2317,7 @@ impl VM {
                             *(ip.sub(1) as *mut u8) = op::Ge;
                         }
                         self.frames.last_mut().unwrap().pc = save_pc!();
-                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y)?;
+                        self.exec_comparison_reg(base, a, b, c, |x, y| x >= y, |x, y| x >= y, "ge")?;
                     }
                 }
                 op::QEqInt => {
@@ -2477,7 +2483,72 @@ impl VM {
 
     // ── Register-based instruction helpers ───────────────────────
 
-    /// Register-based Add: handles int, float, mixed, and string concat.
+    /// Attempts to call a named operator method (`add`, `subtract`, etc.) on
+    /// an Object or Struct receiver. Returns `Some(result)` if the receiver is
+    /// an Object/Struct and the method is found; `None` otherwise so the caller
+    /// can fall through to its normal error path.
+    fn try_operator_method(
+        &mut self,
+        receiver: Value,
+        rhs: Value,
+        method_name: &'static str,
+    ) -> Option<Result<Value, RuntimeError>> {
+        match &receiver {
+            Value::Object(_) => {
+                let class_name = if let Value::Object(obj) = &receiver {
+                    obj.borrow().type_name().to_string()
+                } else {
+                    unreachable!()
+                };
+                let qualified = format!("{class_name}::{method_name}");
+                let func_idx = self.function_map.get(&qualified).copied();
+                // Also walk inheritance chain
+                let func_idx = func_idx.or_else(|| {
+                    let mut search = self
+                        .class_metas
+                        .get(&class_name)
+                        .and_then(|m| m.parent.clone());
+                    let mut found = None;
+                    while let Some(cls) = search {
+                        let q = format!("{cls}::{method_name}");
+                        if let Some(&fi) = self.function_map.get(&q) {
+                            found = Some(fi);
+                            break;
+                        }
+                        search = self.class_metas.get(&cls).and_then(|m| m.parent.clone());
+                    }
+                    found
+                });
+                if let Some(fi) = func_idx {
+                    let args = vec![receiver, rhs];
+                    Some(self.call_compiled_function(fi, &args))
+                } else {
+                    // Try native WritObject::call_method
+                    if let Value::Object(obj) = &receiver {
+                        let result = obj
+                            .borrow_mut()
+                            .call_method(method_name, &[rhs])
+                            .map_err(|e| self.make_error(e));
+                        Some(result)
+                    } else {
+                        None
+                    }
+                }
+            }
+            Value::Struct(s) => {
+                let qualified = format!("{}::{method_name}", s.layout.type_name);
+                if let Some(&fi) = self.function_map.get(&qualified) {
+                    let args = vec![receiver, rhs];
+                    Some(self.call_compiled_function(fi, &args))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Register-based Add: handles int, float, mixed, string concat, and operator overloading.
     fn exec_add_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
         let a_ref = &self.stack[base + a as usize];
         let b_ref = &self.stack[base + b as usize];
@@ -2496,11 +2567,17 @@ impl VM {
             }
             (Value::Str(a), Value::Str(b)) => Value::Str(Rc::new(format!("{a}{b}"))),
             _ => {
-                return Err(self.make_error(format!(
-                    "cannot add {} and {}",
-                    self.stack[base + a as usize].type_name(),
-                    self.stack[base + b as usize].type_name()
-                )));
+                let lhs_v = self.stack[base + a as usize].clone();
+                let rhs_v = self.stack[base + b as usize].clone();
+                if let Some(res) = self.try_operator_method(lhs_v, rhs_v, "add") {
+                    res?
+                } else {
+                    return Err(self.make_error(format!(
+                        "cannot add {} and {}",
+                        self.stack[base + a as usize].type_name(),
+                        self.stack[base + b as usize].type_name()
+                    )));
+                }
             }
         };
         self.stack[base + dst as usize] = result;
@@ -2517,6 +2594,7 @@ impl VM {
         i32_op: fn(i32, i32) -> Option<i32>,
         i64_op: fn(i64, i64) -> Option<i64>,
         f64_op: fn(f64, f64) -> f64,
+        method_name: &'static str,
     ) -> Result<(), RuntimeError> {
         let a_ref = &self.stack[a_abs];
         let b_ref = &self.stack[b_abs];
@@ -2534,11 +2612,17 @@ impl VM {
                 Value::F64(f64_op(a.as_f64(), b.as_i64() as f64))
             }
             _ => {
-                return Err(self.make_error(format!(
-                    "cannot perform arithmetic on {} and {}",
-                    self.stack[a_abs].type_name(),
-                    self.stack[b_abs].type_name()
-                )));
+                let lhs_v = self.stack[a_abs].clone();
+                let rhs_v = self.stack[b_abs].clone();
+                if let Some(res) = self.try_operator_method(lhs_v, rhs_v, method_name) {
+                    res?
+                } else {
+                    return Err(self.make_error(format!(
+                        "cannot perform arithmetic on {} and {}",
+                        self.stack[a_abs].type_name(),
+                        self.stack[b_abs].type_name()
+                    )));
+                }
             }
         };
         self.stack[dst_abs] = result;
@@ -2572,11 +2656,17 @@ impl VM {
                 Value::F64(a.as_f64() / b.as_i64() as f64)
             }
             _ => {
-                return Err(self.make_error(format!(
-                    "cannot divide {} by {}",
-                    self.stack[base + a as usize].type_name(),
-                    self.stack[base + b as usize].type_name()
-                )));
+                let lhs_v = self.stack[base + a as usize].clone();
+                let rhs_v = self.stack[base + b as usize].clone();
+                if let Some(res) = self.try_operator_method(lhs_v, rhs_v, "divide") {
+                    res?
+                } else {
+                    return Err(self.make_error(format!(
+                        "cannot divide {} by {}",
+                        self.stack[base + a as usize].type_name(),
+                        self.stack[base + b as usize].type_name()
+                    )));
+                }
             }
         };
         self.stack[base + dst as usize] = result;
@@ -2606,11 +2696,17 @@ impl VM {
                 Value::F64(a.as_f64() % b.as_i64() as f64)
             }
             _ => {
-                return Err(self.make_error(format!(
-                    "cannot modulo {} by {}",
-                    self.stack[base + a as usize].type_name(),
-                    self.stack[base + b as usize].type_name()
-                )));
+                let lhs_v = self.stack[base + a as usize].clone();
+                let rhs_v = self.stack[base + b as usize].clone();
+                if let Some(res) = self.try_operator_method(lhs_v, rhs_v, "modulo") {
+                    res?
+                } else {
+                    return Err(self.make_error(format!(
+                        "cannot modulo {} by {}",
+                        self.stack[base + a as usize].type_name(),
+                        self.stack[base + b as usize].type_name()
+                    )));
+                }
             }
         };
         self.stack[base + dst as usize] = result;
@@ -2626,6 +2722,7 @@ impl VM {
         b: u8,
         i64_cmp: fn(&i64, &i64) -> bool,
         f64_cmp: fn(&f64, &f64) -> bool,
+        method_name: &'static str,
     ) -> Result<(), RuntimeError> {
         let a_ref = &self.stack[base + a as usize];
         let b_ref = &self.stack[base + b as usize];
@@ -2643,11 +2740,27 @@ impl VM {
                 f64_cmp(&a.as_f64(), &(b.as_i64() as f64))
             }
             _ => {
-                return Err(self.make_error(format!(
-                    "cannot compare {} and {}",
-                    self.stack[base + a as usize].type_name(),
-                    self.stack[base + b as usize].type_name()
-                )));
+                let lhs_v = self.stack[base + a as usize].clone();
+                let rhs_v = self.stack[base + b as usize].clone();
+                if let Some(res) = self.try_operator_method(lhs_v, rhs_v, method_name) {
+                    // Operator method returns bool as Value::Bool
+                    match res? {
+                        Value::Bool(b) => {
+                            self.stack[base + dst as usize] = Value::Bool(b);
+                            return Ok(());
+                        }
+                        other => {
+                            self.stack[base + dst as usize] = Value::Bool(!other.is_falsy());
+                            return Ok(());
+                        }
+                    }
+                } else {
+                    return Err(self.make_error(format!(
+                        "cannot compare {} and {}",
+                        self.stack[base + a as usize].type_name(),
+                        self.stack[base + b as usize].type_name()
+                    )));
+                }
             }
         };
         self.stack[base + dst as usize] = Value::Bool(result);

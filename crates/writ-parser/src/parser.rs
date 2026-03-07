@@ -1278,7 +1278,26 @@ impl Parser {
 
     // ── Function declarations ─────────────────────────────────────────
 
-    /// Parses `func name(params) [-> Type] { body }`.
+    /// Parses optional generic type parameters `<T, U>` after a declaration name.
+    /// Returns an empty vec if no `<` follows.
+    fn parse_type_params(&mut self) -> Result<Vec<String>, ParseError> {
+        if self.peek() != &TokenKind::Less {
+            return Ok(Vec::new());
+        }
+        self.advance(); // consume `<`
+        let mut params = Vec::new();
+        let (first, _) = self.expect_identifier()?;
+        params.push(first);
+        while self.peek() == &TokenKind::Comma {
+            self.advance(); // consume `,`
+            let (param, _) = self.expect_identifier()?;
+            params.push(param);
+        }
+        self.expect(&TokenKind::Greater)?;
+        Ok(params)
+    }
+
+    /// Parses `func name[<T>](params) [-> Type] { body }`.
     fn parse_func_decl(
         &mut self,
         is_static: bool,
@@ -1286,6 +1305,7 @@ impl Parser {
     ) -> Result<FuncDecl, ParseError> {
         self.expect(&TokenKind::Func)?; // consume `func`
         let (name, _) = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
         self.expect(&TokenKind::LeftParen)?;
         let params = self.parse_func_params()?;
         self.expect(&TokenKind::RightParen)?;
@@ -1301,6 +1321,7 @@ impl Parser {
 
         Ok(FuncDecl {
             name,
+            type_params,
             params,
             return_type,
             body,
@@ -1541,10 +1562,11 @@ impl Parser {
 
     // ── Class declarations ────────────────────────────────────────────
 
-    /// Parses `class Name [extends Parent] [with Trait1, Trait2] { body }`.
+    /// Parses `class Name[<T, U>] [extends Parent] [with Trait1, Trait2] { body }`.
     fn parse_class_decl(&mut self) -> Result<ClassDecl, ParseError> {
         self.expect(&TokenKind::Class)?; // consume `class`
         let (name, _) = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
 
         // Optional `extends Parent`
         let extends = if self.peek() == &TokenKind::Extends {
@@ -1606,6 +1628,7 @@ impl Parser {
 
         Ok(ClassDecl {
             name,
+            type_params,
             extends,
             traits,
             fields,
@@ -1613,11 +1636,12 @@ impl Parser {
         })
     }
 
-    /// Parses a struct declaration: `struct Name { fields; methods }`.
+    /// Parses a struct declaration: `struct Name[<T>] { fields; methods }`.
     /// Structs are value types — no `extends`, no `with`.
     fn parse_struct_decl(&mut self) -> Result<StructDecl, ParseError> {
         self.expect(&TokenKind::Struct)?; // consume `struct`
         let (name, _) = self.expect_identifier()?;
+        let type_params = self.parse_type_params()?;
 
         // Structs do not support extends or with
         if self.peek() == &TokenKind::Extends {
@@ -1669,6 +1693,7 @@ impl Parser {
 
         Ok(StructDecl {
             name,
+            type_params,
             fields,
             methods,
         })

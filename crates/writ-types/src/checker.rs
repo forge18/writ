@@ -31,6 +31,10 @@ pub struct TypeChecker {
     /// The expected return type of the function currently being checked.
     /// `None` when outside any function body.
     current_return_type: Option<Type>,
+    /// Uninstantiated generic class templates, keyed by name.
+    generic_classes: HashMap<String, ClassDecl>,
+    /// Uninstantiated generic struct templates, keyed by name.
+    generic_structs: HashMap<String, StructDecl>,
 }
 
 impl Default for TypeChecker {
@@ -48,6 +52,8 @@ impl TypeChecker {
             module_registry: ModuleRegistry::new(),
             namespace_aliases: HashMap::new(),
             current_return_type: None,
+            generic_classes: HashMap::new(),
+            generic_structs: HashMap::new(),
         }
     }
 
@@ -490,7 +496,7 @@ impl TypeChecker {
     // ── Private helpers ──────────────────────────────────────────────────
 
     /// Resolves a parser [`TypeExpr`] to a checked [`Type`].
-    fn resolve_type_expr(&self, type_expr: &TypeExpr, span: &Span) -> Result<Type, TypeError> {
+    fn resolve_type_expr(&mut self, type_expr: &TypeExpr, span: &Span) -> Result<Type, TypeError> {
         match type_expr {
             TypeExpr::Simple(name) => match name.as_str() {
                 "int" => Ok(Type::Int),
@@ -558,10 +564,10 @@ impl TypeChecker {
                     let v = self.resolve_type_expr(&args[1], span)?;
                     Ok(Type::Dictionary(Box::new(k), Box::new(v)))
                 }
-                _ => Err(TypeError::simple(
-                    format!("unknown generic type '{name}'"),
-                    span.clone(),
-                )),
+                _ => {
+                    // Try user-defined generic class or struct.
+                    self.instantiate_generic(name, args, span)
+                }
             },
             TypeExpr::Tuple(types) => {
                 let resolved: Vec<Type> = types
@@ -571,6 +577,235 @@ impl TypeChecker {
                 Ok(Type::Tuple(resolved))
             }
         }
+    }
+
+    /// Produces a synthetic monomorphic name for a generic instantiation.
+    /// e.g. `Stack<int>` → `"Stack__int"`, `Pair<string, int>` → `"Pair__string__int"`.
+    fn monomorphic_name(base: &str, arg_types: &[Type]) -> String {
+        let mut name = base.to_string();
+        for ty in arg_types {
+            name.push_str("__");
+            name.push_str(&ty.to_string());
+        }
+        name
+    }
+
+    /// Substitutes type-parameter references in a `TypeExpr` given a binding map.
+    /// e.g. if bindings = {"T": "int"}, `Simple("T")` becomes `Simple("int")`.
+    fn substitute_type_expr(
+        type_expr: &TypeExpr,
+        bindings: &HashMap<String, String>,
+    ) -> TypeExpr {
+        match type_expr {
+            TypeExpr::Simple(name) => {
+                if let Some(bound) = bindings.get(name) {
+                    TypeExpr::Simple(bound.clone())
+                } else {
+                    TypeExpr::Simple(name.clone())
+                }
+            }
+            TypeExpr::Generic { name, args } => TypeExpr::Generic {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|a| Self::substitute_type_expr(a, bindings))
+                    .collect(),
+            },
+            TypeExpr::Tuple(types) => TypeExpr::Tuple(
+                types
+                    .iter()
+                    .map(|t| Self::substitute_type_expr(t, bindings))
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Instantiates a user-defined generic class or struct for the given type arguments.
+    /// Registers the concrete monomorphic type in the registry and returns its `Type`.
+    fn instantiate_generic(
+        &mut self,
+        name: &str,
+        args: &[TypeExpr],
+        span: &Span,
+    ) -> Result<Type, TypeError> {
+        // Resolve the type arguments first.
+        let mut arg_types = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_types.push(self.resolve_type_expr(arg, span)?);
+        }
+
+        let mono_name = Self::monomorphic_name(name, &arg_types);
+
+        // If already instantiated, return cached type.
+        if self.registry.get_class(&mono_name).is_some() {
+            return Ok(Type::Class(mono_name));
+        }
+        if self.registry.get_struct(&mono_name).is_some() {
+            return Ok(Type::Struct(mono_name));
+        }
+
+        // Look up the template.
+        if let Some(template) = self.generic_classes.get(name).cloned() {
+            if template.type_params.len() != arg_types.len() {
+                return Err(TypeError::simple(
+                    format!(
+                        "'{}' expects {} type argument(s), got {}",
+                        name,
+                        template.type_params.len(),
+                        arg_types.len()
+                    ),
+                    span.clone(),
+                ));
+            }
+            // Build substitution map: param name → concrete type display string.
+            let bindings: HashMap<String, String> = template
+                .type_params
+                .iter()
+                .zip(arg_types.iter())
+                .map(|(p, t)| (p.clone(), t.to_string()))
+                .collect();
+
+            // Substitute fields.
+            let mut fields = Vec::new();
+            for field in &template.fields {
+                let subst = Self::substitute_type_expr(&field.type_annotation, &bindings);
+                let ty = self.resolve_type_expr(&subst, span)?;
+                fields.push(FieldInfo {
+                    name: field.name.clone(),
+                    ty,
+                    visibility: field.visibility,
+                    has_default: field.default.is_some(),
+                    has_setter: field.setter.is_some(),
+                });
+            }
+
+            // Substitute methods.
+            let mut methods = Vec::new();
+            for method in &template.methods {
+                let return_type = match &method.return_type {
+                    Some(te) => {
+                        let subst = Self::substitute_type_expr(te, &bindings);
+                        self.resolve_type_expr(&subst, span)?
+                    }
+                    None => Type::Void,
+                };
+                let mut params = Vec::new();
+                for param in &method.params {
+                    let subst =
+                        Self::substitute_type_expr(&param.type_annotation, &bindings);
+                    params.push(self.resolve_type_expr(&subst, span)?);
+                }
+                methods.push(MethodInfo {
+                    name: method.name.clone(),
+                    params,
+                    return_type,
+                    is_static: method.is_static,
+                    visibility: method.visibility,
+                    has_default_body: false,
+                });
+            }
+
+            let constructor_params: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
+            self.registry.register_class(ClassInfo {
+                name: mono_name.clone(),
+                fields,
+                methods,
+                parent: None,
+                traits: Vec::new(),
+            });
+            self.env.define(
+                &mono_name,
+                VarInfo {
+                    ty: Type::Function {
+                        params: constructor_params,
+                        return_type: Box::new(Type::Class(mono_name.clone())),
+                    },
+                    mutability: Mutability::Immutable,
+                },
+            );
+            return Ok(Type::Class(mono_name));
+        }
+
+        if let Some(template) = self.generic_structs.get(name).cloned() {
+            if template.type_params.len() != arg_types.len() {
+                return Err(TypeError::simple(
+                    format!(
+                        "'{}' expects {} type argument(s), got {}",
+                        name,
+                        template.type_params.len(),
+                        arg_types.len()
+                    ),
+                    span.clone(),
+                ));
+            }
+            let bindings: HashMap<String, String> = template
+                .type_params
+                .iter()
+                .zip(arg_types.iter())
+                .map(|(p, t)| (p.clone(), t.to_string()))
+                .collect();
+
+            let mut fields = Vec::new();
+            for field in &template.fields {
+                let subst = Self::substitute_type_expr(&field.type_annotation, &bindings);
+                let ty = self.resolve_type_expr(&subst, span)?;
+                fields.push(FieldInfo {
+                    name: field.name.clone(),
+                    ty,
+                    visibility: field.visibility,
+                    has_default: field.default.is_some(),
+                    has_setter: field.setter.is_some(),
+                });
+            }
+
+            let mut methods = Vec::new();
+            for method in &template.methods {
+                let return_type = match &method.return_type {
+                    Some(te) => {
+                        let subst = Self::substitute_type_expr(te, &bindings);
+                        self.resolve_type_expr(&subst, span)?
+                    }
+                    None => Type::Void,
+                };
+                let mut params = Vec::new();
+                for param in &method.params {
+                    let subst =
+                        Self::substitute_type_expr(&param.type_annotation, &bindings);
+                    params.push(self.resolve_type_expr(&subst, span)?);
+                }
+                methods.push(MethodInfo {
+                    name: method.name.clone(),
+                    params,
+                    return_type,
+                    is_static: method.is_static,
+                    visibility: method.visibility,
+                    has_default_body: false,
+                });
+            }
+
+            let constructor_params: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
+            self.registry.register_struct(StructInfo {
+                name: mono_name.clone(),
+                fields,
+                methods,
+            });
+            self.env.define(
+                &mono_name,
+                VarInfo {
+                    ty: Type::Function {
+                        params: constructor_params,
+                        return_type: Box::new(Type::Struct(mono_name.clone())),
+                    },
+                    mutability: Mutability::Immutable,
+                },
+            );
+            return Ok(Type::Struct(mono_name));
+        }
+
+        Err(TypeError::simple(
+            format!("unknown generic type '{name}'"),
+            span.clone(),
+        ))
     }
 
     /// Checks if `actual` is compatible with `expected`.
@@ -1459,6 +1694,11 @@ impl TypeChecker {
     }
 
     fn check_class_decl(&mut self, decl: &ClassDecl, span: &Span) -> Result<(), TypeError> {
+        // Generic templates are checked only when instantiated.
+        if !decl.type_params.is_empty() {
+            return Ok(());
+        }
+
         let class_name = &decl.name;
 
         // Validate field defaults match their type annotations.
@@ -1674,6 +1914,11 @@ impl TypeChecker {
     }
 
     fn check_struct_decl(&mut self, decl: &StructDecl, span: &Span) -> Result<(), TypeError> {
+        // Generic templates are checked only when instantiated.
+        if !decl.type_params.is_empty() {
+            return Ok(());
+        }
+
         let struct_name = &decl.name;
 
         // Validate field defaults match their type annotations.
@@ -2612,6 +2857,12 @@ impl TypeChecker {
     }
 
     fn register_class(&mut self, decl: &ClassDecl, span: &Span) -> Result<(), TypeError> {
+        // Generic templates are not registered as concrete types — stored for later instantiation.
+        if !decl.type_params.is_empty() {
+            self.generic_classes.insert(decl.name.clone(), decl.clone());
+            return Ok(());
+        }
+
         // Verify parent exists if extends is specified.
         if let Some(parent) = &decl.extends
             && self.registry.get_class(parent).is_none()
@@ -2679,6 +2930,12 @@ impl TypeChecker {
     }
 
     fn register_struct(&mut self, decl: &StructDecl, span: &Span) -> Result<(), TypeError> {
+        // Generic templates are not registered as concrete types — stored for later instantiation.
+        if !decl.type_params.is_empty() {
+            self.generic_structs.insert(decl.name.clone(), decl.clone());
+            return Ok(());
+        }
+
         let mut fields = Vec::new();
         for field in &decl.fields {
             let ty = self.resolve_type_expr(&field.type_annotation, span)?;
@@ -2864,7 +3121,7 @@ mod tests {
 
     #[test]
     fn resolve_all_primitive_types() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let cases = [
             ("int", Type::Int),
@@ -2881,7 +3138,7 @@ mod tests {
 
     #[test]
     fn resolve_unknown_type_name() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let result = checker.resolve_type_expr(&TypeExpr::Simple("Foo".to_string()), &span);
         assert!(result.is_err());
@@ -2890,7 +3147,7 @@ mod tests {
 
     #[test]
     fn resolve_generic_type_unsupported() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         // Unknown generic type names should produce an error.
         let result = checker.resolve_type_expr(
@@ -2905,7 +3162,7 @@ mod tests {
 
     #[test]
     fn resolve_array_type() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let result = checker.resolve_type_expr(
             &TypeExpr::Generic {
@@ -2919,7 +3176,7 @@ mod tests {
 
     #[test]
     fn resolve_dictionary_type() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let result = checker.resolve_type_expr(
             &TypeExpr::Generic {
@@ -2939,7 +3196,7 @@ mod tests {
 
     #[test]
     fn resolve_tuple_type() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let result = checker.resolve_type_expr(
             &TypeExpr::Tuple(vec![
@@ -2953,7 +3210,7 @@ mod tests {
 
     #[test]
     fn resolve_result_type() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let result = checker.resolve_type_expr(
             &TypeExpr::Generic {
@@ -2967,7 +3224,7 @@ mod tests {
 
     #[test]
     fn resolve_optional_type() {
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         let span = test_span();
         let result = checker.resolve_type_expr(
             &TypeExpr::Generic {
@@ -2977,6 +3234,154 @@ mod tests {
             &span,
         );
         assert_eq!(result.unwrap(), Type::Optional(Box::new(Type::Str)));
+    }
+
+    #[test]
+    fn resolve_user_defined_generic_struct() {
+        use writ_parser::{FieldDecl, StructDecl, Visibility};
+
+        let mut checker = TypeChecker::new();
+        let span = test_span();
+
+        // Register a generic struct template: struct Box<T> { value: T }
+        let template = StructDecl {
+            name: "Box".to_string(),
+            type_params: vec!["T".to_string()],
+            fields: vec![FieldDecl {
+                name: "value".to_string(),
+                type_annotation: TypeExpr::Simple("T".to_string()),
+                default: None,
+                visibility: Visibility::Public,
+                setter: None,
+            }],
+            methods: vec![],
+        };
+        checker.generic_structs.insert("Box".to_string(), template);
+
+        // Instantiate Box<int>
+        let result = checker.resolve_type_expr(
+            &TypeExpr::Generic {
+                name: "Box".to_string(),
+                args: vec![TypeExpr::Simple("int".to_string())],
+            },
+            &span,
+        );
+        assert_eq!(result.unwrap(), Type::Struct("Box__int".to_string()));
+
+        // Verify the monomorphic struct was registered.
+        assert!(checker.registry.get_struct("Box__int").is_some());
+        let info = checker.registry.get_struct("Box__int").unwrap();
+        assert_eq!(info.fields[0].ty, Type::Int);
+    }
+
+    #[test]
+    fn resolve_user_defined_generic_class() {
+        use writ_parser::{ClassDecl, FieldDecl, Visibility};
+
+        let mut checker = TypeChecker::new();
+        let span = test_span();
+
+        let template = ClassDecl {
+            name: "Stack".to_string(),
+            type_params: vec!["T".to_string()],
+            extends: None,
+            traits: vec![],
+            fields: vec![FieldDecl {
+                name: "top".to_string(),
+                type_annotation: TypeExpr::Simple("T".to_string()),
+                default: None,
+                visibility: Visibility::Public,
+                setter: None,
+            }],
+            methods: vec![],
+        };
+        checker.generic_classes.insert("Stack".to_string(), template);
+
+        // Instantiate Stack<string>
+        let result = checker.resolve_type_expr(
+            &TypeExpr::Generic {
+                name: "Stack".to_string(),
+                args: vec![TypeExpr::Simple("string".to_string())],
+            },
+            &span,
+        );
+        assert_eq!(result.unwrap(), Type::Class("Stack__string".to_string()));
+        assert!(checker.registry.get_class("Stack__string").is_some());
+        let info = checker.registry.get_class("Stack__string").unwrap();
+        assert_eq!(info.fields[0].ty, Type::Str);
+    }
+
+    #[test]
+    fn resolve_generic_wrong_arity_is_error() {
+        use writ_parser::{FieldDecl, StructDecl, Visibility};
+
+        let mut checker = TypeChecker::new();
+        let span = test_span();
+
+        let template = StructDecl {
+            name: "Pair".to_string(),
+            type_params: vec!["A".to_string(), "B".to_string()],
+            fields: vec![
+                FieldDecl {
+                    name: "first".to_string(),
+                    type_annotation: TypeExpr::Simple("A".to_string()),
+                    default: None,
+                    visibility: Visibility::Public,
+                    setter: None,
+                },
+                FieldDecl {
+                    name: "second".to_string(),
+                    type_annotation: TypeExpr::Simple("B".to_string()),
+                    default: None,
+                    visibility: Visibility::Public,
+                    setter: None,
+                },
+            ],
+            methods: vec![],
+        };
+        checker.generic_structs.insert("Pair".to_string(), template);
+
+        // Only one arg supplied to a two-param generic — should error.
+        let result = checker.resolve_type_expr(
+            &TypeExpr::Generic {
+                name: "Pair".to_string(),
+                args: vec![TypeExpr::Simple("int".to_string())],
+            },
+            &span,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_generic_cached_on_second_use() {
+        use writ_parser::{FieldDecl, StructDecl, Visibility};
+
+        let mut checker = TypeChecker::new();
+        let span = test_span();
+
+        let template = StructDecl {
+            name: "Wrap".to_string(),
+            type_params: vec!["T".to_string()],
+            fields: vec![FieldDecl {
+                name: "inner".to_string(),
+                type_annotation: TypeExpr::Simple("T".to_string()),
+                default: None,
+                visibility: Visibility::Public,
+                setter: None,
+            }],
+            methods: vec![],
+        };
+        checker.generic_structs.insert("Wrap".to_string(), template);
+
+        let te = TypeExpr::Generic {
+            name: "Wrap".to_string(),
+            args: vec![TypeExpr::Simple("float".to_string())],
+        };
+
+        let r1 = checker.resolve_type_expr(&te, &span).unwrap();
+        let r2 = checker.resolve_type_expr(&te, &span).unwrap();
+        assert_eq!(r1, r2);
+        assert_eq!(r1, Type::Struct("Wrap__float".to_string()));
     }
 
     #[test]

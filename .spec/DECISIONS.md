@@ -27,7 +27,8 @@ Centralized log of architectural and design decisions for Writ. Each entry recor
 | 2026-03-02 | Semicolons optional | Newlines terminate statements. Unclosed brackets defer termination |
 | 2026-03-02 | String interpolation with `$name` and `${expression}` | GDScript-familiar. `\$` escapes interpolation. `"""` for multiline |
 | 2026-03-02 | `..` for string concatenation | Avoids overloading `+`. Explicit operator for string-specific operation |
-| 2026-03-02 | No operator overloading in the language | Rust binding layer handles it. Not exposed to scripters |
+| 2026-03-06 | Operator overloading via named-method convention | Define `func add(other: T) -> T` etc. VM dispatches at runtime. No compiler changes needed — avoids over-engineering |
+| 2026-03-06 | User-defined generics via monomorphization at type-check time | Each `Stack<int>` instantiation becomes a concrete `Stack__int` type. Compiler and VM never see generics — only concrete types |
 
 ## Runtime Decisions
 
