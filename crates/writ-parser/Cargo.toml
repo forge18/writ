@@ -1,7 +1,0 @@
-[package]
-name = "writ-parser"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-writ-lexer = { path = "../writ-lexer" }

@@ -1,7 +1,7 @@
 use lsp_types::{Diagnostic, DiagnosticSeverity};
-use writ_lexer::{LexError, Span};
-use writ_parser::ParseError;
-use writ_types::TypeError;
+use writ::lexer::{LexError, Span};
+use writ::parser::ParseError;
+use writ::types::TypeError;
 
 use crate::convert::span_to_range;
 

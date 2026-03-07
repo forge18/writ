@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use writ_compiler::Compiler;
-use writ_lexer::Lexer;
-use writ_parser::Parser;
+use writ::compiler::Compiler;
+use writ::lexer::Lexer;
+use writ::parser::Parser;
 
 const FIBONACCI: &str = "\
 func fib(n: int) -> int {

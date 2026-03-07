@@ -968,35 +968,11 @@ name = "writ"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "writ-codegen",
- "writ-compiler",
- "writ-lexer",
- "writ-parser",
- "writ-stdlib",
- "writ-types",
- "writ-vm",
+ "fastnoise-lite",
+ "glam",
+ "rand",
+ "regex",
 ]
-
-[[package]]
-name = "writ-codegen"
-version = "0.1.0"
-dependencies = [
- "writ-parser",
- "writ-types",
-]
-
-[[package]]
-name = "writ-compiler"
-version = "0.1.0"
-dependencies = [
- "writ-lexer",
- "writ-parser",
- "writ-types",
-]
-
-[[package]]
-name = "writ-lexer"
-version = "0.1.0"
 
 [[package]]
 name = "writ-lsp"
@@ -1008,47 +984,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "writ-lexer",
- "writ-parser",
- "writ-types",
-]
-
-[[package]]
-name = "writ-parser"
-version = "0.1.0"
-dependencies = [
- "writ-lexer",
-]
-
-[[package]]
-name = "writ-stdlib"
-version = "0.1.0"
-dependencies = [
- "fastnoise-lite",
- "glam",
- "rand",
- "regex",
- "writ-compiler",
- "writ-lexer",
- "writ-parser",
- "writ-vm",
-]
-
-[[package]]
-name = "writ-types"
-version = "0.1.0"
-dependencies = [
- "writ-lexer",
- "writ-parser",
-]
-
-[[package]]
-name = "writ-vm"
-version = "0.1.0"
-dependencies = [
- "writ-compiler",
- "writ-lexer",
- "writ-parser",
+ "writ",
 ]
 
 [[package]]

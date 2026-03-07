@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/writ-lexer", "crates/writ-parser", "crates/writ-types", "crates/writ-compiler", "crates/writ-vm", "crates/writ-stdlib", "crates/writ-codegen", "crates/writ-lsp"]
+members = ["crates/writ-lsp"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,19 +10,22 @@ edition = "2024"
 name = "writ"
 version.workspace = true
 edition.workspace = true
+description = "An embeddable, statically typed scripting language for Rust"
+license = "MIT"
+repository = "https://github.com/forge18/writ"
+keywords = ["scripting", "embedded", "language", "gamedev", "vm"]
+categories = ["game-development", "embedded", "scripting"]
+readme = "README.md"
 
 [features]
-mobile-aosoa = ["writ-vm/mobile-aosoa"]
-debug-hooks = ["writ-vm/debug-hooks"]
+mobile-aosoa = []
+debug-hooks = []
 
 [dependencies]
-writ-lexer = { path = "crates/writ-lexer" }
-writ-parser = { path = "crates/writ-parser" }
-writ-types = { path = "crates/writ-types" }
-writ-compiler = { path = "crates/writ-compiler" }
-writ-vm = { path = "crates/writ-vm" }
-writ-stdlib = { path = "crates/writ-stdlib" }
-writ-codegen = { path = "crates/writ-codegen" }
+rand = "0.8"
+regex = "1"
+glam = "0.29"
+fastnoise-lite = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

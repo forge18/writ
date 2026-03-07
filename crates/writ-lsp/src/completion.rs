@@ -66,8 +66,8 @@ pub fn handle_completion(
 fn complete_dot_access(
     source: &str,
     offset: usize,
-    _stmts: &[writ_parser::Stmt],
-    checker: &writ_types::TypeChecker,
+    _stmts: &[writ::parser::Stmt],
+    checker: &writ::types::TypeChecker,
     items: &mut Vec<CompletionItem>,
 ) {
     // Walk backwards to find the identifier before the dot.
@@ -87,7 +87,7 @@ fn complete_dot_access(
     let registry = checker.registry();
 
     match ty {
-        writ_types::Type::Class(type_name) => {
+        writ::types::Type::Class(type_name) => {
             // Add fields (with inheritance).
             for field in registry.all_fields(type_name) {
                 items.push(CompletionItem {
@@ -114,7 +114,7 @@ fn complete_dot_access(
                 });
             }
         }
-        writ_types::Type::Struct(type_name) => {
+        writ::types::Type::Struct(type_name) => {
             if let Some(info) = registry.get_struct(type_name) {
                 for field in &info.fields {
                     items.push(CompletionItem {
@@ -168,7 +168,7 @@ fn complete_general(
         for (name, info) in env.all_visible() {
             if prefix.is_empty() || name.starts_with(prefix) {
                 let kind = match &info.ty {
-                    writ_types::Type::Function { .. } => CompletionItemKind::FUNCTION,
+                    writ::types::Type::Function { .. } => CompletionItemKind::FUNCTION,
                     _ => CompletionItemKind::VARIABLE,
                 };
                 items.push(CompletionItem {
@@ -261,7 +261,7 @@ fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-fn format_params(params: &[writ_types::Type]) -> String {
+fn format_params(params: &[writ::types::Type]) -> String {
     params
         .iter()
         .map(|t| t.to_string())
@@ -275,7 +275,7 @@ fn format_params(params: &[writ_types::Type]) -> String {
 /// (e.g., `p.` with no member). By removing the incomplete line, the rest of the
 /// program parses and type-checks successfully, giving us the type information
 /// needed for completions.
-fn analyze_without_line(source: &str, offset: usize) -> Option<writ_types::TypeChecker> {
+fn analyze_without_line(source: &str, offset: usize) -> Option<writ::types::TypeChecker> {
     // Find the line containing the offset and remove it.
     let mut fixed = String::new();
     let mut current_offset = 0;

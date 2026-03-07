@@ -1,9 +1,9 @@
 /// Profiles instruction pair/triple frequency across all benchmark programs.
 /// Run with: cargo run --example profile_instructions --release
 use std::collections::HashMap;
-use writ_compiler::{Compiler, Instruction};
-use writ_lexer::Lexer;
-use writ_parser::Parser;
+use writ::compiler::{Compiler, Instruction};
+use writ::lexer::Lexer;
+use writ::parser::Parser;
 
 const FIBONACCI: &str = "\
 func fib(n: int) -> int {

@@ -1,8 +1,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use writ_compiler::{Chunk, ClassMeta, CompiledFunction, Compiler, StructMeta};
-use writ_lexer::Lexer;
-use writ_parser::Parser;
-use writ_vm::VM;
+use writ::compiler::{Chunk, ClassMeta, CompiledFunction, Compiler, StructMeta};
+use writ::lexer::Lexer;
+use writ::parser::Parser;
+use writ::vm::VM;
 
 // ── Cross-language benchmark programs ────────────────────────────────
 // These are standard benchmarks used by Wren, Lua, and "Are We Fast Yet"
@@ -198,7 +198,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("fibonacci_28", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&fib_chunk, &fib_fns, &fib_structs, &fib_classes)
                 .unwrap()
         });
@@ -208,7 +208,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("binary_trees", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&bt_chunk, &bt_fns, &bt_structs, &bt_classes)
                 .unwrap()
         });
@@ -218,7 +218,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("permute_9", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&perm_chunk, &perm_fns, &perm_structs, &perm_classes)
                 .unwrap()
         });
@@ -228,7 +228,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("mandelbrot_100", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&mb_chunk, &mb_fns, &mb_structs, &mb_classes)
                 .unwrap()
         });
@@ -238,7 +238,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("sieve_5000", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&sieve_chunk, &sieve_fns, &sieve_structs, &sieve_classes)
                 .unwrap()
         });
@@ -248,7 +248,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("queens_8", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&queens_chunk, &queens_fns, &queens_structs, &queens_classes)
                 .unwrap()
         });
@@ -258,7 +258,7 @@ fn bench_vm(c: &mut Criterion) {
     group.bench_function("loop_sum", |b| {
         b.iter(|| {
             let mut vm = VM::new();
-            writ_stdlib::register_all(&mut vm);
+            writ::stdlib::register_all(&mut vm);
             vm.execute_program(&loop_chunk, &loop_fns, &loop_structs, &loop_classes)
                 .unwrap()
         });

@@ -1,4 +1,4 @@
-use writ_lexer::Span;
+use writ::lexer::Span;
 
 /// Converts a Writ `Span` (1-indexed) to an LSP `Range` (0-indexed).
 pub fn span_to_range(span: &Span) -> lsp_types::Range {

@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use writ_lexer::Lexer;
+use writ::lexer::Lexer;
 
 const ARITHMETIC: &str = "return 1 + 2 * 3 - 4 / 5";
 

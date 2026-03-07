@@ -29,7 +29,7 @@ pub fn handle_references(world: &WorldState, params: ReferenceParams) -> Option<
 
 /// Walks the AST and collects all locations where `name` appears as an identifier.
 fn collect_identifier_locations(
-    stmts: &[writ_parser::Stmt],
+    stmts: &[writ::parser::Stmt],
     name: &str,
     uri: &lsp_types::Uri,
     locations: &mut Vec<Location>,
@@ -40,12 +40,12 @@ fn collect_identifier_locations(
 }
 
 fn collect_from_stmt(
-    stmt: &writ_parser::Stmt,
+    stmt: &writ::parser::Stmt,
     name: &str,
     uri: &lsp_types::Uri,
     locations: &mut Vec<Location>,
 ) {
-    use writ_parser::StmtKind;
+    use writ::parser::StmtKind;
 
     match &stmt.kind {
         StmtKind::Let {
@@ -136,10 +136,10 @@ fn collect_from_stmt(
             collect_identifier_locations(then_block, name, uri, locations);
             if let Some(branch) = else_branch {
                 match branch {
-                    writ_parser::ElseBranch::ElseIf(s) => {
+                    writ::parser::ElseBranch::ElseIf(s) => {
                         collect_from_stmt(s, name, uri, locations);
                     }
-                    writ_parser::ElseBranch::ElseBlock(stmts) => {
+                    writ::parser::ElseBranch::ElseBlock(stmts) => {
                         collect_identifier_locations(stmts, name, uri, locations);
                     }
                 }
@@ -172,10 +172,10 @@ fn collect_from_stmt(
             }
             for arm in arms {
                 match &arm.body {
-                    writ_parser::WhenBody::Expr(expr) => {
+                    writ::parser::WhenBody::Expr(expr) => {
                         collect_from_expr(expr, name, uri, locations);
                     }
-                    writ_parser::WhenBody::Block(stmts) => {
+                    writ::parser::WhenBody::Block(stmts) => {
                         collect_identifier_locations(stmts, name, uri, locations);
                     }
                 }
@@ -189,12 +189,12 @@ fn collect_from_stmt(
 }
 
 fn collect_from_expr(
-    expr: &writ_parser::Expr,
+    expr: &writ::parser::Expr,
     name: &str,
     uri: &lsp_types::Uri,
     locations: &mut Vec<Location>,
 ) {
-    use writ_parser::ExprKind;
+    use writ::parser::ExprKind;
 
     match &expr.kind {
         ExprKind::Identifier(ident) => {
@@ -219,10 +219,10 @@ fn collect_from_expr(
             collect_from_expr(callee, name, uri, locations);
             for arg in args {
                 match arg {
-                    writ_parser::CallArg::Positional(expr) => {
+                    writ::parser::CallArg::Positional(expr) => {
                         collect_from_expr(expr, name, uri, locations);
                     }
-                    writ_parser::CallArg::Named { value, .. } => {
+                    writ::parser::CallArg::Named { value, .. } => {
                         collect_from_expr(value, name, uri, locations);
                     }
                 }
@@ -250,18 +250,18 @@ fn collect_from_expr(
             collect_from_expr(rhs, name, uri, locations);
         }
         ExprKind::Lambda { body, .. } => match body {
-            writ_parser::LambdaBody::Expr(expr) => {
+            writ::parser::LambdaBody::Expr(expr) => {
                 collect_from_expr(expr, name, uri, locations);
             }
-            writ_parser::LambdaBody::Block(stmts) => {
+            writ::parser::LambdaBody::Block(stmts) => {
                 collect_identifier_locations(stmts, name, uri, locations);
             }
         },
         ExprKind::ArrayLiteral(elements) => {
             for element in elements {
                 match element {
-                    writ_parser::ArrayElement::Expr(expr)
-                    | writ_parser::ArrayElement::Spread(expr) => {
+                    writ::parser::ArrayElement::Expr(expr)
+                    | writ::parser::ArrayElement::Spread(expr) => {
                         collect_from_expr(expr, name, uri, locations);
                     }
                 }
@@ -270,11 +270,11 @@ fn collect_from_expr(
         ExprKind::DictLiteral(elements) => {
             for element in elements {
                 match element {
-                    writ_parser::DictElement::KeyValue { key, value } => {
+                    writ::parser::DictElement::KeyValue { key, value } => {
                         collect_from_expr(key, name, uri, locations);
                         collect_from_expr(value, name, uri, locations);
                     }
-                    writ_parser::DictElement::Spread(expr) => {
+                    writ::parser::DictElement::Spread(expr) => {
                         collect_from_expr(expr, name, uri, locations);
                     }
                 }
@@ -285,7 +285,7 @@ fn collect_from_expr(
         }
         ExprKind::StringInterpolation(segments) => {
             for segment in segments {
-                if let writ_parser::InterpolationSegment::Expression(expr) = segment {
+                if let writ::parser::InterpolationSegment::Expression(expr) = segment {
                     collect_from_expr(expr, name, uri, locations);
                 }
             }
@@ -303,11 +303,11 @@ fn collect_from_expr(
                 collect_from_expr(subj, name, uri, locations);
             }
             for arm in arms {
-                if let writ_parser::WhenBody::Block(stmts) = &arm.body {
+                if let writ::parser::WhenBody::Block(stmts) = &arm.body {
                     for stmt in stmts {
                         collect_from_stmt(stmt, name, uri, locations);
                     }
-                } else if let writ_parser::WhenBody::Expr(expr) = &arm.body {
+                } else if let writ::parser::WhenBody::Expr(expr) = &arm.body {
                     collect_from_expr(expr, name, uri, locations);
                 }
             }

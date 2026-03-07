@@ -42,7 +42,7 @@ pub fn handle_rename(world: &WorldState, params: RenameParams) -> Option<Workspa
 
 /// Walks the AST and collects text edits for renaming `old_name` to `new_name`.
 fn collect_rename_edits(
-    stmts: &[writ_parser::Stmt],
+    stmts: &[writ::parser::Stmt],
     old_name: &str,
     new_name: &str,
     edits: &mut Vec<TextEdit>,
@@ -53,12 +53,12 @@ fn collect_rename_edits(
 }
 
 fn collect_from_stmt(
-    stmt: &writ_parser::Stmt,
+    stmt: &writ::parser::Stmt,
     old_name: &str,
     new_name: &str,
     edits: &mut Vec<TextEdit>,
 ) {
-    use writ_parser::StmtKind;
+    use writ::parser::StmtKind;
 
     match &stmt.kind {
         StmtKind::Let {
@@ -126,10 +126,10 @@ fn collect_from_stmt(
             collect_rename_edits(then_block, old_name, new_name, edits);
             if let Some(branch) = else_branch {
                 match branch {
-                    writ_parser::ElseBranch::ElseIf(s) => {
+                    writ::parser::ElseBranch::ElseIf(s) => {
                         collect_from_stmt(s, old_name, new_name, edits);
                     }
-                    writ_parser::ElseBranch::ElseBlock(stmts) => {
+                    writ::parser::ElseBranch::ElseBlock(stmts) => {
                         collect_rename_edits(stmts, old_name, new_name, edits);
                     }
                 }
@@ -162,10 +162,10 @@ fn collect_from_stmt(
             }
             for arm in arms {
                 match &arm.body {
-                    writ_parser::WhenBody::Expr(expr) => {
+                    writ::parser::WhenBody::Expr(expr) => {
                         collect_from_expr(expr, old_name, new_name, edits);
                     }
-                    writ_parser::WhenBody::Block(stmts) => {
+                    writ::parser::WhenBody::Block(stmts) => {
                         collect_rename_edits(stmts, old_name, new_name, edits);
                     }
                 }
@@ -179,12 +179,12 @@ fn collect_from_stmt(
 }
 
 fn collect_from_expr(
-    expr: &writ_parser::Expr,
+    expr: &writ::parser::Expr,
     old_name: &str,
     new_name: &str,
     edits: &mut Vec<TextEdit>,
 ) {
-    use writ_parser::ExprKind;
+    use writ::parser::ExprKind;
 
     match &expr.kind {
         ExprKind::Identifier(ident) => {
@@ -209,10 +209,10 @@ fn collect_from_expr(
             collect_from_expr(callee, old_name, new_name, edits);
             for arg in args {
                 match arg {
-                    writ_parser::CallArg::Positional(expr) => {
+                    writ::parser::CallArg::Positional(expr) => {
                         collect_from_expr(expr, old_name, new_name, edits);
                     }
-                    writ_parser::CallArg::Named { value, .. } => {
+                    writ::parser::CallArg::Named { value, .. } => {
                         collect_from_expr(value, old_name, new_name, edits);
                     }
                 }
@@ -240,18 +240,18 @@ fn collect_from_expr(
             collect_from_expr(rhs, old_name, new_name, edits);
         }
         ExprKind::Lambda { body, .. } => match body {
-            writ_parser::LambdaBody::Expr(expr) => {
+            writ::parser::LambdaBody::Expr(expr) => {
                 collect_from_expr(expr, old_name, new_name, edits);
             }
-            writ_parser::LambdaBody::Block(stmts) => {
+            writ::parser::LambdaBody::Block(stmts) => {
                 collect_rename_edits(stmts, old_name, new_name, edits);
             }
         },
         ExprKind::ArrayLiteral(elements) => {
             for element in elements {
                 match element {
-                    writ_parser::ArrayElement::Expr(expr)
-                    | writ_parser::ArrayElement::Spread(expr) => {
+                    writ::parser::ArrayElement::Expr(expr)
+                    | writ::parser::ArrayElement::Spread(expr) => {
                         collect_from_expr(expr, old_name, new_name, edits);
                     }
                 }
@@ -260,11 +260,11 @@ fn collect_from_expr(
         ExprKind::DictLiteral(elements) => {
             for element in elements {
                 match element {
-                    writ_parser::DictElement::KeyValue { key, value } => {
+                    writ::parser::DictElement::KeyValue { key, value } => {
                         collect_from_expr(key, old_name, new_name, edits);
                         collect_from_expr(value, old_name, new_name, edits);
                     }
-                    writ_parser::DictElement::Spread(expr) => {
+                    writ::parser::DictElement::Spread(expr) => {
                         collect_from_expr(expr, old_name, new_name, edits);
                     }
                 }
@@ -275,7 +275,7 @@ fn collect_from_expr(
         }
         ExprKind::StringInterpolation(segments) => {
             for segment in segments {
-                if let writ_parser::InterpolationSegment::Expression(expr) = segment {
+                if let writ::parser::InterpolationSegment::Expression(expr) = segment {
                     collect_from_expr(expr, old_name, new_name, edits);
                 }
             }
@@ -293,11 +293,11 @@ fn collect_from_expr(
                 collect_from_expr(subj, old_name, new_name, edits);
             }
             for arm in arms {
-                if let writ_parser::WhenBody::Block(stmts) = &arm.body {
+                if let writ::parser::WhenBody::Block(stmts) = &arm.body {
                     for stmt in stmts {
                         collect_from_stmt(stmt, old_name, new_name, edits);
                     }
-                } else if let writ_parser::WhenBody::Expr(expr) = &arm.body {
+                } else if let writ::parser::WhenBody::Expr(expr) = &arm.body {
                     collect_from_expr(expr, old_name, new_name, edits);
                 }
             }

@@ -2,15 +2,14 @@
 name = "writ-lsp"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [[bin]]
 name = "writ-lsp"
 path = "src/main.rs"
 
 [dependencies]
-writ-lexer = { path = "../writ-lexer" }
-writ-parser = { path = "../writ-parser" }
-writ-types = { path = "../writ-types" }
+writ = { path = "../.." }
 lsp-server = "0.7"
 lsp-types = "0.97"
 serde = "1"

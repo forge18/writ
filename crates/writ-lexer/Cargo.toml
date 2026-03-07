@@ -1,4 +1,0 @@
-[package]
-name = "writ-lexer"
-version.workspace = true
-edition.workspace = true

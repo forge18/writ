@@ -42,3 +42,4 @@ docs/.astro/
 tarpaulin-report.html
 *.profraw
 lcov.info
+flamegraphs/

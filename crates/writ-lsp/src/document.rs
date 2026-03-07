@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use lsp_types::{Diagnostic, Uri};
-use writ_parser::Stmt;
-use writ_types::TypeChecker;
+use writ::parser::Stmt;
+use writ::types::TypeChecker;
 
 use crate::analysis;
 

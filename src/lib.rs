@@ -16,26 +16,34 @@
 
 use std::fs;
 
-use writ_compiler::Compiler;
-use writ_lexer::Lexer;
-use writ_parser::Parser;
-use writ_types::TypeChecker;
-use writ_vm::VM;
+pub mod lexer;
+pub mod parser;
+pub mod types;
+pub mod compiler;
+pub mod vm;
+pub mod stdlib;
+pub mod codegen;
+
+use compiler::Compiler;
+use lexer::Lexer;
+use parser::Parser;
+use types::TypeChecker;
+use vm::VM;
 
 // Re-export key types that embedders need.
-pub use writ_compiler::CompileError;
-pub use writ_lexer::{LexError, SourceLine, format_error_context};
-pub use writ_parser::ParseError;
-pub use writ_types::{Type, TypeError};
+pub use compiler::CompileError;
+pub use lexer::{LexError, SourceLine, format_error_context};
+pub use parser::ParseError;
+pub use types::{Type, TypeError};
 // FloatValue and IntValue have been flattened into Value directly (I32/I64/F32/F64 variants).
-pub use writ_vm::{Fn0, Fn1, Fn2, Fn3, MFn0, MFn1, MFn2, MFn3};
-pub use writ_vm::{RuntimeError, StackFrame, StackTrace, Value, ValueTag, WritObject};
-pub use writ_vm::{fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
+pub use vm::{Fn0, Fn1, Fn2, Fn3, MFn0, MFn1, MFn2, MFn3};
+pub use vm::{RuntimeError, StackFrame, StackTrace, Value, ValueTag, WritObject};
+pub use vm::{fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
 #[cfg(feature = "debug-hooks")]
-pub use writ_vm::{BreakpointAction, BreakpointContext};
+pub use vm::{BreakpointAction, BreakpointContext};
 
 // Re-export codegen for embedders that want Rust source output.
-pub use writ_codegen::RustCodegen;
+pub use codegen::RustCodegen;
 
 /// Unified error type for the Writ pipeline.
 ///
@@ -138,7 +146,7 @@ impl Writ {
     /// Creates a new Writ instance with the standard library registered.
     pub fn new() -> Self {
         let mut vm = VM::new();
-        writ_stdlib::register_all(&mut vm);
+        stdlib::register_all(&mut vm);
         Self {
             vm,
             type_checker: TypeChecker::new(),
@@ -223,7 +231,7 @@ impl Writ {
     /// Registers a host function that scripts can call.
     pub fn register_fn<H>(&mut self, name: &str, handler: H) -> &mut Self
     where
-        H: writ_vm::binding::IntoNativeHandler,
+        H: vm::binding::IntoNativeHandler,
     {
         self.vm.register_fn(name, handler);
         self
@@ -247,7 +255,7 @@ impl Writ {
         handler: H,
     ) -> &mut Self
     where
-        H: writ_vm::binding::IntoNativeHandler,
+        H: vm::binding::IntoNativeHandler,
     {
         self.type_checker.register_host_function(name, params, return_type);
         self.vm.register_fn(name, handler);
@@ -265,7 +273,7 @@ impl Writ {
     /// whose signatures cannot be expressed in the Writ type system.
     pub fn register_host_fn_untyped<H>(&mut self, name: &str, handler: H) -> &mut Self
     where
-        H: writ_vm::binding::IntoNativeHandler,
+        H: vm::binding::IntoNativeHandler,
     {
         self.type_checker
             .register_host_function(name, vec![Type::Unknown], Type::Unknown);
@@ -282,7 +290,7 @@ impl Writ {
         handler: H,
     ) -> &mut Self
     where
-        H: writ_vm::binding::IntoNativeMethodHandler,
+        H: vm::binding::IntoNativeMethodHandler,
     {
         self.vm.register_method(tag, name, module, handler);
         self
@@ -414,7 +422,7 @@ impl Writ {
     #[cfg(feature = "debug-hooks")]
     pub fn on_breakpoint<F>(&mut self, handler: F) -> &mut Self
     where
-        F: Fn(&writ_vm::BreakpointContext) -> writ_vm::BreakpointAction + 'static,
+        F: Fn(&vm::BreakpointContext) -> vm::BreakpointAction + 'static,
     {
         self.vm.on_breakpoint(handler);
         self
@@ -484,7 +492,7 @@ impl Writ {
 
         self.type_checker.check_program_typed(&stmts)?;
 
-        let codegen = writ_codegen::RustCodegen::new();
+        let codegen = codegen::RustCodegen::new();
         Ok(codegen.generate(self.type_checker.registry()))
     }
 }

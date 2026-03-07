@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use lsp_types::Diagnostic;
-use writ_lexer::Lexer;
-use writ_parser::{Parser, Stmt, StmtKind};
-use writ_types::{Type, TypeChecker};
+use writ::lexer::Lexer;
+use writ::parser::{Parser, Stmt, StmtKind};
+use writ::types::{Type, TypeChecker};
 
 use crate::diagnostics::{
     lex_error_to_diagnostic, parse_error_to_diagnostic, type_error_to_diagnostic,

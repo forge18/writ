@@ -62,8 +62,8 @@ fn is_ident_char(b: u8) -> bool {
 
 /// Searches a statement (and its children) for a declaration matching `name`.
 /// Returns the span of the declaration if found.
-fn find_declaration_span(stmt: &writ_parser::Stmt, name: &str) -> Option<writ_lexer::Span> {
-    use writ_parser::StmtKind;
+fn find_declaration_span(stmt: &writ::parser::Stmt, name: &str) -> Option<writ::lexer::Span> {
+    use writ::parser::StmtKind;
 
     match &stmt.kind {
         StmtKind::Let {
@@ -124,12 +124,12 @@ fn find_declaration_span(stmt: &writ_parser::Stmt, name: &str) -> Option<writ_le
             }
             if let Some(branch) = else_branch {
                 match branch {
-                    writ_parser::ElseBranch::ElseIf(s) => {
+                    writ::parser::ElseBranch::ElseIf(s) => {
                         if let Some(span) = find_declaration_span(s, name) {
                             return Some(span);
                         }
                     }
-                    writ_parser::ElseBranch::ElseBlock(stmts) => {
+                    writ::parser::ElseBranch::ElseBlock(stmts) => {
                         for s in stmts {
                             if let Some(span) = find_declaration_span(s, name) {
                                 return Some(span);

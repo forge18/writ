@@ -2,10 +2,10 @@
 /// Usage: cargo flamegraph --example profile_bottlenecks --release -- <benchmark>
 /// Available benchmarks: fibonacci, binary_trees, permute, mandelbrot, sieve, queens, loop_sum
 use std::time::Instant;
-use writ_compiler::{Chunk, ClassMeta, CompiledFunction, Compiler, StructMeta};
-use writ_lexer::Lexer;
-use writ_parser::Parser;
-use writ_vm::VM;
+use writ::compiler::{Chunk, ClassMeta, CompiledFunction, Compiler, StructMeta};
+use writ::lexer::Lexer;
+use writ::parser::Parser;
+use writ::vm::VM;
 
 const FIBONACCI: &str = "\
 func fib(n: int) -> int {
@@ -181,7 +181,7 @@ fn run_n(source: &str, n: usize) {
     let start = Instant::now();
     for _ in 0..n {
         let mut vm = VM::new();
-        writ_stdlib::register_all(&mut vm);
+        writ::stdlib::register_all(&mut vm);
         std::hint::black_box(
             vm.execute_program(&chunk, &fns, &structs, &classes)
                 .unwrap(),
