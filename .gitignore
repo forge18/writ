@@ -45,3 +45,4 @@ lcov.info
 flamegraphs/
 
 # Misc
+crates/writ-bench/
