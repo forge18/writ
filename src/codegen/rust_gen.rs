@@ -113,8 +113,6 @@ impl RustCodegen {
         out
     }
 
-    // ── Private helpers ──────────────────────────────────────────────
-
     fn generate_struct_def(&self, info: &ClassInfo) -> String {
         let mut out = String::new();
         out.push_str(&format!(
@@ -251,7 +249,7 @@ impl RustCodegen {
                 out.push_str("        todo!(\"trait method body\")\n");
                 out.push_str("    }\n");
             } else if !trait_method.has_default_body {
-                // Required method not implemented — emit a stub
+                // Required method not implemented -- emit a stub
                 out.push_str(&format!(
                     "    fn {name}({params}){ret} {{\n",
                     name = trait_method.name

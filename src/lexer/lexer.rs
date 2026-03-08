@@ -187,7 +187,7 @@ impl<'src> Lexer<'src> {
                         if self.peek() == Some(b'\n') || self.peek() == Some(b'\r') {
                             continue;
                         } else {
-                            // Restore — the whitespace is before real content.
+                            // Restore -- the whitespace is before real content.
                             self.pos = saved_pos;
                             self.line = saved_line;
                             self.column = saved_col;
@@ -232,7 +232,7 @@ impl<'src> Lexer<'src> {
                 Ok(self.make_token(TokenKind::Semicolon, start_line, start_col, 1))
             }
 
-            // Colon — `:` or `::`
+            // Colon -- `:` or `::`
             b':' => {
                 self.advance();
                 if self.peek() == Some(b':') {
@@ -243,7 +243,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Dot — `.`, `..`, `...`, `..=`
+            // Dot -- `.`, `..`, `...`, `..=`
             b'.' => {
                 self.advance();
                 if self.peek() == Some(b'.') {
@@ -262,7 +262,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Plus — `+`, `+=`
+            // Plus -- `+`, `+=`
             b'+' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -273,7 +273,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Minus — `-`, `-=`, `->`
+            // Minus -- `-`, `-=`, `->`
             b'-' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -287,7 +287,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Star — `*`, `*=`
+            // Star -- `*`, `*=`
             b'*' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -298,7 +298,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Slash — `/`, `/=`, `//` (line comment), `/* */` (block comment)
+            // Slash -- `/`, `/=`, `//` (line comment), `/* */` (block comment)
             b'/' => {
                 self.advance();
                 if self.peek() == Some(b'/') {
@@ -316,7 +316,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Percent — `%`, `%=`
+            // Percent -- `%`, `%=`
             b'%' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -327,7 +327,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Equals — `=`, `==`, `=>`
+            // Equals -- `=`, `==`, `=>`
             b'=' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -341,7 +341,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Bang — `!`, `!=`
+            // Bang -- `!`, `!=`
             b'!' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -352,7 +352,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Less — `<`, `<=`
+            // Less -- `<`, `<=`
             b'<' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -363,7 +363,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Greater — `>`, `>=`
+            // Greater -- `>`, `>=`
             b'>' => {
                 self.advance();
                 if self.peek() == Some(b'=') {
@@ -374,7 +374,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Ampersand — `&&`
+            // Ampersand -- `&&`
             b'&' => {
                 self.advance();
                 if self.peek() == Some(b'&') {
@@ -385,7 +385,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Pipe — `||`
+            // Pipe -- `||`
             b'|' => {
                 self.advance();
                 if self.peek() == Some(b'|') {
@@ -396,7 +396,7 @@ impl<'src> Lexer<'src> {
                 }
             }
 
-            // Question — `?`, `??`, `?.`
+            // Question -- `?`, `??`, `?.`
             b'?' => {
                 self.advance();
                 if self.peek() == Some(b'?') {
@@ -596,7 +596,7 @@ impl<'src> Lexer<'src> {
                                 length,
                             ));
                         }
-                        // Single or double `"` inside multiline — literal content.
+                        // Single or double `"` inside multiline -- literal content.
                         content.push(self.advance().unwrap() as char);
                     } else {
                         // Closing `"` for single-line string.
@@ -637,7 +637,7 @@ impl<'src> Lexer<'src> {
                         // ${expr} interpolation.
                         return self.scan_expr_interpolation(content, start_line, start_col);
                     }
-                    // Bare `$` not followed by ident or `{` — literal.
+                    // Bare `$` not followed by ident or `{` -- literal.
                     content.push(self.advance().unwrap() as char);
                 }
                 Some(b'\n') if !multiline => {
@@ -727,7 +727,7 @@ impl<'src> Lexer<'src> {
         self.pending.push(interp_start);
 
         if content.is_empty() {
-            // No literal content before the interpolation — return InterpolationStart directly.
+            // No literal content before the interpolation -- return InterpolationStart directly.
             return Ok(self.pending.pop().unwrap());
         }
 
@@ -755,7 +755,7 @@ impl<'src> Lexer<'src> {
         self.advance(); // $
         self.advance(); // {
 
-        // Push interpolation mode — the next calls to next_token() will lex normally
+        // Push interpolation mode -- the next calls to next_token() will lex normally
         // until the matching `}` is found.
         self.push_mode(LexMode::Interpolation { brace_depth: 1 });
 
@@ -797,13 +797,13 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
                 return Ok(self.make_token(TokenKind::InterpolationEnd, start_line, start_col, 1));
             }
-            // Nested brace — decrement depth and emit as normal token.
+            // Nested brace -- decrement depth and emit as normal token.
             self.advance();
             self.update_brace_depth(brace_depth - 1);
             return Ok(self.make_token(TokenKind::RightBrace, start_line, start_col, 1));
         }
 
-        // Check for opening `{` — increment depth.
+        // Check for opening `{` -- increment depth.
         if self.peek() == Some(b'{') {
             self.advance();
             self.update_brace_depth(brace_depth + 1);

@@ -1,65 +1,55 @@
 use super::frame::CallFrame;
 use super::value::Value;
 
-/// Unique identifier for a coroutine.
 pub type CoroutineId = u64;
 
-/// The lifecycle state of a coroutine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoroutineState {
-    /// Ready to run or currently executing.
     Running,
-    /// Suspended — waiting for a condition before resuming.
+    /// Waiting for a condition before resuming.
     Suspended,
-    /// Finished execution — return value available.
     Complete,
-    /// Cancelled by owner destruction or parent cancellation.
+    /// Triggered by owner destruction or parent cancellation.
     Cancelled,
 }
 
-/// The wait condition that a suspended coroutine is blocked on.
 #[derive(Debug, Clone)]
 pub enum WaitCondition {
-    /// Suspend for one frame (bare `yield`).
+    /// Bare `yield` -- one frame.
     OneFrame,
-    /// Suspend for a number of seconds (accumulated via delta).
-    Seconds { remaining: f64 },
-    /// Suspend for a number of frames.
-    Frames { remaining: u32 },
-    /// Suspend until a predicate function returns true.
-    Until { predicate: Value },
-    /// Suspend until a child coroutine completes.
-    /// `result_reg` is the frame-relative register to write the child's return value into.
+    /// Accumulated via delta time.
+    Seconds {
+        remaining: f64,
+    },
+    Frames {
+        remaining: u32,
+    },
+    Until {
+        predicate: Value,
+    },
+    /// `result_reg` is the frame-relative register for the child's return value.
     Coroutine {
         child_id: CoroutineId,
         result_reg: u8,
     },
 }
 
-/// A coroutine — an independent execution context with its own stack.
 #[derive(Debug)]
 pub struct Coroutine {
-    /// Unique ID.
     pub id: CoroutineId,
-    /// Current state.
     pub state: CoroutineState,
-    /// The operand stack (owned by this coroutine).
     pub(crate) stack: Vec<Value>,
-    /// The call stack (owned by this coroutine).
     pub(crate) frames: Vec<CallFrame>,
-    /// Upvalue index arrays parallel to `frames`.
+    /// Parallel to `frames`.
     pub(crate) frame_upvalues: Vec<Option<Vec<u32>>>,
-    /// What this coroutine is waiting on (only meaningful when Suspended).
+    /// Only meaningful when `Suspended`.
     pub(crate) wait: Option<WaitCondition>,
-    /// Return value after completion.
     pub(crate) return_value: Option<Value>,
-    /// The ID of the owning object (for structured concurrency).
+    /// For structured concurrency.
     pub owner_id: Option<u64>,
-    /// Open upvalues for this coroutine's execution context.
     pub(crate) open_upvalues: Vec<Option<u32>>,
-    /// Flat upvalue store for this coroutine.
     pub(crate) upvalue_store: Vec<Value>,
-    /// Child coroutine IDs (for cancellation propagation).
+    /// For cancellation propagation.
     pub(crate) children: Vec<CoroutineId>,
 }
 

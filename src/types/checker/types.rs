@@ -89,7 +89,7 @@ impl TypeChecker {
     }
 
     /// Produces a synthetic monomorphic name for a generic instantiation.
-    /// e.g. `Stack<int>` → `"Stack__int"`, `Pair<string, int>` → `"Pair__string__int"`.
+    /// e.g. `Stack<int>` -> `"Stack__int"`, `Pair<string, int>` -> `"Pair__string__int"`.
     pub(super) fn monomorphic_name(base: &str, arg_types: &[Type]) -> String {
         let mut name = base.to_string();
         for ty in arg_types {
@@ -166,7 +166,7 @@ impl TypeChecker {
                     span.clone(),
                 ));
             }
-            // Build substitution map: param name → concrete type display string.
+            // Build substitution map: param name -> concrete type display string.
             let bindings: HashMap<String, String> = template
                 .type_params
                 .iter()

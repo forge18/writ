@@ -9,56 +9,40 @@ use super::aosoa::AoSoAContainer;
 use super::object::WritObject;
 use super::writ_struct::WritStruct;
 
-/// Heap-allocated closure data, boxed to keep the `Value` enum small.
 #[derive(Debug, Clone)]
 pub struct ClosureData {
-    /// Index into the VM's function table.
     pub func_idx: usize,
-    /// Indices into the VM's flat upvalue store.
     pub upvalues: Vec<u32>,
 }
 
-/// A runtime value in the Writ VM.
-///
-/// Integer and float widths are flattened directly into the enum to
-/// eliminate nested discriminant checks on the arithmetic hot path.
-/// Width promotion (i32→i64, f32→f64) still happens transparently.
+/// Widths flattened into the enum to avoid nested discriminant checks on
+/// the arithmetic hot path. Width promotion (i32->i64, f32->f64) is transparent.
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// 32-bit signed integer — the default narrow representation.
+    /// Default narrow int.
     I32(i32),
-    /// 64-bit signed integer — promoted to when i32 overflows.
+    /// Promoted when i32 overflows.
     I64(i64),
-    /// 32-bit float — the default narrow representation.
+    /// Default narrow float.
     F32(f32),
-    /// 64-bit float — promoted to when f32 range/precision is exceeded.
+    /// Promoted when f32 range/precision is exceeded.
     F64(f64),
-    /// Boolean.
     Bool(bool),
-    /// Reference-counted string.
     Str(Rc<str>),
-    /// Null value.
     Null,
-    /// Reference-counted mutable array.
     Array(Rc<RefCell<Vec<Value>>>),
-    /// Reference-counted mutable dictionary with string keys.
     Dict(Rc<RefCell<HashMap<String, Value>>>),
-    /// Host-owned object implementing the [`WritObject`] trait.
     Object(Rc<RefCell<dyn WritObject>>),
-    /// Writ struct instance — true value type, copied on assignment.
+    /// Value type -- copied on assignment.
     Struct(Box<WritStruct>),
-    /// A closure: a function bundled with its captured upvalues (boxed to
-    /// keep Value small — closures are rare on the hot path).
+    /// Boxed to keep Value small (closures are rare on the hot path).
     Closure(Box<ClosureData>),
-    /// Handle to a running coroutine, used for yield-coroutine chains.
     CoroutineHandle(u64),
-    /// AoSoA container: cache-friendly columnar storage for homogeneous struct arrays.
-    /// Only available when the `mobile-aosoa` feature is enabled.
     #[cfg(feature = "mobile-aosoa")]
     AoSoA(Rc<RefCell<AoSoAContainer>>),
 }
 
-/// Lightweight type tag for method dispatch keying.
+/// Type tag for method dispatch keying.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueTag {
     Int,
@@ -88,8 +72,6 @@ impl Value {
             Value::Null | Value::CoroutineHandle(_) | Value::Closure(_) => None,
         }
     }
-
-    // ── Integer helpers ──────────────────────────────────────────
 
     /// Returns `true` if this value is an integer (either width).
     #[inline(always)]
@@ -143,7 +125,7 @@ impl Value {
                 if narrow.is_finite() || !result.is_finite() {
                     Value::F32(narrow)
                 } else {
-                    // Result overflowed f32 — promote
+                    // Result overflowed f32 -- promote
                     Value::F64(result)
                 }
             }
@@ -178,7 +160,7 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    /// Returns an owned type name — handles `Object` by borrowing the Rc.
+    /// Returns an owned type name -- handles `Object` by borrowing the Rc.
     pub fn type_name_owned(&self) -> String {
         match self {
             Value::Object(obj) => obj.borrow().type_name().to_string(),
@@ -189,7 +171,7 @@ impl Value {
     /// Returns a human-readable type name for error messages.
     ///
     /// Script authors see only `"int"` and `"float"` regardless of the
-    /// internal width — the promotion is an implementation detail.
+    /// internal width -- the promotion is an implementation detail.
     pub fn type_name(&self) -> &str {
         match self {
             Value::I32(_) | Value::I64(_) => "int",
@@ -373,8 +355,8 @@ mod tests {
 
     #[test]
     fn test_display_float() {
-        assert_eq!(Value::F32(3.14).to_string(), "3.14");
-        assert_eq!(Value::F64(3.14).to_string(), "3.14");
+        assert_eq!(Value::F32(3.125).to_string(), "3.125");
+        assert_eq!(Value::F64(3.125).to_string(), "3.125");
     }
 
     #[test]
@@ -462,8 +444,8 @@ mod tests {
 
     #[test]
     fn test_float_helpers() {
-        assert!((Value::F32(3.14).as_f64() - 3.14f32 as f64).abs() < f64::EPSILON);
-        assert_eq!(Value::F64(3.14).as_f64(), 3.14);
+        assert!((Value::F32(3.125).as_f64() - 3.125f32 as f64).abs() < f64::EPSILON);
+        assert_eq!(Value::F64(3.125).as_f64(), 3.125);
         assert!(Value::F32(1.0).is_float());
         assert!(Value::F64(1.0).is_float());
         assert!(!Value::I32(1).is_float());

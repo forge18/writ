@@ -115,8 +115,6 @@ fn find_best_match<'a>(
     best.map(|(name, _, _, _)| name)
 }
 
-// ── Domain-specific suggestion builders ─────────────────────────────
-
 /// Suggest a similar variable name from the visible scope.
 pub fn suggest_variable(name: &str, env: &TypeEnv, span: &Span) -> Vec<Suggestion> {
     let visible = env.all_visible();
@@ -312,7 +310,7 @@ pub fn suggest_public_getter(
     vec![]
 }
 
-/// Suggest a type conversion (e.g., `int` → `float` via `as float`).
+/// Suggest a type conversion (e.g., `int` -> `float` via `as float`).
 pub fn suggest_type_conversion(actual: &Type, expected: &Type, span: &Span) -> Vec<Suggestion> {
     let conversion = match (actual, expected) {
         (Type::Int, Type::Float) => Some("as float"),
@@ -479,7 +477,7 @@ mod tests {
                 scope_distance: 0,
             },
         ];
-        // "ax" -> "ab" = 1, "ac" = 1 — tied on edit distance
+        // "ax" -> "ab" = 1, "ac" = 1 -- tied on edit distance
         // "ac" has matching type (Int), so it wins
         let result = find_best_match("ax", &candidates, Some(&Type::Int));
         assert_eq!(result, Some("ac"));
@@ -499,7 +497,7 @@ mod tests {
                 scope_distance: 0,
             },
         ];
-        // "ax" -> "ab" = 1, "ac" = 1 — tied. Both type-compatible. "ac" is closer scope.
+        // "ax" -> "ab" = 1, "ac" = 1 -- tied. Both type-compatible. "ac" is closer scope.
         let result = find_best_match("ax", &candidates, Some(&Type::Int));
         assert_eq!(result, Some("ac"));
     }

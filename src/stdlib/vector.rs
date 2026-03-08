@@ -5,7 +5,7 @@ use crate::vm::WritObject;
 use crate::vm::{VM, Value};
 use glam::{Vec2, Vec3, Vec4};
 
-// ── Vector2 ─────────────────────────────────────────────────────────
+// --- Vector2 ---
 
 #[derive(Debug, Clone)]
 pub struct WritVector2(pub Vec2);
@@ -107,7 +107,7 @@ impl WritObject for WritVector2 {
     }
 }
 
-// ── Vector3 ─────────────────────────────────────────────────────────
+// --- Vector3 ---
 
 #[derive(Debug, Clone)]
 pub struct WritVector3(pub Vec3);
@@ -215,7 +215,7 @@ impl WritObject for WritVector3 {
     }
 }
 
-// ── Vector4 ─────────────────────────────────────────────────────────
+// --- Vector4 ---
 
 #[derive(Debug, Clone)]
 pub struct WritVector4(pub Vec4);
@@ -321,7 +321,7 @@ impl WritObject for WritVector4 {
     }
 }
 
-// ── Value constructors ──────────────────────────────────────────────
+// --- Value constructors ---
 
 pub fn vec2_value(v: Vec2) -> Value {
     Value::Object(Rc::new(RefCell::new(WritVector2(v))))
@@ -335,7 +335,7 @@ pub fn vec4_value(v: Vec4) -> Value {
     Value::Object(Rc::new(RefCell::new(WritVector4(v))))
 }
 
-// ── Extraction helpers ──────────────────────────────────────────────
+// --- Extraction helpers ---
 
 pub fn extract_f32(value: &Value, context: &str) -> Result<f32, String> {
     match value {
@@ -449,7 +449,7 @@ fn try_extract_vec4(args: &[Value], idx: usize) -> Option<Vec4> {
     extract_vec4(args, idx).ok()
 }
 
-// ── Registration ────────────────────────────────────────────────────
+// --- Registration ---
 
 pub fn register(vm: &mut VM) {
     // Vector2 constructor

@@ -1,7 +1,7 @@
 use crate::vm::{VM, Value};
 
 pub fn register(vm: &mut VM) {
-    // ── Keyboard keys ─────────────────────────────────────────────────
+    // --- Keyboard keys ---
     let keys = [
         // Letters
         ("Key_A", 0),
@@ -84,7 +84,7 @@ pub fn register(vm: &mut VM) {
         vm.register_global(name, Value::I64(*value));
     }
 
-    // ── Mouse buttons ─────────────────────────────────────────────────
+    // --- Mouse buttons ---
     let mouse_buttons = [
         ("MouseButton_Left", 0),
         ("MouseButton_Right", 1),
@@ -97,7 +97,7 @@ pub fn register(vm: &mut VM) {
         vm.register_global(name, Value::I64(*value));
     }
 
-    // ── Controller buttons ────────────────────────────────────────────
+    // --- Controller buttons ---
     let controller_buttons = [
         ("ControllerButton_A", 0),
         ("ControllerButton_B", 1),
@@ -120,7 +120,7 @@ pub fn register(vm: &mut VM) {
         vm.register_global(name, Value::I64(*value));
     }
 
-    // ── Controller axes ───────────────────────────────────────────────
+    // --- Controller axes ---
     let controller_axes = [
         ("ControllerAxis_LeftStickX", 0),
         ("ControllerAxis_LeftStickY", 1),

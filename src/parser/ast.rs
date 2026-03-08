@@ -1,6 +1,6 @@
 use crate::lexer::Span;
 
-// ── Type Expressions ──────────────────────────────────────────────────
+// --- Type Expressions ---
 
 /// A type annotation: `float`, `Result<float>`, `Array<Weapon>`, `(float, float)`.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,7 +15,7 @@ pub enum TypeExpr {
     Tuple(Vec<TypeExpr>),
 }
 
-// ── Shared Types ──────────────────────────────────────────────────────
+// --- Shared Types ---
 
 /// Visibility modifier for class fields and methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,14 +33,14 @@ pub struct FuncParam {
     pub is_variadic: bool,
 }
 
-/// An argument in a function call — positional or named.
+/// An argument in a function call -- positional or named.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallArg {
     Positional(Expr),
     Named { name: String, value: Expr },
 }
 
-// ── Expression AST ────────────────────────────────────────────────────
+// --- Expression AST ---
 
 /// A single expression in the Writ language.
 #[derive(Debug, Clone, PartialEq)]
@@ -121,7 +121,7 @@ pub enum ExprKind {
     /// Tuple literal: `(10.0, 20.0)`.
     Tuple(Vec<Expr>),
 
-    /// Error propagation: `expr?` — unwrap `Result<T>` or propagate error.
+    /// Error propagation: `expr?` -- unwrap `Result<T>` or propagate error.
     ErrorPropagate(Box<Expr>),
 
     /// Array literal: `[1, 2, 3]` or `[...a, 4]`.
@@ -141,14 +141,14 @@ pub enum ExprKind {
     /// Only valid inside a class method that has a parent class.
     Super { method: String, args: Vec<CallArg> },
 
-    /// `when` used as an expression — each arm yields a value.
+    /// `when` used as an expression -- each arm yields a value.
     When {
         subject: Option<Box<Expr>>,
         arms: Vec<WhenArm>,
     },
 }
 
-/// An element inside an array literal — either a plain expression or a spread.
+/// An element inside an array literal -- either a plain expression or a spread.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArrayElement {
     /// A regular expression element: `42`.
@@ -157,7 +157,7 @@ pub enum ArrayElement {
     Spread(Expr),
 }
 
-/// An entry in a dictionary literal — either a key-value pair or a spread.
+/// An entry in a dictionary literal -- either a key-value pair or a spread.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DictElement {
     /// A `key: value` pair.
@@ -166,7 +166,7 @@ pub enum DictElement {
     Spread(Expr),
 }
 
-/// Body of a lambda — single expression or block.
+/// Body of a lambda -- single expression or block.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LambdaBody {
     Expr(Box<Expr>),
@@ -215,7 +215,7 @@ pub enum InterpolationSegment {
     Expression(Expr),
 }
 
-// ── Statement AST (Phase 3) ─────────────────────────────────────────────
+// --- Statement AST (Phase 3) ---
 
 /// A single statement in the Writ language.
 #[derive(Debug, Clone, PartialEq)]
@@ -227,21 +227,21 @@ pub struct Stmt {
 /// All statement variants.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtKind {
-    /// `let name: type = value` — runtime immutable binding.
+    /// `let name: type = value` -- runtime immutable binding.
     Let {
         name: String,
         type_annotation: Option<TypeExpr>,
         initializer: Expr,
     },
 
-    /// `var name: type = value` — mutable binding.
+    /// `var name: type = value` -- mutable binding.
     Var {
         name: String,
         type_annotation: Option<TypeExpr>,
         initializer: Expr,
     },
 
-    /// `const name = value` — compile-time constant.
+    /// `const name = value` -- compile-time constant.
     Const { name: String, initializer: Expr },
 
     /// `target = value` or `target += value`, etc.
@@ -263,7 +263,7 @@ pub enum StmtKind {
     /// `continue`
     Continue,
 
-    /// `{ stmt* }` — block of statements.
+    /// `{ stmt* }` -- block of statements.
     Block(Vec<Stmt>),
 
     /// `if condition { ... } else if ... else { ... }`
@@ -289,7 +289,7 @@ pub enum StmtKind {
         arms: Vec<WhenArm>,
     },
 
-    /// `let (x, y) = expr` — tuple destructuring.
+    /// `let (x, y) = expr` -- tuple destructuring.
     LetDestructure {
         names: Vec<String>,
         initializer: Expr,
@@ -319,11 +319,11 @@ pub enum StmtKind {
     /// Export wrapper: `export class Foo { ... }`.
     Export(Box<Stmt>),
 
-    /// `start expr` — launches a coroutine, returns immediately.
+    /// `start expr` -- launches a coroutine, returns immediately.
     Start(Expr),
 }
 
-/// The else branch of an if statement — either another if or a block.
+/// The else branch of an if statement -- either another if or a block.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ElseBranch {
     ElseIf(Box<Stmt>),
@@ -377,14 +377,14 @@ pub enum WhenPattern {
     Else,
 }
 
-/// Body of a `when` arm — either a single expression or a block.
+/// Body of a `when` arm -- either a single expression or a block.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WhenBody {
     Expr(Expr),
     Block(Vec<Stmt>),
 }
 
-// ── Declaration AST (Phase 4) ─────────────────────────────────────────
+// --- Declaration AST (Phase 4) ---
 
 /// A top-level declaration in a Writ file.
 #[derive(Debug, Clone, PartialEq)]
@@ -494,7 +494,7 @@ pub struct EnumVariant {
 }
 
 /// Struct declaration: `struct Name<T> { fields; methods }`.
-/// Value type — no inheritance, no traits.
+/// Value type -- no inheritance, no traits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDecl {
     pub name: String,

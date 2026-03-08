@@ -51,8 +51,8 @@ Import everything under a namespace:
 ```writ
 import * as weapons from "weapons/sword"
 
-let s = weapons.createSword(damage: 20.0)
-let blade: weapons.Sword = s
+let s = weapons::createSword(damage: 20.0)
+let blade: weapons::Sword = s
 ```
 
 Use `::` for namespace access on wildcard imports.

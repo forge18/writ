@@ -11,18 +11,19 @@ The standard library is loaded automatically by `Writ::new()`. The host can disa
 
 Global functions always available.
 
-| Function     | Signature                                        | Description                 |
-|--------------|--------------------------------------------------|-----------------------------|
-| `print`      | `(value: any)`                                   | Print to the host console   |
-| `assert`     | `(condition: bool, msg: string)`                 | Error if condition is false |
-| `typeof`     | `(value: any) -> string`                         | Type name of a value        |
-| `instanceof` | `(value: any, type: string) -> bool`             | Check type at runtime       |
-| `hasField`   | `(value: any, field: string) -> bool`            | Check if a field exists     |
-| `getField`   | `(value: any, field: string) -> any`             | Get a field by name         |
-| `fields`     | `(value: any) -> Array<string>`                  | All field names             |
-| `methods`    | `(value: any) -> Array<string>`                  | All method names            |
-| `hasMethod`  | `(value: any, method: string) -> bool`           | Check if a method exists    |
-| `invoke`     | `(value: any, method: string, args: any) -> any` | Call a method by name       |
+| Function     | Signature                                            | Description                |
+|--------------|------------------------------------------------------|----------------------------|
+| `print`      | `(value: any)`                                       | Print to the host console  |
+| `assert`     | `(condition: bool, msg: string)`                     | Error if condition is false|
+| `typeof`     | `(value: any) -> string`                             | Type name of a value       |
+| `instanceof` | `(value: any, type: string) -> bool`                 | Check type at runtime      |
+| `hasField`   | `(value: any, field: string) -> bool`                | Check if a field exists    |
+| `getField`   | `(value: any, field: string) -> any`                 | Get a field by name        |
+| `setField`   | `(value: any, field: string, val: any)`              | Set a field by name        |
+| `fields`     | `(value: any) -> Array<string>`                      | All field names            |
+| `methods`    | `(value: any) -> Array<string>`                      | All method names           |
+| `hasMethod`  | `(value: any, method: string) -> bool`               | Check if a method exists   |
+| `invoke`     | `(value: any, method: string, ...args: any) -> any`  | Call a method by name      |
 
 ---
 
@@ -128,7 +129,7 @@ let scores = {"alice": 100, "bob": 95}
 
 scores.len()              // 2
 scores.isEmpty()          // false
-scores.contains("alice")  // true
+scores.has("alice")       // true
 
 scores.keys()             // Array<string>
 scores.values()           // Array<int>
@@ -195,13 +196,13 @@ re.replaceAll("a1b2", "X") // "aXbX" — replace all
 
 ## Math types
 
-### Vec2 / Vec3 / Vec4
+### Vector2 / Vector3 / Vector4
 
 2D, 3D, and 4D vectors. Backed by `glam`.
 
 ```writ
-let v2 = Vec2(x: 1.0, y: 0.0)
-let v3 = Vec3(x: 0.0, y: 1.0, z: 0.0)
+let v2 = Vector2(x: 1.0, y: 0.0)
+let v3 = Vector3(x: 0.0, y: 1.0, z: 0.0)
 
 v2.length()
 v2.normalized()
@@ -213,15 +214,15 @@ v3.length()
 v3.normalized()
 ```
 
-### Mat3 / Mat4
+### Matrix3 / Matrix4
 
 3×3 and 4×4 matrices. Backed by `glam`.
 
 ```writ
-let m = Mat4.identity()
-let rot = Mat4.fromRotation(axis, angle)
-let scale = Mat4.fromScale(sx, sy, sz)
-let trans = Mat4.fromTranslation(tx, ty, tz)
+let m = Matrix4_IDENTITY
+let rot = Matrix4_rotation(axis, angle)
+let scale = Matrix4_scale(sx, sy, sz)
+let trans = Matrix4_translation(tx, ty, tz)
 
 m.multiply(other)
 m.inverse()
@@ -233,13 +234,13 @@ m.transpose()
 Rotation representation. Backed by `glam`.
 
 ```writ
-let q = Quaternion.fromAxisAngle(axis, angle)
-let q = Quaternion.fromEuler(x, y, z)
-let q = Quaternion.lookRotation(forward, up)
+let q = Quaternion_fromAxisAngle(axis, angle)
+let q = Quaternion_fromEuler(x, y, z)
+let q = Quaternion_lookRotation(forward, up)
 
-q.normalize()
+q.normalized()
 q.slerp(other, t)
-q.toMat4()
+q.toMatrix()
 ```
 
 ### Color
@@ -254,12 +255,12 @@ let c = Color.fromHSV(h, s, v)
 c.lerp(other, 0.5)
 ```
 
-### Rect / BoundingBox
+### Rectangle / BoundingBox
 
 2D rectangle and 3D bounding box.
 
 ```writ
-let r = Rect(x: 0.0, y: 0.0, width: 100.0, height: 50.0)
+let r = Rectangle(x: 0.0, y: 0.0, width: 100.0, height: 50.0)
 r.contains(point)
 r.intersects(other)
 r.area()
@@ -296,9 +297,15 @@ Module name: `"tween"`. Animate a value over time.
 
 ```writ
 let t = Tween(from: 0.0, to: 100.0, duration: 2.0)
+t.setEasing("easeInQuad")   // linear, easeInQuad, easeOutQuad, easeInOutQuad,
+                             // easeInCubic, easeOutCubic, easeInOutCubic, smoothstep
+t.setLoop("pingpong")       // "none", "loop", "pingpong"
+t.setDelay(0.5)             // delay before starting
+
 t.update(delta)
 let value = t.value()
-t.isDone()
+t.isFinished()
+t.reset()
 ```
 
 ---
@@ -309,8 +316,16 @@ Module name: `"timer"`.
 
 ```writ
 let t = Timer(duration: 5.0)
+t.start()
 t.update(delta)
-t.isDone()
+t.stop()
 t.reset()
+
+t.isFinished()
+t.isRunning()
 t.elapsed()
+t.remaining()
+
+t.setRepeating(true)
+t.setCallback(myFunction)
 ```

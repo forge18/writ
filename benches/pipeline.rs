@@ -1,10 +1,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use writ::Writ;
 
-// ── Cross-language benchmark programs ────────────────────────────────
-// End-to-end pipeline: lex → parse → compile → execute
+// --- Cross-language benchmark programs ---
+// End-to-end pipeline: lex -> parse -> compile -> execute
 
-/// Recursive fibonacci — standard function call overhead benchmark.
+/// Recursive fibonacci -- standard function call overhead benchmark.
 /// Used by: Wren, AWFY, CLBG, Rhai
 const FIBONACCI: &str = "\
 func fib(n: int) -> int {
@@ -13,7 +13,7 @@ func fib(n: int) -> int {
 }
 return fib(28)";
 
-/// Binary trees — object allocation and recursive traversal.
+/// Binary trees -- object allocation and recursive traversal.
 /// Used by: Wren, CLBG, AWFY
 const BINARY_TREES: &str = "\
 class Tree {
@@ -40,7 +40,7 @@ while i <= 100 {
 }
 return sum";
 
-/// Permute — recursion and counting (Heap's algorithm structure).
+/// Permute -- recursion and counting (Heap's algorithm structure).
 /// Used by: AWFY
 const PERMUTE: &str = "\
 func permute(n: int) -> int {
@@ -55,7 +55,7 @@ func permute(n: int) -> int {
 }
 return permute(9)";
 
-/// Mandelbrot — floating point arithmetic and nested loops.
+/// Mandelbrot -- floating point arithmetic and nested loops.
 /// Used by: AWFY, CLBG
 const MANDELBROT: &str = "\
 func mandelbrot(size: int) -> int {
@@ -90,7 +90,7 @@ func mandelbrot(size: int) -> int {
 }
 return mandelbrot(100)";
 
-/// Sieve of Eratosthenes — array subscript and index assignment.
+/// Sieve of Eratosthenes -- array subscript and index assignment.
 /// Used by: Wren, AWFY, CLBG
 const SIEVE: &str = "\
 func sieve(size: int) -> int {
@@ -117,7 +117,7 @@ func sieve(size: int) -> int {
 }
 return sieve(5000)";
 
-/// N-Queens solver — exercises closures and nested function capture.
+/// N-Queens solver -- exercises closures and nested function capture.
 /// Used by: AWFY, Wren
 const QUEENS: &str = "\
 func queens(n: int) -> int {
@@ -159,7 +159,7 @@ func queens(n: int) -> int {
 }
 return queens(8)";
 
-/// Tight loop — instruction dispatch throughput baseline.
+/// Tight loop -- instruction dispatch throughput baseline.
 const LOOP_SUM: &str = "\
 var sum = 0
 var i = 0

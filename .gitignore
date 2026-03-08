@@ -16,9 +16,11 @@ Thumbs.db
 
 # Claude
 .claude/
+CLAUDE.md
 
 # OpenCode
 .opencode/
+AGENT.md
 
 # Node / TypeScript
 node_modules/

@@ -131,7 +131,7 @@ impl Compiler {
                 self.emit(Instruction::LoadStr(slot, index), line);
             }
         } else if has_upvalues {
-            // Top-level function captures upvalues — emit MakeClosure into a
+            // Top-level function captures upvalues -- emit MakeClosure into a
             // scratch register so the VM populates closure_map while the main
             // chunk's stack is still live.
             let scratch = self.alloc_temp(span)?;
@@ -256,7 +256,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Function call compilation ──────────────────────────────────
+    // --- Function call compilation ---
 
     pub(super) fn save_state(&mut self) -> SavedState {
         SavedState {
@@ -285,7 +285,7 @@ impl Compiler {
         self.max_reg = saved.max_reg;
     }
 
-    // ── Local variable management ──────────────────────────────────
+    // --- Local variable management ---
 
     pub(super) fn resolve_local(&self, name: &str) -> Option<(u8, u8)> {
         self.locals

@@ -564,7 +564,7 @@ mod tests {
         };
         checker.generic_structs.insert("Pair".to_string(), template);
 
-        // Only one arg supplied to a two-param generic — should error.
+        // Only one arg supplied to a two-param generic -- should error.
         let result = checker.resolve_type_expr(
             &TypeExpr::Generic {
                 name: "Pair".to_string(),

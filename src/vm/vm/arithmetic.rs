@@ -5,7 +5,7 @@ use super::super::value::Value;
 use super::{ArithOps, CmpOps, VM};
 
 impl VM {
-    // ── Instruction helpers ──────────────────────────────────────────
+    // --- Instruction helpers ---
 
     /// Performs a checked i32 operation, promoting to i64 on overflow.
     #[inline(always)]
@@ -53,7 +53,7 @@ impl VM {
         result.map_err(|msg| self.make_error(msg))
     }
 
-    // ── Upvalue helpers ──────────────────────────────────────────
+    // --- Upvalue helpers ---
 
     /// Captures a local variable into the flat upvalue store.
     /// Returns the store index. Reuses existing capture if already open.
@@ -98,7 +98,7 @@ impl VM {
         self.has_open_upvalues = any_remaining;
     }
 
-    // ── Register-based instruction helpers ───────────────────────
+    // --- Register-based instruction helpers ---
 
     /// Attempts to call a named operator method (`add`, `subtract`, etc.) on
     /// an Object or Struct receiver. Returns `Some(result)` if the receiver is

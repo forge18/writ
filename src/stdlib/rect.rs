@@ -6,7 +6,7 @@ use glam::{Vec2, Vec3};
 
 use super::vector::{extract_f32, extract_vec2, extract_vec3, vec2_value, vec3_value};
 
-// ── Rectangle ───────────────────────────────────────────────────────
+// --- Rectangle ---
 
 #[derive(Debug, Clone)]
 pub struct WritRectangle {
@@ -103,7 +103,7 @@ impl WritObject for WritRectangle {
     }
 }
 
-// ── BoundingBox ─────────────────────────────────────────────────────
+// --- BoundingBox ---
 
 #[derive(Debug, Clone)]
 pub struct WritBoundingBox {
@@ -202,7 +202,7 @@ impl WritObject for WritBoundingBox {
     }
 }
 
-// ── Value constructors ──────────────────────────────────────────────
+// --- Value constructors ---
 
 fn rect_value(r: WritRectangle) -> Value {
     Value::Object(Rc::new(RefCell::new(r)))
@@ -212,7 +212,7 @@ fn bbox_value(b: WritBoundingBox) -> Value {
     Value::Object(Rc::new(RefCell::new(b)))
 }
 
-// ── Extraction helpers ──────────────────────────────────────────────
+// --- Extraction helpers ---
 
 fn extract_rect(args: &[Value], idx: usize) -> Result<WritRectangle, String> {
     let v = args.get(idx).ok_or("missing Rectangle argument")?;
@@ -242,7 +242,7 @@ fn extract_bbox(args: &[Value], idx: usize) -> Result<WritBoundingBox, String> {
     }
 }
 
-// ── Registration ────────────────────────────────────────────────────
+// --- Registration ---
 
 pub fn register(vm: &mut VM) {
     vm.register_type("Rectangle", |args| {

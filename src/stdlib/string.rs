@@ -77,7 +77,7 @@ pub fn register(vm: &mut VM) {
         Some("string"),
         mfn2(
             |s: RcStr, old: RcStr, new: RcStr| -> Result<String, String> {
-                Ok(s.replace(&*old, &*new))
+                Ok(s.replace(&*old, &new))
             },
         ),
     );

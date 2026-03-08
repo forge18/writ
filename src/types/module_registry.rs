@@ -4,7 +4,7 @@ use super::types::Type;
 
 /// Maps module paths to their exported names and types.
 ///
-/// The type checker does not load files — the caller populates this
+/// The type checker does not load files -- the caller populates this
 /// registry before type checking begins.
 pub struct ModuleRegistry {
     modules: HashMap<String, HashMap<String, Type>>,

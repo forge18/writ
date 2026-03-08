@@ -36,8 +36,6 @@ Primitives are always lowercase.
 |------------|-----------------|-----------------------------|
 | `int`      | `i32`           | Whole number                |
 | `bigint`   | `i64`           | Large whole number          |
-| `uint`     | `u32`           | Unsigned whole number       |
-| `ubigint`  | `u64`           | Large unsigned whole number |
 | `float`    | `f32`           | Decimal number              |
 | `bigfloat` | `f64`           | High precision decimal      |
 | `bool`     | `bool`          | True/false                  |
@@ -690,13 +688,10 @@ impl std::ops::DerefMut for Player {
 The VM starts with zero external access. The host explicitly opts in to what scripts can use:
 
 ```rust
-let vm = VM::new()
-    .register_type::<Player>()
-    .register_type::<Vector2>()
-    .register_fn("move", player_move)
-    .register_fn("spawn", entity_spawn)
-    .register_fn("on_update", on_update)
-    .register_fn("on_collision", on_collision)
+let mut vm = Writ::new();
+vm.register_type("Player", |args| { /* ... */ Ok(Box::new(player)) });
+vm.register_host_fn("move", vec![Type::Int], Type::Void, fn1(player_move));
+vm.register_host_fn("spawn", vec![Type::Str], Type::Void, fn1(entity_spawn));
 ```
 
 Different VM instances can have different capabilities — mod scripts get a restricted API surface, core game scripts get full access. Same language, same VM, same execution model. The difference is purely what the host registers.
@@ -947,7 +942,7 @@ vm.on_return(|fn_name| { })
 The host can set a maximum instruction count per script execution. Protects against infinite loops in untrusted mod scripts. Configurable per VM instance.
 
 ```rust
-vm.instruction_limit(1_000_000)  // kill after N instructions
+vm.set_instruction_limit(1_000_000);  // kill after N instructions
 ```
 
 When the limit is hit, the script is terminated and an error is returned to the host.
@@ -1004,7 +999,7 @@ Backed by `std::vec::Vec`
 Backed by `std::collections::HashMap`
 
 - `keys`, `values`
-- `contains`, `remove`
+- `has`, `remove`
 - `len`, `isEmpty`
 - `merge`
 

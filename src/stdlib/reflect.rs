@@ -1,9 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[cfg(test)]
-use crate::vm::WritStruct;
 use crate::vm::binding::{fn1, fn2, fn3};
+use crate::vm::sequence::{NativeResult, Sequence, SequenceAction};
 use crate::vm::{VM, Value};
 
 pub fn register(vm: &mut VM) {
@@ -119,31 +118,70 @@ pub fn register(vm: &mut VM) {
             Ok(result)
         }),
     );
+
+    vm.register_seq_fn(
+        "invoke",
+        Rc::new(|args: &[Value]| -> Result<NativeResult, String> {
+            let obj = args.first().ok_or("invoke: missing object")?.clone();
+            let method_name = match args.get(1) {
+                Some(Value::Str(s)) => s.to_string(),
+                Some(other) => {
+                    return Err(format!(
+                        "invoke: method name must be a string, got {}",
+                        other.type_name()
+                    ));
+                }
+                None => return Err("invoke: missing method name".into()),
+            };
+            let call_args: Vec<Value> = if args.len() > 2 {
+                args[2..].to_vec()
+            } else {
+                Vec::new()
+            };
+
+            // Native objects: dispatch directly via WritObject::call_method
+            if let Value::Object(ref obj_rc) = obj {
+                let result = obj_rc.borrow_mut().call_method(&method_name, &call_args)?;
+                return Ok(NativeResult::Value(result));
+            }
+
+            // Script-defined structs: build qualified name and call via sequence
+            if let Value::Struct(ref s) = obj {
+                let qualified = format!("{}::{}", s.layout.type_name, method_name);
+                let mut all_args = Vec::with_capacity(1 + call_args.len());
+                all_args.push(obj.clone());
+                all_args.extend(call_args);
+                return Ok(NativeResult::Sequence(Box::new(InvokeSequence {
+                    callee: Value::Str(Rc::from(qualified.as_str())),
+                    args: Some(all_args),
+                })));
+            }
+
+            Err(format!(
+                "invoke not supported on type '{}'",
+                obj.type_name()
+            ))
+        }),
+    );
 }
 
-/// Constructs a WritStruct from the given fields (used by reflection tests).
-#[cfg(test)]
-pub fn make_test_struct(
-    name: &str,
-    fields: Vec<(&str, Value)>,
-    public: Vec<&str>,
-    methods: Vec<&str>,
-) -> WritStruct {
-    use crate::vm::FieldLayout;
-    use std::collections::HashSet;
+/// One-shot sequence that calls a single function and returns its result.
+struct InvokeSequence {
+    callee: Value,
+    args: Option<Vec<Value>>,
+}
 
-    let field_names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
-    let field_values: Vec<Value> = fields.into_iter().map(|(_, v)| v).collect();
-    let public_fields: HashSet<String> = public.into_iter().map(|s| s.to_string()).collect();
-    let public_methods: HashSet<String> = methods.into_iter().map(|s| s.to_string()).collect();
-    let layout = Rc::new(FieldLayout::new(
-        name.to_string(),
-        field_names,
-        public_fields,
-        public_methods,
-    ));
-    WritStruct {
-        layout,
-        fields: field_values,
+impl Sequence for InvokeSequence {
+    fn poll(&mut self, last_result: Option<Value>) -> SequenceAction {
+        if let Some(result) = last_result {
+            return SequenceAction::Done(result);
+        }
+        match self.args.take() {
+            Some(args) => SequenceAction::Call {
+                callee: self.callee.clone(),
+                args,
+            },
+            None => SequenceAction::Error("invoke: internal error — no args".into()),
+        }
     }
 }

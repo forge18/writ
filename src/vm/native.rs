@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use super::binding::{IntoNativeHandler, IntoNativeMethodHandler};
+use super::sequence::NativeResult;
 use super::value::Value;
 
 /// Type alias for native function callables.
@@ -71,4 +72,30 @@ impl NativeMethod {
             body: handler.into_method_handler(),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sequence-capable native types (callback support)
+// ---------------------------------------------------------------------------
+
+/// Native function that may return a [`NativeResult::Sequence`] for deferred
+/// callback invocation.
+pub type NativeSeqFn = Rc<dyn Fn(&[Value]) -> Result<NativeResult, String>>;
+
+/// Native method that may return a [`NativeResult::Sequence`].
+pub type NativeSeqMethodFn = Rc<dyn Fn(&Value, &[Value]) -> Result<NativeResult, String>>;
+
+/// A host-registered native function that may invoke script callbacks via sequences.
+pub struct SeqNativeFunction {
+    pub module: Option<String>,
+    pub arity: Option<u8>,
+    pub body: NativeSeqFn,
+}
+
+/// A host-registered method that may invoke script callbacks via sequences.
+pub struct SeqNativeMethod {
+    pub name: String,
+    pub module: Option<String>,
+    pub arity: Option<u8>,
+    pub body: NativeSeqMethodFn,
 }

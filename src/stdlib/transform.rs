@@ -10,7 +10,7 @@ use super::vector::{
     extract_f32, extract_vec2, extract_vec3, value_to_vec2, value_to_vec3, vec2_value, vec3_value,
 };
 
-// ── Transform2D ─────────────────────────────────────────────────────
+// --- Transform2D ---
 
 #[derive(Debug, Clone)]
 pub struct WritTransform2D {
@@ -104,7 +104,7 @@ impl WritObject for WritTransform2D {
     }
 }
 
-// ── Transform3D ─────────────────────────────────────────────────────
+// --- Transform3D ---
 
 #[derive(Debug, Clone)]
 pub struct WritTransform3D {
@@ -195,7 +195,7 @@ impl WritObject for WritTransform3D {
     }
 }
 
-// ── Value constructors ──────────────────────────────────────────────
+// --- Value constructors ---
 
 fn transform2d_value(t: WritTransform2D) -> Value {
     Value::Object(Rc::new(RefCell::new(t)))
@@ -205,7 +205,7 @@ fn transform3d_value(t: WritTransform3D) -> Value {
     Value::Object(Rc::new(RefCell::new(t)))
 }
 
-// ── Registration ────────────────────────────────────────────────────
+// --- Registration ---
 
 pub fn register(vm: &mut VM) {
     vm.register_type("Transform2D", |args| {

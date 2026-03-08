@@ -69,7 +69,7 @@ impl Parser {
         self.parse_precedence(Precedence::Lowest)
     }
 
-    // ── Token navigation ──────────────────────────────────────────────
+    // --- Token navigation ---
 
     fn peek(&self) -> &TokenKind {
         self.tokens
@@ -141,7 +141,7 @@ impl Parser {
         }
     }
 
-    // ── Type expression parsing ───────────────────────────────────────
+    // --- Type expression parsing ---
 
     /// Parses a type expression: `float`, `Result<float>`, `Array<Weapon>`, `(float, float)`.
     fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
@@ -178,7 +178,7 @@ impl Parser {
         }
     }
 
-    // ── Shared parsing helpers ─────────────────────────────────────────
+    // --- Shared parsing helpers ---
 
     /// Peeks at a token `offset` positions ahead (0 = current).
     fn peek_ahead(&self, offset: usize) -> &TokenKind {
@@ -284,7 +284,7 @@ impl Parser {
         Ok(content)
     }
 
-    // ── Pratt parsing core ────────────────────────────────────────────
+    // --- Pratt parsing core ---
 
     fn parse_precedence(&mut self, min_prec: Precedence) -> Result<Expr, ParseError> {
         let mut left = self.parse_prefix()?;
@@ -306,7 +306,7 @@ impl Parser {
         Ok(left)
     }
 
-    // ── Prefix parsing (atoms + unary) ────────────────────────────────
+    // --- Prefix parsing (atoms + unary) ---
 
     fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
         self.skip_newlines();
@@ -457,7 +457,7 @@ impl Parser {
         }
     }
 
-    // ── Infix parsing (binary, ternary, postfix) ──────────────────────
+    // --- Infix parsing (binary, ternary, postfix) ---
 
     fn parse_infix(&mut self, left: Expr, prec: Precedence) -> Result<Expr, ParseError> {
         let op_token = self.advance();
@@ -670,7 +670,7 @@ impl Parser {
         }
     }
 
-    // ── String interpolation ──────────────────────────────────────────
+    // --- String interpolation ---
 
     fn parse_string_expression(&mut self) -> Result<Expr, ParseError> {
         let start_token = self.advance();
@@ -713,7 +713,7 @@ impl Parser {
             }
         }
 
-        // Plain string with no interpolation → Literal
+        // Plain string with no interpolation -> Literal
         if !has_interpolation {
             return match segments.len() {
                 0 => Ok(Expr {
@@ -744,7 +744,7 @@ impl Parser {
         })
     }
 
-    // ── Statement termination helpers ────────────────────────────────
+    // --- Statement termination helpers ---
 
     /// Returns true if the current token terminates a statement.
     fn at_stmt_terminator(&self) -> bool {
@@ -788,7 +788,7 @@ impl Parser {
         }
     }
 
-    // ── Block parsing ────────────────────────────────────────────────
+    // --- Block parsing ---
 
     /// Parses a block: `{ stmt* }`. Returns the inner statements.
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
@@ -803,7 +803,7 @@ impl Parser {
         Ok(stmts)
     }
 
-    // ── Statement parsing ────────────────────────────────────────────
+    // --- Statement parsing ---
 
     /// Parse a single statement.
     pub fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -952,7 +952,7 @@ impl Parser {
         Ok(stmts)
     }
 
-    // ── Variable declarations ────────────────────────────────────────
+    // --- Variable declarations ---
 
     /// Parses `let name [: type] = expr` or `let (x, y) = expr`.
     fn parse_let_decl(&mut self) -> Result<Stmt, ParseError> {
@@ -1047,7 +1047,7 @@ impl Parser {
         })
     }
 
-    // ── Return ───────────────────────────────────────────────────────
+    // --- Return ---
 
     /// Parses `return [expr]`.
     fn parse_return(&mut self) -> Result<Stmt, ParseError> {
@@ -1066,7 +1066,7 @@ impl Parser {
         })
     }
 
-    // ── If/else ──────────────────────────────────────────────────────
+    // --- If/else ---
 
     /// Parses `if condition { ... } [else if ... | else { ... }]`.
     fn parse_if_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -1099,7 +1099,7 @@ impl Parser {
         })
     }
 
-    // ── Loops ────────────────────────────────────────────────────────
+    // --- Loops ---
 
     /// Parses `while condition { body }`.
     fn parse_while_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -1131,7 +1131,7 @@ impl Parser {
         })
     }
 
-    // ── When statement ───────────────────────────────────────────────
+    // --- When statement ---
 
     /// Parses `when [subject] { arms }`.
     fn parse_when_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -1211,7 +1211,7 @@ impl Parser {
         Ok(WhenArm { pattern, body })
     }
 
-    // ── Declaration parsing (Phase 4) ──────────────────────────────────
+    // --- Declaration parsing (Phase 4) ---
 
     /// Parse a single top-level declaration.
     pub fn parse_decl(&mut self) -> Result<Decl, ParseError> {
@@ -1300,7 +1300,7 @@ impl Parser {
         Ok(decls)
     }
 
-    // ── Function declarations ─────────────────────────────────────────
+    // --- Function declarations ---
 
     /// Parses optional generic type parameters `<T, U>` after a declaration name.
     /// Returns an empty vec if no `<` follows.
@@ -1382,7 +1382,7 @@ impl Parser {
         })
     }
 
-    // ── Lambda / Tuple / Grouped disambiguation ──────────────────────
+    // --- Lambda / Tuple / Grouped disambiguation ---
 
     /// Parses `(` ... `)` which could be a lambda, tuple, or grouped expression.
     fn parse_paren_expr(&mut self) -> Result<Expr, ParseError> {
@@ -1390,7 +1390,7 @@ impl Parser {
         let span = open.span.clone();
         self.skip_newlines();
 
-        // Empty parens: `()` — check for lambda `() => ...`
+        // Empty parens: `()` -- check for lambda `() => ...`
         if self.peek() == &TokenKind::RightParen {
             self.advance(); // consume `)`
             if self.peek() == &TokenKind::FatArrow {
@@ -1435,7 +1435,7 @@ impl Parser {
                     });
                 }
             }
-            // Not a lambda — restore position
+            // Not a lambda -- restore position
             self.pos = saved_pos;
         }
 
@@ -1496,7 +1496,7 @@ impl Parser {
         })
     }
 
-    /// Parses a single array element — either `...expr` (spread) or `expr`.
+    /// Parses a single array element -- either `...expr` (spread) or `expr`.
     fn parse_array_element(&mut self) -> Result<ArrayElement, ParseError> {
         self.skip_newlines();
         if self.peek() == &TokenKind::DotDotDot {
@@ -1535,7 +1535,7 @@ impl Parser {
         })
     }
 
-    /// Parses a single dict element — either `...expr` (spread) or `key: value`.
+    /// Parses a single dict element -- either `...expr` (spread) or `key: value`.
     fn parse_dict_element(&mut self) -> Result<DictElement, ParseError> {
         self.skip_newlines();
         if self.peek() == &TokenKind::DotDotDot {
@@ -1612,7 +1612,7 @@ impl Parser {
         Some(params)
     }
 
-    // ── Class declarations ────────────────────────────────────────────
+    // --- Class declarations ---
 
     /// Parses `class Name[<T, U>] [extends Parent] [with Trait1, Trait2] [where T : Trait] { body }`.
     fn parse_class_decl(&mut self) -> Result<ClassDecl, ParseError> {
@@ -1693,7 +1693,7 @@ impl Parser {
     }
 
     /// Parses a struct declaration: `struct Name[<T>] { fields; methods }`.
-    /// Structs are value types — no `extends`, no `with`.
+    /// Structs are value types -- no `extends`, no `with`.
     fn parse_struct_decl(&mut self) -> Result<StructDecl, ParseError> {
         self.expect(&TokenKind::Struct)?; // consume `struct`
         let (name, _) = self.expect_identifier()?;
@@ -1702,13 +1702,12 @@ impl Parser {
         // Structs do not support extends or with
         if self.peek() == &TokenKind::Extends {
             return Err(self.error(
-                "structs cannot use 'extends' — structs do not support inheritance".to_string(),
+                "structs cannot use 'extends' -- structs do not support inheritance".to_string(),
             ));
         }
         if self.peek() == &TokenKind::With {
-            return Err(
-                self.error("structs cannot use 'with' — structs do not support traits".to_string())
-            );
+            return Err(self
+                .error("structs cannot use 'with' -- structs do not support traits".to_string()));
         }
 
         // Parse body: { fields and methods }
@@ -1802,7 +1801,7 @@ impl Parser {
         Ok(Setter { param_name, body })
     }
 
-    // ── Trait declarations ────────────────────────────────────────────
+    // --- Trait declarations ---
 
     /// Parses `trait Name { methods }`.
     fn parse_trait_decl(&mut self) -> Result<TraitDecl, ParseError> {
@@ -1855,7 +1854,7 @@ impl Parser {
         })
     }
 
-    // ── Enum declarations ─────────────────────────────────────────────
+    // --- Enum declarations ---
 
     /// Parses `enum Name { variants [; fields; methods] }`.
     fn parse_enum_decl(&mut self) -> Result<EnumDecl, ParseError> {
@@ -1926,7 +1925,7 @@ impl Parser {
         })
     }
 
-    // ── Import / Export ───────────────────────────────────────────────
+    // --- Import / Export ---
 
     /// Parses `import { A, B } from "path"` or `import * as alias from "path"`.
     fn parse_import_decl(&mut self) -> Result<Decl, ParseError> {
@@ -1981,7 +1980,7 @@ impl Parser {
         })
     }
 
-    // ── When statement ───────────────────────────────────────────────
+    // --- When statement ---
 
     /// Parses a `when` pattern.
     fn parse_when_pattern(&mut self) -> Result<WhenPattern, ParseError> {
@@ -2033,7 +2032,7 @@ impl Parser {
                         }
                         Ok(WhenPattern::MultipleValues(values))
                     }
-                    // Check if the expression is a Range — decompose into WhenPattern::Range
+                    // Check if the expression is a Range -- decompose into WhenPattern::Range
                     _ => match first.kind {
                         ExprKind::Range {
                             start,

@@ -118,7 +118,7 @@ impl WritObject for WritColor {
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// --- Helpers ---
 
 fn color_value(c: WritColor) -> Value {
     Value::Object(Rc::new(RefCell::new(c)))
@@ -197,7 +197,7 @@ fn parse_hex(s: &str) -> Result<WritColor, String> {
     }
 }
 
-// ── Registration ────────────────────────────────────────────────────
+// --- Registration ---
 
 pub fn register(vm: &mut VM) {
     // Color(r, g, b) or Color(r, g, b, a)

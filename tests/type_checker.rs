@@ -8,8 +8,6 @@
 use std::rc::Rc;
 use writ::{Value, Writ, WritError};
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 /// Assert the result is a type error whose message contains `expected`.
 #[track_caller]
 fn assert_type_error(result: &Result<Value, WritError>, expected: &str) {
@@ -31,8 +29,6 @@ fn assert_type_error(result: &Result<Value, WritError>, expected: &str) {
 fn w() -> Writ {
     Writ::new()
 }
-
-// ── 1A: Happy path ────────────────────────────────────────────────────────────
 
 #[test]
 fn test_typed_variable_declaration() {
@@ -210,8 +206,6 @@ fn test_typed_fibonacci() {
     assert_eq!(result.unwrap(), Value::I32(55));
 }
 
-// ── 1B: Type error detection ──────────────────────────────────────────────────
-
 #[test]
 fn test_error_undefined_variable() {
     let result = w().run("return undefined_variable");
@@ -221,7 +215,7 @@ fn test_error_undefined_variable() {
 #[test]
 fn test_error_undefined_function() {
     let result = w().run("return nonexistent_function(42)");
-    // Type checker catches undefined function, or runtime does — either is an error
+    // Type checker catches undefined function, or runtime does -- either is an error
     assert!(result.is_err());
 }
 
@@ -284,8 +278,6 @@ fn test_error_undefined_field() {
     assert!(result.is_err());
 }
 
-// ── 1C: Generic type instantiation ───────────────────────────────────────────
-
 #[test]
 fn test_generic_struct_instantiation_typed() {
     let result = w().run(
@@ -295,7 +287,7 @@ fn test_generic_struct_instantiation_typed() {
     );
     // Generic instantiation should succeed or produce a clear error
     // The test exercises the generic instantiation code path either way
-    let _ = result; // accept either outcome — coverage is the goal
+    let _ = result; // accept either outcome -- coverage is the goal
 }
 
 #[test]
@@ -317,8 +309,6 @@ fn test_generic_struct_two_type_params() {
     );
     let _ = result;
 }
-
-// ── 1D: Suggestions (exercises suggestions.rs uncovered paths) ───────────────
 
 #[test]
 fn test_suggestion_for_typo_in_variable() {
@@ -351,8 +341,6 @@ fn test_suggestion_for_typo_in_method() {
     );
     assert!(result.is_err());
 }
-
-// ── 1E: Struct/class features with type checking ─────────────────────────────
 
 #[test]
 fn test_typed_struct_equality() {
@@ -449,8 +437,6 @@ fn test_typed_recursion() {
     assert_eq!(result.unwrap(), Value::I32(55));
 }
 
-// ── 1F: Type-checked program format_with_source ───────────────────────────────
-
 #[test]
 fn test_type_error_format_with_source() {
     // Exercises TypeError::format_with_source
@@ -470,8 +456,6 @@ fn test_type_error_display() {
     }
 }
 
-// ── 1A: check_program_collecting / cascading error suppression ────────────────
-
 #[test]
 fn test_check_program_collecting_no_errors() {
     let result = w().run("let x: int = 1\nreturn x");
@@ -483,8 +467,6 @@ fn test_undefined_var_suppresses_cascade() {
     let result = w().run("return foo + foo");
     assert!(result.is_err());
 }
-
-// ── 1B: Ternary expression ────────────────────────────────────────────────────
 
 #[test]
 fn test_typed_ternary_expression() {
@@ -504,8 +486,6 @@ fn test_typed_ternary_error_non_bool_condition() {
     assert!(result.is_err());
 }
 
-// ── 1C: Cast expression ───────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_cast_int_to_float() {
     let result = w().run("let x: int = 5\nreturn x as float");
@@ -518,8 +498,6 @@ fn test_typed_cast_error_incompatible() {
     assert!(result.is_err());
 }
 
-// ── 1D: String interpolation ──────────────────────────────────────────────────
-
 #[test]
 fn test_typed_string_interpolation() {
     let result = w().run("let name: string = \"World\"\nreturn \"Hello $name\"");
@@ -531,8 +509,6 @@ fn test_typed_string_interpolation_expr() {
     let result = w().run("let x: int = 6\nlet y: int = 7\nreturn \"Answer: ${x * y}\"");
     assert!(result.is_ok());
 }
-
-// ── 1E: Lambda expression ─────────────────────────────────────────────────────
 
 #[test]
 fn test_typed_lambda_expression() {
@@ -554,8 +530,6 @@ fn test_typed_lambda_block_body() {
     assert_eq!(result.unwrap(), Value::I32(10));
 }
 
-// ── 1F: Tuple destructuring ───────────────────────────────────────────────────
-
 #[test]
 fn test_typed_tuple_destructure() {
     let result = w().run("let (a, b) = (1, 2)\nreturn a + b");
@@ -573,8 +547,6 @@ fn test_typed_tuple_destructure_non_tuple_error() {
     let result = w().run("let (a, b) = 42\nreturn a");
     assert!(result.is_err());
 }
-
-// ── 1G: Array spread literal ──────────────────────────────────────────────────
 
 #[test]
 fn test_typed_array_spread() {
@@ -602,8 +574,6 @@ fn test_typed_array_element_type_mismatch_error() {
     assert!(result.is_err());
 }
 
-// ── 1H: Dict literal typed ────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_dict_literal() {
     let result = w().run(
@@ -627,8 +597,6 @@ fn test_typed_dict_value_type_mismatch_error() {
     let result = w().run("let d = {\"a\": 1, \"b\": \"two\"}");
     assert!(result.is_err());
 }
-
-// ── 1I: Trait with default body ───────────────────────────────────────────────
 
 #[test]
 fn test_typed_trait_with_default_body() {
@@ -675,8 +643,6 @@ fn test_typed_trait_signature_mismatch_error() {
     assert!(result.is_err());
 }
 
-// ── 1J: Enum exhaustiveness ───────────────────────────────────────────────────
-
 #[test]
 fn test_typed_when_enum_exhaustive() {
     // Type checker accepts exhaustive when on enum (all variants covered)
@@ -711,8 +677,6 @@ fn test_typed_when_enum_with_else_ok() {
     );
     assert_eq!(result.unwrap(), Value::I32(1));
 }
-
-// ── 1K: Result when pattern ───────────────────────────────────────────────────
 
 #[test]
 fn test_typed_when_result_success_arm() {
@@ -753,11 +717,9 @@ fn test_typed_when_result_non_exhaustive_error() {
     assert!(result.is_err());
 }
 
-// ── 1L: ? error propagation ───────────────────────────────────────────────────
-
 #[test]
 fn test_typed_error_propagate_ok() {
-    // Type checker validates Result<T> function signatures — verify two nested Result funcs accepted
+    // Type checker validates Result<T> function signatures -- verify two nested Result funcs accepted
     let result = w().run(
         "func inner() -> Result<int> { return Success(42) }\n\
          func outer() -> Result<int> { return Success(1) }\n\
@@ -782,8 +744,6 @@ fn test_typed_error_propagate_outside_result_fn_error() {
     assert!(result.is_err());
 }
 
-// ── 1M: Success/Error constructors ───────────────────────────────────────────
-
 #[test]
 fn test_typed_success_constructor_ok() {
     // Type checker accepts Success(val) inside a Result<int>-returning function
@@ -805,8 +765,6 @@ fn test_typed_success_wrong_arg_count_error() {
     let result = w().run("return Success(1, 2)");
     assert!(result.is_err());
 }
-
-// ── 1N: Named constructor arguments ──────────────────────────────────────────
 
 #[test]
 fn test_typed_named_constructor_args_class() {
@@ -847,8 +805,6 @@ fn test_typed_named_constructor_missing_required_field_error() {
     assert!(result.is_err());
 }
 
-// ── 1O: where clause ─────────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_where_clause_basic() {
     // The type checker validates where clause trait names; unknown trait produces error
@@ -863,7 +819,7 @@ fn test_typed_where_clause_basic() {
 
 #[test]
 fn test_typed_where_clause_class() {
-    // Generic class with where clause — valid trait name accepted by type checker
+    // Generic class with where clause -- valid trait name accepted by type checker
     let result = w().run(
         "trait Comparable { func compare() -> int }\n\
          class Box<T> where T : Comparable {\n\
@@ -874,8 +830,6 @@ fn test_typed_where_clause_class() {
     assert_eq!(result.unwrap(), Value::I32(42));
 }
 
-// ── 1P: SafeAccess ?. error ───────────────────────────────────────────────────
-
 #[test]
 fn test_typed_safe_access_non_optional_error() {
     let result = w().run(
@@ -885,8 +839,6 @@ fn test_typed_safe_access_non_optional_error() {
     );
     assert!(result.is_err());
 }
-
-// ── 1Q: Unary operator errors ─────────────────────────────────────────────────
 
 #[test]
 fn test_typed_unary_negate_non_numeric_error() {
@@ -905,8 +857,6 @@ fn test_typed_unary_negate_int_ok() {
     let result = w().run("return -5");
     assert_eq!(result.unwrap(), Value::I32(-5));
 }
-
-// ── 1R: Binary arithmetic errors ─────────────────────────────────────────────
 
 #[test]
 fn test_typed_arithmetic_non_numeric_lhs_error() {
@@ -943,8 +893,6 @@ fn test_typed_logical_or_ok() {
     let result = w().run("return false || true");
     assert_eq!(result.unwrap(), Value::Bool(true));
 }
-
-// ── 1S: Compound assignment ───────────────────────────────────────────────────
 
 #[test]
 fn test_typed_compound_add_assign() {
@@ -987,8 +935,6 @@ fn test_typed_index_assignment() {
     assert_eq!(result.unwrap(), Value::I32(99));
 }
 
-// ── 1T: Return type errors ────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_return_empty_from_non_void_error() {
     let result = w().run("func f() -> int { return }\nreturn f()");
@@ -1012,15 +958,11 @@ fn test_typed_missing_return_on_all_paths_error() {
     assert!(result.is_err());
 }
 
-// ── 1U: start statement ───────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_start_expression() {
     let result = w().run("func worker() { }\nstart worker()\nreturn 1");
     assert_eq!(result.unwrap(), Value::I32(1));
 }
-
-// ── 1V: Null coalesce ─────────────────────────────────────────────────────────
 
 #[test]
 fn test_typed_null_coalesce_non_optional_error() {
@@ -1031,7 +973,7 @@ fn test_typed_null_coalesce_non_optional_error() {
 #[test]
 fn test_typed_null_coalesce_with_result_ok() {
     // Type checker accepts ?? on a Result<T> return value (Result is nullable-like)
-    // Just declare the function and return a known value — type checker validates f() return type
+    // Just declare the function and return a known value -- type checker validates f() return type
     let result = w().run(
         "func f() -> Result<int> { return Success(42) }\n\
          return 1",
@@ -1039,11 +981,9 @@ fn test_typed_null_coalesce_with_result_ok() {
     assert_eq!(result.unwrap(), Value::I32(1));
 }
 
-// ── 1W: Class field defaults ──────────────────────────────────────────────────
-
 #[test]
 fn test_typed_class_with_field_default_ok() {
-    // Type checker accepts field defaults — verify it type-checks the default expression
+    // Type checker accepts field defaults -- verify it type-checks the default expression
     let result = w().run(
         "class Config {\n\
              public timeout: int = 30\n\
@@ -1065,15 +1005,11 @@ fn test_typed_class_field_default_type_mismatch_error() {
     assert!(result.is_err());
 }
 
-// ── 1X: Unknown parent class ──────────────────────────────────────────────────
-
 #[test]
 fn test_typed_unknown_parent_class_error() {
     let result = w().run("class Dog extends NonExistentAnimal { }\nreturn 1");
     assert!(result.is_err());
 }
-
-// ── 1Y: Private member access error ──────────────────────────────────────────
 
 #[test]
 fn test_typed_private_field_access_error() {
@@ -1086,8 +1022,6 @@ fn test_typed_private_field_access_error() {
     );
     assert!(result.is_err());
 }
-
-// ── 1Z: when with int subject (generic fallback) ──────────────────────────────
 
 #[test]
 fn test_typed_when_int_subject_ok() {
@@ -1102,8 +1036,6 @@ fn test_typed_when_int_subject_ok() {
     );
     assert!(result.is_ok());
 }
-
-// ── 1AA: Array/dict method resolution ────────────────────────────────────────
 
 #[test]
 fn test_typed_array_push_method() {
@@ -1142,8 +1074,6 @@ fn test_typed_dict_unknown_method_error() {
     assert!(result.is_err());
 }
 
-// ── 1BB: Range expressions ────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_range_string_concat_ok() {
     let result = w().run("return \"hello\" .. \" world\"");
@@ -1162,8 +1092,6 @@ fn test_typed_range_type_mismatch_error() {
     assert!(result.is_err());
 }
 
-// ── 1CC: Enum with method ─────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_enum_with_method_ok() {
     // Enum declaration is type-checked; methods on enums aren't supported in the parser,
@@ -1174,8 +1102,6 @@ fn test_typed_enum_with_method_ok() {
     );
     assert_eq!(result.unwrap(), Value::I32(1));
 }
-
-// ── 1DD: Struct method typed ──────────────────────────────────────────────────
 
 #[test]
 fn test_typed_struct_method_typed() {
@@ -1193,8 +1119,6 @@ fn test_typed_struct_method_typed() {
 // ══════════════════════════════════════════════════════════════════════
 // Phase 2: Additional type checker coverage tests
 // ══════════════════════════════════════════════════════════════════════
-
-// ── 2A: Binary op errors ──────────────────────────────────────────────
 
 #[test]
 fn test_arith_left_non_numeric() {
@@ -1235,8 +1159,6 @@ fn test_logical_right_non_bool() {
     assert_type_error(&w().run("return true && 1"), "right operand of logical");
 }
 
-// ── 2B: Assignment errors ──────────────────────────────────────────────
-
 #[test]
 fn test_assign_to_let() {
     assert_type_error(&w().run("let x: int = 1\nx = 2\nreturn x"), "immutable");
@@ -1263,8 +1185,6 @@ fn test_compound_assign_type_mismatch() {
     );
 }
 
-// ── 2C: Unary op errors ──────────────────────────────────────────────
-
 #[test]
 fn test_negate_non_numeric() {
     assert_type_error(&w().run("return -true"), "cannot negate non-numeric");
@@ -1274,8 +1194,6 @@ fn test_negate_non_numeric() {
 fn test_not_non_bool() {
     assert_type_error(&w().run("return !42"), "cannot apply '!'");
 }
-
-// ── 2D: Return type errors ────────────────────────────────────────────
 
 #[test]
 fn test_return_value_in_void_function() {
@@ -1301,8 +1219,6 @@ fn test_return_nothing_from_non_void() {
     );
 }
 
-// ── 2E: Ternary errors ───────────────────────────────────────────────
-
 #[test]
 fn test_ternary_non_bool_condition() {
     assert_type_error(
@@ -1324,8 +1240,6 @@ fn test_ternary_ok() {
     assert_eq!(w().run("return true ? 1 : 2").unwrap(), Value::I32(1));
     assert_eq!(w().run("return false ? 1 : 2").unwrap(), Value::I32(2));
 }
-
-// ── 2F: Struct constructor validation ─────────────────────────────────
 
 #[test]
 fn test_struct_constructor_too_few_args() {
@@ -1351,11 +1265,9 @@ fn test_struct_constructor_wrong_type() {
     );
 }
 
-// ── 2G: When exhaustiveness ──────────────────────────────────────────
-
 #[test]
 fn test_when_expression_ok() {
-    // when with int values — doesn't need enum runtime
+    // when with int values -- doesn't need enum runtime
     let result = w().run(
         "let x = 1\n\
          let r = when x {\n\
@@ -1367,8 +1279,6 @@ fn test_when_expression_ok() {
     );
     assert_eq!(result.unwrap(), Value::I32(10));
 }
-
-// ── 2H: Trait validation ─────────────────────────────────────────────
 
 #[test]
 fn test_trait_missing_method() {
@@ -1397,8 +1307,6 @@ fn test_trait_unknown_name() {
     );
 }
 
-// ── 2J: Null coalesce ────────────────────────────────────────────────
-
 #[test]
 fn test_null_coalesce_on_non_optional() {
     assert_type_error(
@@ -1407,21 +1315,15 @@ fn test_null_coalesce_on_non_optional() {
     );
 }
 
-// ── 2K: Let destructure errors ───────────────────────────────────────
-
 #[test]
 fn test_destructure_non_tuple() {
     assert_type_error(&w().run("let (a, b) = 42"), "cannot destructure non-tuple");
 }
 
-// ── 2L: Array literal errors ─────────────────────────────────────────
-
 #[test]
 fn test_array_mismatched_element_types() {
     assert_type_error(&w().run(r#"let a: Array<int> = [1, "two"]"#), "mismatch");
 }
-
-// ── Additional typed happy paths ─────────────────────────────────────
 
 #[test]
 fn test_ternary_with_typed_vars() {
@@ -1602,10 +1504,6 @@ fn test_compound_assign_ok() {
     );
 }
 
-// ── Phase 4B: Deep type checker coverage ─────────────────────────────────────
-
-// ── Super error paths ────────────────────────────────────────────────────────
-
 #[test]
 fn test_super_outside_class_error() {
     assert_type_error(
@@ -1674,8 +1572,6 @@ fn test_super_happy_path() {
     assert!(result.is_ok(), "super happy path failed: {:?}", result);
 }
 
-// ── Error() constructor validation ───────────────────────────────────────────
-
 #[test]
 fn test_error_constructor_zero_args() {
     assert_type_error(
@@ -1709,8 +1605,6 @@ fn test_success_constructor_zero_args() {
     );
 }
 
-// ── Null coalesce type mismatch ──────────────────────────────────────────────
-
 #[test]
 fn test_null_coalesce_optional_type_mismatch() {
     // Null coalesce on non-optional type should error
@@ -1726,8 +1620,6 @@ fn test_null_coalesce_optional_type_mismatch() {
         "requires",
     );
 }
-
-// ── When with Result<T> exhaustiveness ───────────────────────────────────────
 
 #[test]
 fn test_when_result_exhaustive_both_arms() {
@@ -1803,8 +1695,6 @@ fn test_when_result_with_else_ok() {
     );
 }
 
-// ── Trait default method body errors ─────────────────────────────────────────
-
 #[test]
 fn test_trait_default_body_wrong_return_type() {
     assert_type_error(
@@ -1833,8 +1723,6 @@ fn test_trait_default_body_missing_return() {
     );
 }
 
-// ── Suggestions coverage ─────────────────────────────────────────────────────
-
 #[test]
 fn test_suggest_variable_typo() {
     let result = w().run("let hello: int = 1\nreturn helo");
@@ -1861,8 +1749,6 @@ fn test_suggest_struct_field_typo() {
     assert!(result.is_err(), "struct field typo should error");
 }
 
-// ── Lambda type checking ─────────────────────────────────────────────────────
-
 #[test]
 fn test_lambda_expr_body_typed() {
     let result = w().run(
@@ -1885,18 +1771,14 @@ fn test_lambda_block_body_typed() {
     assert!(result.is_ok(), "lambda block body failed: {:?}", result);
 }
 
-// ── Non-callable type ────────────────────────────────────────────────────────
-
 #[test]
 fn test_non_callable_type_error() {
     assert_type_error(&w().run("let x: int = 42\nreturn x()"), "not callable");
 }
 
-// ── When with enum: exhaustive happy path ────────────────────────────────────
-
 #[test]
 fn test_when_enum_all_variants_covered() {
-    // Exhaustive enum when — test the type check acceptance, not runtime execution
+    // Exhaustive enum when -- test the type check acceptance, not runtime execution
     // Enum when at runtime may not fully work since enum values are strings
     let result = w().run(
         "enum Color { Red, Green, Blue }\n\
@@ -1906,8 +1788,6 @@ fn test_when_enum_all_variants_covered() {
     assert!(result.is_ok(), "exhaustive enum when failed: {:?}", result);
 }
 
-// ── Function wrong return type ───────────────────────────────────────────────
-
 #[test]
 fn test_function_returns_wrong_type_detailed() {
     assert_type_error(
@@ -1915,8 +1795,6 @@ fn test_function_returns_wrong_type_detailed() {
         "mismatch",
     );
 }
-
-// ── if/while bool condition ──────────────────────────────────────────────────
 
 #[test]
 fn test_if_non_bool_condition_detailed() {
@@ -1927,8 +1805,6 @@ fn test_if_non_bool_condition_detailed() {
 fn test_while_non_bool_condition_detailed() {
     assert_type_error(&w().run("while \"yes\" { break }\nreturn 0"), "bool");
 }
-
-// ── Class constructor validation ─────────────────────────────────────────────
 
 #[test]
 fn test_class_constructor_wrong_field_type() {
@@ -1958,8 +1834,6 @@ fn test_class_constructor_too_many_args() {
     );
 }
 
-// ── Trait with class implementation ──────────────────────────────────────────
-
 #[test]
 fn test_class_implements_trait_ok() {
     let result = w().run(
@@ -1976,8 +1850,6 @@ fn test_class_implements_trait_ok() {
     assert!(result.is_ok(), "trait implementation failed: {:?}", result);
 }
 
-// ── Tuple destructure happy path ─────────────────────────────────────────────
-
 #[test]
 fn test_tuple_destructure_from_function() {
     let result = w().run(
@@ -1988,11 +1860,9 @@ fn test_tuple_destructure_from_function() {
     assert_eq!(result.unwrap(), Value::I32(3));
 }
 
-// ── Error propagate (?) paths ────────────────────────────────────────────────
-
 #[test]
 fn test_error_propagate_happy_path() {
-    // ? operator type-checks but may not compile — verify it doesn't produce a type error
+    // ? operator type-checks but may not compile -- verify it doesn't produce a type error
     let result = w().run(
         "func inner() -> Result<int> { return Success(42) }\n\
          func outer() -> Result<int> {\n\
@@ -2010,8 +1880,6 @@ fn test_error_propagate_happy_path() {
     );
 }
 
-// ── String concat type ──────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_string_concat() {
     let result = w().run(
@@ -2022,11 +1890,9 @@ fn test_typed_string_concat() {
     assert_eq!(result.unwrap(), Value::Str(Rc::from("hello world")));
 }
 
-// ── For range typed ──────────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_for_range() {
-    // for-in is not supported by the type checker yet — verify it produces the expected error
+    // for-in is not supported by the type checker yet -- verify it produces the expected error
     let result = w().run(
         "var sum: int = 0\n\
          for i in 1..=5 {\n\
@@ -2039,8 +1905,6 @@ fn test_typed_for_range() {
     assert!(msg.contains("not supported"), "got: {}", msg);
 }
 
-// ── Typed array operations ───────────────────────────────────────────────────
-
 #[test]
 fn test_typed_array_push_and_length() {
     // Array type annotation uses Array<int> syntax
@@ -2052,8 +1916,6 @@ fn test_typed_array_push_and_length() {
     assert_eq!(result.unwrap(), Value::I32(4));
 }
 
-// ── Typed dict operations ────────────────────────────────────────────────────
-
 #[test]
 fn test_typed_dict_bracket_access() {
     // Dict literal infers types without explicit annotation
@@ -2062,4 +1924,685 @@ fn test_typed_dict_bracket_access() {
          return d[\"x\"]",
     );
     assert_eq!(result.unwrap(), Value::I32(42));
+}
+
+// ── Group 1: Typed equality/comparison ops ──────────────────────────
+// These emit typed opcodes (EqInt, NeInt, EqFloat, NeFloat) which bypass
+// the generic comparison path. Must use function params (not literals,
+// which get constant-folded).
+
+#[test]
+fn test_typed_eq_int_op() {
+    let result = w().run(
+        "func eq(a: int, b: int) -> bool { return a == b }\n\
+         return eq(5, 5)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_ne_int_op() {
+    let result = w().run(
+        "func ne(a: int, b: int) -> bool { return a != b }\n\
+         return ne(5, 3)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_eq_float_op() {
+    let result = w().run(
+        "func eq(a: float, b: float) -> bool { return a == b }\n\
+         return eq(3.14, 3.14)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_ne_float_op() {
+    let result = w().run(
+        "func ne(a: float, b: float) -> bool { return a != b }\n\
+         return ne(3.14, 2.71)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_gt_int_op() {
+    let result = w().run(
+        "func gt(a: int, b: int) -> bool { return a > b }\n\
+         return gt(10, 3)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_ge_int_op() {
+    let result = w().run(
+        "func ge(a: int, b: int) -> bool { return a >= b }\n\
+         return ge(5, 5)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_gt_float_op() {
+    let result = w().run(
+        "func gt(a: float, b: float) -> bool { return a > b }\n\
+         return gt(3.5, 1.5)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_typed_ge_float_op() {
+    let result = w().run(
+        "func ge(a: float, b: float) -> bool { return a >= b }\n\
+         return ge(2.5, 2.5)",
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+// ── Group 4: Named constructor arguments ────────────────────────────
+
+#[test]
+fn test_typed_class_named_constructor() {
+    let result = w().run(
+        "class Pt {\n\
+           public x: int\n\
+           public y: int\n\
+         }\n\
+         let p = Pt(x: 3, y: 7)\n\
+         return p.x + p.y",
+    );
+    assert_eq!(result.unwrap(), Value::I32(10));
+}
+
+#[test]
+fn test_typed_struct_named_constructor() {
+    let result = w().run(
+        "struct Vec2 {\n\
+           public x: int\n\
+           public y: int\n\
+         }\n\
+         let v = Vec2(x: 10, y: 20)\n\
+         return v.x + v.y",
+    );
+    assert_eq!(result.unwrap(), Value::I32(30));
+}
+
+#[test]
+fn test_typed_named_constructor_class_unknown_field_error() {
+    assert_type_error(
+        &w().run(
+            "class Pt {\n\
+               public x: int\n\
+               public y: int\n\
+             }\n\
+             let p = Pt(x: 1, z: 2)\n\
+             return 0",
+        ),
+        "no field",
+    );
+}
+
+#[test]
+fn test_typed_named_constructor_missing_required_error() {
+    assert_type_error(
+        &w().run(
+            "class Pt {\n\
+               public x: int\n\
+               public y: int\n\
+             }\n\
+             let p = Pt(x: 1)\n\
+             return 0",
+        ),
+        "missing required field",
+    );
+}
+
+#[test]
+fn test_typed_named_constructor_mixed_error() {
+    assert_type_error(
+        &w().run(
+            "class Pt {\n\
+               public x: int\n\
+               public y: int\n\
+             }\n\
+             let p = Pt(1, y: 2)\n\
+             return 0",
+        ),
+        "cannot mix",
+    );
+}
+
+#[test]
+fn test_typed_named_constructor_type_mismatch_error() {
+    assert_type_error(
+        &w().run(
+            "class Pt {\n\
+               public x: int\n\
+               public y: int\n\
+             }\n\
+             let p = Pt(x: \"hello\", y: 2)\n\
+             return 0",
+        ),
+        "type mismatch",
+    );
+}
+
+// ── Group 5: Array/Dict spread type checking ────────────────────────
+
+#[test]
+fn test_typed_array_spread_literal() {
+    // Spread in array literal — type checker validates the spread element type
+    let result = w().run(
+        "let a: Array<int> = [1, 2]\n\
+         let b = [...a, 3]\n\
+         return b[0]",
+    );
+    // The spread is accepted by the type checker (Array<int> spread into Array<int>)
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_typed_array_spread_int_non_array_error() {
+    assert_type_error(
+        &w().run(
+            "let x: int = 5\n\
+             let b = [...x]\n\
+             return 0",
+        ),
+        "spread requires Array",
+    );
+}
+
+#[test]
+fn test_typed_dict_key_type_mismatch_error() {
+    assert_type_error(
+        &w().run(
+            "let d = {\"a\": 1, 2: 3}\n\
+             return 0",
+        ),
+        "key type mismatch",
+    );
+}
+
+#[test]
+fn test_typed_dict_value_type_mismatch_in_literal_error() {
+    assert_type_error(
+        &w().run(
+            "let d = {\"a\": 1, \"b\": \"x\"}\n\
+             return 0",
+        ),
+        "value type mismatch",
+    );
+}
+
+// ── Group 6: Trait default body, class setter, field defaults ───────
+
+#[test]
+fn test_typed_trait_default_body() {
+    // Trait with default body — type checker validates the body.
+    // Type checking succeeds even if runtime doesn't dispatch default methods yet.
+    let result = w().run(
+        "trait Doubler {\n\
+           func double(n: int) -> int {\n\
+             return n * 2\n\
+           }\n\
+         }\n\
+         class Calc with Doubler {\n\
+           public func double(n: int) -> int {\n\
+             return n * 2\n\
+           }\n\
+         }\n\
+         let c = Calc()\n\
+         return c.double(5)",
+    );
+    assert_eq!(result.unwrap(), Value::I32(10));
+}
+
+#[test]
+fn test_typed_trait_default_body_wrong_return_error() {
+    assert_type_error(
+        &w().run(
+            "trait BadTrait {\n\
+               func compute() -> int {\n\
+                 return \"not an int\"\n\
+               }\n\
+             }\n\
+             return 0",
+        ),
+        "mismatch",
+    );
+}
+
+#[test]
+fn test_typed_class_field_default_value() {
+    // Class with default field value — type checker validates the default expression type
+    let result = w().run(
+        "class Config {\n\
+           public retries: int = 3\n\
+           public name: string\n\
+         }\n\
+         let c = Config(3, \"test\")\n\
+         return c.retries",
+    );
+    assert_eq!(result.unwrap(), Value::I32(3));
+}
+
+#[test]
+fn test_typed_struct_field_default_value() {
+    // Struct with default field value — type checker validates the default expression type
+    let result = w().run(
+        "struct Opts {\n\
+           public verbose: bool = false\n\
+           public count: int\n\
+         }\n\
+         let o = Opts(false, 5)\n\
+         return o.count",
+    );
+    assert_eq!(result.unwrap(), Value::I32(5));
+}
+
+#[test]
+fn test_typed_enum_with_method_typechecks() {
+    // Enum with method — type checker validates the method body.
+    // We just verify type checking accepts the declaration.
+    let result = w().run(
+        "enum Dir {\n\
+           Up, Down\n\
+           func label() -> int {\n\
+             return 1\n\
+           }\n\
+         }\n\
+         return 42",
+    );
+    assert_eq!(result.unwrap(), Value::I32(42));
+}
+
+// ── Group 10: Additional type checker coverage ──────────────────────
+
+#[test]
+fn test_suggest_field_typo() {
+    let result = w().run(
+        "struct Point {\n\
+           public x: int\n\
+           public y: int\n\
+         }\n\
+         let p = Point(1, 2)\n\
+         return p.xx",
+    );
+    // Should error, and ideally suggest 'x'
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_suggest_method_typo() {
+    let result = w().run(
+        "let a = [1, 2, 3]\n\
+         return a.lenght()",
+    );
+    // Should error — misspelled "length" / "len"
+    assert!(result.is_err());
+}
+
+// ─── Typed arithmetic ops (covers DivInt, DivFloat, AddIntImm, SubIntImm in VM) ───
+
+#[test]
+fn test_typed_div_int() {
+    let result = w()
+        .run(
+            "func div(a: int, b: int) -> int { return a / b }\n\
+             return div(10, 3)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_typed_div_float() {
+    let result = w()
+        .run(
+            "func div(a: float, b: float) -> float { return a / b }\n\
+             return div(10.0, 4.0)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(2.5));
+}
+
+#[test]
+fn test_typed_add_int_function() {
+    let result = w()
+        .run(
+            "func add(a: int, b: int) -> int { return a + b }\n\
+             return add(100, 200)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(300));
+}
+
+#[test]
+fn test_typed_sub_int_function() {
+    let result = w()
+        .run(
+            "func sub(a: int, b: int) -> int { return a - b }\n\
+             return sub(100, 30)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(70));
+}
+
+#[test]
+fn test_typed_mul_int_function() {
+    let result = w()
+        .run(
+            "func mul(a: int, b: int) -> int { return a * b }\n\
+             return mul(7, 8)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(56));
+}
+
+#[test]
+fn test_typed_add_float_function() {
+    let result = w()
+        .run(
+            "func add(a: float, b: float) -> float { return a + b }\n\
+             return add(1.5, 2.5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(4.0));
+}
+
+#[test]
+fn test_typed_sub_float_function() {
+    let result = w()
+        .run(
+            "func sub(a: float, b: float) -> float { return a - b }\n\
+             return sub(10.0, 3.5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(6.5));
+}
+
+#[test]
+fn test_typed_mul_float_function() {
+    let result = w()
+        .run(
+            "func mul(a: float, b: float) -> float { return a * b }\n\
+             return mul(3.0, 4.0)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(12.0));
+}
+
+// ─── Typed const ───
+
+#[test]
+fn test_typed_const_int() {
+    let result = w().run("const PI_APPROX = 3\nreturn PI_APPROX").unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+// ─── Typed if/while with boolean conditions ───
+
+#[test]
+fn test_typed_if_with_comparison() {
+    let result = w()
+        .run(
+            "func max(a: int, b: int) -> int {\n\
+               if a > b {\n\
+                 return a\n\
+               }\n\
+               return b\n\
+             }\n\
+             return max(3, 7)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(7));
+}
+
+#[test]
+fn test_typed_while_countdown() {
+    let result = w()
+        .run(
+            "func countdown(n: int) -> int {\n\
+               var count = n\n\
+               while count > 0 {\n\
+                 count = count - 1\n\
+               }\n\
+               return count\n\
+             }\n\
+             return countdown(10)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(0));
+}
+
+// ─── Type checker: complex function signatures ───
+
+#[test]
+fn test_typed_function_returning_array() {
+    let result = w()
+        .run(
+            "func make_arr() -> Array<int> {\n\
+               return [1, 2, 3]\n\
+             }\n\
+             let a = make_arr()\n\
+             return a.len()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_typed_function_returning_string() {
+    let result = w()
+        .run(
+            "func greet(name: string) -> string {\n\
+               return \"Hello, \" .. name\n\
+             }\n\
+             return greet(\"world\")",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("Hello, world")));
+}
+
+#[test]
+fn test_typed_function_returning_bool() {
+    let result = w()
+        .run(
+            "func is_positive(n: int) -> bool {\n\
+               return n > 0\n\
+             }\n\
+             return is_positive(5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+// ─── Typed class with methods ───
+
+#[test]
+fn test_typed_class_method_call() {
+    let result = w()
+        .run(
+            "class Counter {\n\
+               public value: int\n\
+               public func increment() -> int {\n\
+                 self.value = self.value + 1\n\
+                 return self.value\n\
+               }\n\
+             }\n\
+             let c = Counter(0)\n\
+             c.increment()\n\
+             c.increment()\n\
+             return c.increment()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+// ─── Typed while with break/continue ───
+
+#[test]
+fn test_typed_break_in_while() {
+    let result = w()
+        .run(
+            "func find_first_even(limit: int) -> int {\n\
+               var i = 1\n\
+               while i <= limit {\n\
+                 if i % 2 == 0 {\n\
+                   return i\n\
+                 }\n\
+                 i = i + 1\n\
+               }\n\
+               return -1\n\
+             }\n\
+             return find_first_even(10)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+// ─── Typed array operations ───
+
+#[test]
+fn test_typed_array_index_access() {
+    let result = w()
+        .run(
+            "func get_second(arr: Array<int>) -> int {\n\
+               return arr[1]\n\
+             }\n\
+             return get_second([10, 20, 30])",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(20));
+}
+
+// ─── Typed string operations ───
+
+#[test]
+fn test_typed_string_concat_join() {
+    let result = w()
+        .run(
+            "func join(a: string, b: string) -> string {\n\
+               return a .. \" \" .. b\n\
+             }\n\
+             return join(\"foo\", \"bar\")",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("foo bar")));
+}
+
+// ─── Typed nested function calls ───
+
+#[test]
+fn test_typed_nested_calls() {
+    let result = w()
+        .run(
+            "func double(n: int) -> int { return n * 2 }\n\
+             func quadruple(n: int) -> int { return double(double(n)) }\n\
+             return quadruple(5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(20));
+}
+
+// ─── Typed error cases ───
+
+#[test]
+fn test_typed_wrong_return_type_error() {
+    let result = w().run("func bad() -> int { return \"hello\" }");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_typed_wrong_arg_type_error() {
+    let result = w().run(
+        "func add(a: int, b: int) -> int { return a + b }\n\
+         return add(1, \"two\")",
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_typed_undeclared_variable_error() {
+    let result = w().run("return unknown_var");
+    assert!(result.is_err());
+}
+
+// ─── Typed class inheritance ───
+
+#[test]
+fn test_typed_class_inheritance_method_dispatch() {
+    let result = w()
+        .run(
+            "class Animal {\n\
+               public name: string\n\
+               public func speak() -> string { return self.name }\n\
+             }\n\
+             class Dog extends Animal {\n\
+               public breed: string\n\
+             }\n\
+             let d = Dog(\"Rex\", \"Labrador\")\n\
+             return d.speak()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("Rex")));
+}
+
+// ─── Import errors ───
+
+#[test]
+fn test_typed_import_unknown_module() {
+    let result = w().run("import nonexistent_module");
+    assert!(result.is_err());
+}
+
+// ─── Additional comparison patterns ───
+
+#[test]
+fn test_typed_le_int_op() {
+    let result = w()
+        .run(
+            "func le(a: int, b: int) -> bool { return a <= b }\n\
+             return le(3, 3)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_typed_lt_int_op() {
+    let result = w()
+        .run(
+            "func lt(a: int, b: int) -> bool { return a < b }\n\
+             return lt(3, 5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_typed_le_float_op() {
+    let result = w()
+        .run(
+            "func le(a: float, b: float) -> bool { return a <= b }\n\
+             return le(3.0, 3.0)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_typed_lt_float_op() {
+    let result = w()
+        .run(
+            "func lt(a: float, b: float) -> bool { return a < b }\n\
+             return lt(1.5, 2.5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
 }

@@ -135,7 +135,7 @@ impl TypeChecker {
         span: &Span,
     ) -> Result<(), TypeError> {
         let Some(subject_expr) = subject else {
-            // Subject-less when — just check each arm body.
+            // Subject-less when -- just check each arm body.
             for arm in arms {
                 self.env.push_scope();
                 self.check_when_body(&arm.body)?;
@@ -308,5 +308,5 @@ impl TypeChecker {
         }
     }
 
-    // ── Phase 7: Class, Trait, Enum checking (pass 2) ─────────────────
+    // --- Phase 7: Class, Trait, Enum checking (pass 2) ---
 }

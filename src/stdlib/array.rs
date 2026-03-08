@@ -2,6 +2,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::vm::binding::{mfn0, mfn1, mfn2};
+use crate::vm::sequence::{
+    FilterSequence, ForEachSequence, MapSequence, NativeResult, ReduceSequence, WritFn,
+};
 use crate::vm::{VM, Value, ValueTag};
 
 type Arr = Rc<RefCell<Vec<Value>>>;
@@ -167,6 +170,80 @@ pub fn register(vm: &mut VM) {
             Ok(parts.join(&*separator))
         }),
     );
+
+    // Callback-based methods (registered as seq_methods for trampoline dispatch).
+    vm.register_seq_method(
+        ValueTag::Array,
+        "map",
+        Some("array"),
+        Rc::new(|receiver: &Value, args: &[Value]| {
+            let items = extract_items(receiver, "map")?;
+            let cb = WritFn::from_arg(args.first(), 0)?;
+            Ok(NativeResult::Sequence(Box::new(MapSequence::new(
+                cb.into_callee(),
+                items,
+            ))))
+        }),
+    );
+
+    vm.register_seq_method(
+        ValueTag::Array,
+        "filter",
+        Some("array"),
+        Rc::new(|receiver: &Value, args: &[Value]| {
+            let items = extract_items(receiver, "filter")?;
+            let cb = WritFn::from_arg(args.first(), 0)?;
+            Ok(NativeResult::Sequence(Box::new(FilterSequence::new(
+                cb.into_callee(),
+                items,
+            ))))
+        }),
+    );
+
+    vm.register_seq_method(
+        ValueTag::Array,
+        "reduce",
+        Some("array"),
+        Rc::new(|receiver: &Value, args: &[Value]| {
+            let items = extract_items(receiver, "reduce")?;
+            let cb = WritFn::from_arg(args.first(), 0)?;
+            let initial = args.get(1).cloned().unwrap_or(Value::Null);
+            Ok(NativeResult::Sequence(Box::new(ReduceSequence::new(
+                cb.into_callee(),
+                items,
+                initial,
+            ))))
+        }),
+    );
+
+    vm.register_seq_method(
+        ValueTag::Array,
+        "forEach",
+        Some("array"),
+        Rc::new(|receiver: &Value, args: &[Value]| {
+            let items = extract_items(receiver, "forEach")?;
+            let cb = WritFn::from_arg(args.first(), 0)?;
+            Ok(NativeResult::Sequence(Box::new(ForEachSequence::new(
+                cb.into_callee(),
+                items,
+            ))))
+        }),
+    );
+}
+
+/// Extracts items from an array or AoSoA receiver as a `Vec<Value>`.
+fn extract_items(receiver: &Value, method: &str) -> Result<Vec<Value>, String> {
+    match receiver {
+        Value::Array(a) => Ok(a.borrow().clone()),
+        #[cfg(feature = "mobile-aosoa")]
+        Value::AoSoA(container) => {
+            let b = container.borrow();
+            Ok((0..b.len())
+                .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
+                .collect())
+        }
+        _ => Err(format!("{method}: receiver is not an array")),
+    }
 }
 
 fn to_index(i: i64, method: &str) -> Result<usize, String> {

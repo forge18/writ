@@ -9,8 +9,6 @@ use super::VM;
 use super::display_function_name;
 
 impl VM {
-    // ── Debug internals ─────────────────────────────────────────────
-
     /// Checks for line changes, fires debug hooks, and handles breakpoints.
     /// Called once per instruction when `has_debug_hooks` is true.
     #[cfg(feature = "debug-hooks")]

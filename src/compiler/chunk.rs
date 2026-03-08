@@ -13,7 +13,7 @@ use super::opcode::INSTR_WORDS;
 ///
 /// The VM mutates `code` in-place during quickening (runtime instruction
 /// specialization). Each `VM` instance must own its own deep clone of every
-/// `Chunk` it executes — never share a single `Chunk` between multiple VMs.
+/// `Chunk` it executes -- never share a single `Chunk` between multiple VMs.
 /// `VM::execute_program` and `VM::load_module` both call `chunk.clone()`
 /// before storing in `self.main_chunk`. Do not remove that clone as an
 /// "optimization": the raw pointers captured by `rebuild_ip_cache` point
@@ -23,12 +23,12 @@ use super::opcode::INSTR_WORDS;
 pub struct Chunk {
     /// Compact u32-encoded bytecode.
     code: Vec<u32>,
-    /// Maps instruction index → word offset in `code`.
+    /// Maps instruction index -> word offset in `code`.
     instruction_offsets: Vec<u32>,
     /// Number of logical instructions.
     instr_count: usize,
     strings: Vec<Rc<str>>,
-    /// O(1) deduplication index: string content → pool index.
+    /// O(1) deduplication index: string content -> pool index.
     string_dedup: HashMap<String, u32>,
     /// 64-bit integer constant pool (for LoadConstInt).
     int64_constants: Vec<i64>,
@@ -137,7 +137,7 @@ impl Chunk {
             word_pos += if w1.is_some() { 2 } else { 1 };
         }
 
-        // Pass 2: encode with converted jump offsets (instruction-count → word-count)
+        // Pass 2: encode with converted jump offsets (instruction-count -> word-count)
         self.code.clear();
         for (i, instr) in instructions.iter().enumerate() {
             let (w0, w1) = instr.encode();
@@ -316,11 +316,11 @@ mod tests {
     #[test]
     fn test_code_vec_sync() {
         let mut chunk = Chunk::new();
-        // 1-word: Add(2, 0, 1) → 1 word
+        // 1-word: Add(2, 0, 1) -> 1 word
         chunk.write(Instruction::Add(2, 0, 1), 1);
-        // 2-word: LoadInt(0, 42) → 2 words
+        // 2-word: LoadInt(0, 42) -> 2 words
         chunk.write(Instruction::LoadInt(0, 42), 1);
-        // 1-word: Return(0) → 1 word
+        // 1-word: Return(0) -> 1 word
         chunk.write(Instruction::Return(0), 1);
 
         assert_eq!(chunk.len(), 3);

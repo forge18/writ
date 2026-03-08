@@ -5,7 +5,10 @@ use super::super::error::RuntimeError;
 use super::super::frame::{CallFrame, ChunkId};
 use super::super::value::Value;
 use super::VM;
+#[cfg(feature = "mobile-aosoa")]
 use crate::compiler::string_hash;
+
+type MethodBodyPtr = *const dyn Fn(&Value, &[Value]) -> Result<Value, String>;
 
 impl VM {
     /// Register-based Call instruction.
@@ -177,6 +180,41 @@ impl VM {
         let callee_abs = base + base_reg as usize;
         let n = arg_count as usize;
 
+        // Check sequence-capable functions first (callback support).
+        if let Some(seq_native) = self.seq_native_functions.get(func_name) {
+            if let Some(ref module) = seq_native.module
+                && self.disabled_modules.contains(module)
+            {
+                return Err(self.make_error(format!(
+                    "module '{}' is disabled; cannot call '{}'",
+                    module, func_name
+                )));
+            }
+            if let Some(expected) = seq_native.arity
+                && expected != arg_count
+            {
+                return Err(self.make_error(format!(
+                    "function '{}' expects {} arguments, got {}",
+                    func_name, expected, arg_count
+                )));
+            }
+            let body = Rc::clone(&seq_native.body);
+            let arg_start = callee_abs + 1;
+            let native_result = {
+                let args = &self.stack[arg_start..arg_start + n];
+                (body)(args).map_err(|msg| self.make_error(msg))?
+            };
+            match native_result {
+                super::super::sequence::NativeResult::Value(v) => {
+                    self.stack[callee_abs] = v;
+                }
+                super::super::sequence::NativeResult::Sequence(seq) => {
+                    self.drive_sequence(seq, callee_abs)?;
+                }
+            }
+            return Ok(());
+        }
+
         let native = self
             .native_functions
             .get(func_name)
@@ -202,7 +240,7 @@ impl VM {
 
         let body = Rc::clone(&native.body);
 
-        // Pass a direct slice of the stack — no Vec allocation.
+        // Pass a direct slice of the stack -- no Vec allocation.
         // callee_abs is one slot before arg_start so the write target is
         // non-overlapping with the borrow, and the borrow ends before the write.
         let arg_start = callee_abs + 1;
@@ -308,7 +346,7 @@ impl VM {
 
             // Use raw pointer to body to avoid Rc::clone refcount bump.
             // SAFETY: methods table is not modified during execution.
-            let body: *const dyn Fn(&Value, &[Value]) -> Result<Value, String> = &*method.body;
+            let body: MethodBodyPtr = &*method.body;
             let arg_start = receiver_abs + 1;
             let result = {
                 let args = &self.stack[arg_start..arg_start + n];
@@ -318,126 +356,47 @@ impl VM {
             return Ok(());
         }
 
-        // Built-in callback methods (map, filter, reduce) on arrays
-        if let Value::Array(ref arr) = receiver {
-            let map_hash = string_hash("map");
-            let filter_hash = string_hash("filter");
-            let reduce_hash = string_hash("reduce");
-
-            if name_hash == map_hash && arg_count == 1 {
-                let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => s.to_string(),
-                    _ => return Err(self.make_error("map expects a function".to_string())),
-                };
-                let items = arr.borrow().clone();
-                let mut result = Vec::with_capacity(items.len());
-                for item in &items {
-                    let val = self.call_function(&fn_name, std::slice::from_ref(item))?;
-                    result.push(val);
-                }
-                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
-                return Ok(());
+        // Sequence-capable method dispatch (callback support via trampoline).
+        if let Some(tag) = receiver.tag()
+            && let Some(seq_method) = self.seq_methods.get(&(tag, name_hash))
+        {
+            if let Some(ref module) = seq_method.module
+                && self.disabled_modules.contains(module)
+            {
+                return Err(self.make_error(format!(
+                    "module '{}' is disabled; cannot call '{}'",
+                    module, seq_method.name
+                )));
             }
-
-            if name_hash == filter_hash && arg_count == 1 {
-                let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => s.to_string(),
-                    _ => return Err(self.make_error("filter expects a function".to_string())),
-                };
-                let items = arr.borrow().clone();
-                let mut result = Vec::new();
-                for item in &items {
-                    let keep = self.call_function(&fn_name, std::slice::from_ref(item))?;
-                    if !keep.is_falsy() {
-                        result.push(item.clone());
-                    }
-                }
-                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
-                return Ok(());
+            if let Some(expected) = seq_method.arity
+                && expected != arg_count
+            {
+                return Err(self.make_error(format!(
+                    "method '{}' expects {} arguments, got {}",
+                    seq_method.name, expected, arg_count
+                )));
             }
-
-            if name_hash == reduce_hash && arg_count == 2 {
-                let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => s.to_string(),
-                    _ => return Err(self.make_error("reduce expects a function".to_string())),
-                };
-                let items = arr.borrow().clone();
-                let mut acc = self.stack[receiver_abs + 2].clone();
-                for item in &items {
-                    acc = self.call_function(&fn_name, &[acc, item.clone()])?;
+            let body = Rc::clone(&seq_method.body);
+            let arg_start = receiver_abs + 1;
+            let native_result = {
+                let args = &self.stack[arg_start..arg_start + n];
+                (body)(&receiver, args).map_err(|msg| self.make_error(msg))?
+            };
+            match native_result {
+                super::super::sequence::NativeResult::Value(v) => {
+                    self.stack[receiver_abs] = v;
                 }
-                self.stack[receiver_abs] = acc;
-                return Ok(());
+                super::super::sequence::NativeResult::Sequence(seq) => {
+                    self.drive_sequence(seq, receiver_abs)?;
+                }
             }
+            return Ok(());
         }
 
-        // AoSoA method dispatch
+        // AoSoA iter_field (non-callback, kept inline)
         #[cfg(feature = "mobile-aosoa")]
         if let Value::AoSoA(ref container) = receiver {
-            let map_hash = string_hash("map");
-            let filter_hash = string_hash("filter");
-            let for_each_hash = string_hash("for_each");
             let iter_field_hash = string_hash("iter_field");
-
-            if name_hash == map_hash && arg_count == 1 {
-                let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => s.to_string(),
-                    _ => return Err(self.make_error("map expects a function".to_string())),
-                };
-                let items: Vec<Value> = {
-                    let b = container.borrow();
-                    (0..b.len())
-                        .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
-                        .collect()
-                };
-                let mut result = Vec::with_capacity(items.len());
-                for item in &items {
-                    let val = self.call_function(&fn_name, std::slice::from_ref(item))?;
-                    result.push(val);
-                }
-                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
-                return Ok(());
-            }
-
-            if name_hash == filter_hash && arg_count == 1 {
-                let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => s.to_string(),
-                    _ => return Err(self.make_error("filter expects a function".to_string())),
-                };
-                let items: Vec<Value> = {
-                    let b = container.borrow();
-                    (0..b.len())
-                        .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
-                        .collect()
-                };
-                let mut result = Vec::new();
-                for item in items {
-                    let keep = self.call_function(&fn_name, std::slice::from_ref(&item))?;
-                    if !keep.is_falsy() {
-                        result.push(item);
-                    }
-                }
-                self.stack[receiver_abs] = Value::Array(Rc::new(RefCell::new(result)));
-                return Ok(());
-            }
-
-            if name_hash == for_each_hash && arg_count == 1 {
-                let fn_name = match &self.stack[receiver_abs + 1] {
-                    Value::Str(s) => s.to_string(),
-                    _ => return Err(self.make_error("for_each expects a function".to_string())),
-                };
-                let items: Vec<Value> = {
-                    let b = container.borrow();
-                    (0..b.len())
-                        .map(|i| Value::Struct(Box::new(b.get(i).unwrap())))
-                        .collect()
-                };
-                for item in &items {
-                    self.call_function(&fn_name, std::slice::from_ref(item))?;
-                }
-                self.stack[receiver_abs] = Value::Null;
-                return Ok(());
-            }
 
             if name_hash == iter_field_hash && arg_count == 1 {
                 let field_name = match &self.stack[receiver_abs + 1] {

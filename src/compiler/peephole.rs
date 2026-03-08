@@ -52,7 +52,7 @@ pub fn optimize(
         i += 1;
     }
 
-    // Self-recursive tail call optimization: CallDirect(base, self_idx, arity) + Return(base) →
+    // Self-recursive tail call optimization: CallDirect(base, self_idx, arity) + Return(base) ->
     // TailCallDirect(base, self_idx, arity) + remove Return.
     // Only applies to self-recursive calls to preserve stack traces for cross-function calls.
     if let Some(self_idx) = self_func_idx {

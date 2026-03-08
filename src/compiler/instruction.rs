@@ -30,7 +30,7 @@ impl CmpOp {
 /// overhead of a stack-based architecture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
-    // ── Load/Store ──────────────────────────────────────────────────
+    // --- Load/Store ---
     /// `R(dst) = I32(imm)`
     LoadInt(u8, i32),
     /// `R(dst) = I64(pool[idx])`
@@ -50,22 +50,22 @@ pub enum Instruction {
     /// `R(dst) = globals[hash]`
     LoadGlobal(u8, u32),
 
-    // ── Arithmetic (generic, quickenable) ───────────────────────────
-    /// `R(dst) = R(a) + R(b)` — generic, quickened on first execution
+    // --- Arithmetic (generic, quickenable) ---
+    /// `R(dst) = R(a) + R(b)` -- generic, quickened on first execution
     Add(u8, u8, u8),
-    /// `R(dst) = R(a) - R(b)` — generic, quickened on first execution
+    /// `R(dst) = R(a) - R(b)` -- generic, quickened on first execution
     Sub(u8, u8, u8),
-    /// `R(dst) = R(a) * R(b)` — generic, quickened on first execution
+    /// `R(dst) = R(a) * R(b)` -- generic, quickened on first execution
     Mul(u8, u8, u8),
-    /// `R(dst) = R(a) / R(b)` — generic, quickened on first execution
+    /// `R(dst) = R(a) / R(b)` -- generic, quickened on first execution
     Div(u8, u8, u8),
     /// `R(dst) = R(a) % R(b)`
     Mod(u8, u8, u8),
 
-    // ── Arithmetic (typed, compiler-guaranteed) ─────────────────────
-    /// `R(dst) = R(a) +_int R(b)` — both operands known int
+    // --- Arithmetic (typed, compiler-guaranteed) ---
+    /// `R(dst) = R(a) +_int R(b)` -- both operands known int
     AddInt(u8, u8, u8),
-    /// `R(dst) = R(a) +_float R(b)` — both operands known float
+    /// `R(dst) = R(a) +_float R(b)` -- both operands known float
     AddFloat(u8, u8, u8),
     /// `R(dst) = R(a) -_int R(b)`
     SubInt(u8, u8, u8),
@@ -80,37 +80,37 @@ pub enum Instruction {
     /// `R(dst) = R(a) /_float R(b)`
     DivFloat(u8, u8, u8),
 
-    // ── Arithmetic (immediate forms) ────────────────────────────────
-    /// `R(dst) = R(src) + I32(imm)` — fused load+add for increments
+    // --- Arithmetic (immediate forms) ---
+    /// `R(dst) = R(src) + I32(imm)` -- fused load+add for increments
     AddIntImm(u8, u8, i32),
-    /// `R(dst) = R(src) - I32(imm)` — fused load+sub
+    /// `R(dst) = R(src) - I32(imm)` -- fused load+sub
     SubIntImm(u8, u8, i32),
 
-    // ── Type coercion ────────────────────────────────────────────────
-    /// `R(dst) = R(src) as f64` — widens I32→F64 or I64→F64
+    // --- Type coercion ---
+    /// `R(dst) = R(src) as f64` -- widens I32->F64 or I64->F64
     IntToFloat(u8, u8),
 
-    // ── Unary ───────────────────────────────────────────────────────
+    // --- Unary ---
     /// `R(dst) = -R(src)`
     Neg(u8, u8),
     /// `R(dst) = !R(src)`
     Not(u8, u8),
 
-    // ── Comparison (generic, quickenable) ───────────────────────────
-    /// `R(dst) = R(a) == R(b)` — generic, quickened on first execution
+    // --- Comparison (generic, quickenable) ---
+    /// `R(dst) = R(a) == R(b)` -- generic, quickened on first execution
     Eq(u8, u8, u8),
-    /// `R(dst) = R(a) != R(b)` — generic
+    /// `R(dst) = R(a) != R(b)` -- generic
     Ne(u8, u8, u8),
-    /// `R(dst) = R(a) < R(b)` — generic
+    /// `R(dst) = R(a) < R(b)` -- generic
     Lt(u8, u8, u8),
-    /// `R(dst) = R(a) <= R(b)` — generic
+    /// `R(dst) = R(a) <= R(b)` -- generic
     Le(u8, u8, u8),
-    /// `R(dst) = R(a) > R(b)` — generic
+    /// `R(dst) = R(a) > R(b)` -- generic
     Gt(u8, u8, u8),
-    /// `R(dst) = R(a) >= R(b)` — generic
+    /// `R(dst) = R(a) >= R(b)` -- generic
     Ge(u8, u8, u8),
 
-    // ── Comparison (typed, compiler-guaranteed) ─────────────────────
+    // --- Comparison (typed, compiler-guaranteed) ---
     EqInt(u8, u8, u8),
     EqFloat(u8, u8, u8),
     NeInt(u8, u8, u8),
@@ -124,13 +124,13 @@ pub enum Instruction {
     GeInt(u8, u8, u8),
     GeFloat(u8, u8, u8),
 
-    // ── Logical ─────────────────────────────────────────────────────
-    /// `R(dst) = R(a) && R(b)` — non-short-circuit
+    // --- Logical ---
+    /// `R(dst) = R(a) && R(b)` -- non-short-circuit
     And(u8, u8, u8),
-    /// `R(dst) = R(a) || R(b)` — non-short-circuit
+    /// `R(dst) = R(a) || R(b)` -- non-short-circuit
     Or(u8, u8, u8),
 
-    // ── Control flow ────────────────────────────────────────────────
+    // --- Control flow ---
     /// Unconditional relative jump. Offset from the NEXT instruction.
     Jump(i32),
     /// Jump if `R(src)` is falsy. Offset from the NEXT instruction.
@@ -138,7 +138,7 @@ pub enum Instruction {
     /// Jump if `R(src)` is truthy. Offset from the NEXT instruction.
     JumpIfTruthy(u8, i32),
 
-    // ── Fused compare-and-jump (int) ────────────────────────────────
+    // --- Fused compare-and-jump (int) ---
     // These test a condition and jump if the condition is FALSE (fall through = true).
     /// Jump if NOT `R(a) < R(b)` (int)
     TestLtInt(u8, u8, i32),
@@ -153,7 +153,7 @@ pub enum Instruction {
     /// Jump if NOT `R(a) != R(b)` (int)
     TestNeInt(u8, u8, i32),
 
-    // ── Fused compare-and-jump (int immediate) ──────────────────────
+    // --- Fused compare-and-jump (int immediate) ---
     /// Jump if NOT `R(a) < imm` (int)
     TestLtIntImm(u8, i32, i32),
     /// Jump if NOT `R(a) <= imm` (int)
@@ -163,7 +163,7 @@ pub enum Instruction {
     /// Jump if NOT `R(a) >= imm` (int)
     TestGeIntImm(u8, i32, i32),
 
-    // ── Fused compare-and-jump (float) ──────────────────────────────
+    // --- Fused compare-and-jump (float) ---
     /// Jump if NOT `R(a) < R(b)` (float)
     TestLtFloat(u8, u8, i32),
     /// Jump if NOT `R(a) <= R(b)` (float)
@@ -173,13 +173,13 @@ pub enum Instruction {
     /// Jump if NOT `R(a) >= R(b)` (float)
     TestGeFloat(u8, u8, i32),
 
-    // ── Return ──────────────────────────────────────────────────────
+    // --- Return ---
     /// Return `R(src)` to the caller's result register.
     Return(u8),
     /// Return Null to the caller's result register.
     ReturnNull,
 
-    // ── Function calls ──────────────────────────────────────────────
+    // --- Function calls ---
     /// Dynamic call. `R(base)` is the callee value, args in `R(base+1)..R(base+1+arity)`.
     /// Result written to `R(base)`.
     Call(u8, u8),
@@ -195,15 +195,15 @@ pub enum Instruction {
     /// Args in `R(base)..R(base+arity)`, result forwarded to caller's result register.
     TailCallDirect(u8, u16, u8),
 
-    // ── Null handling ───────────────────────────────────────────────
+    // --- Null handling ---
     /// `R(dst) = R(a) ?? R(b)`
     NullCoalesce(u8, u8, u8),
 
-    // ── String concatenation ────────────────────────────────────────
+    // --- String concatenation ---
     /// `R(dst) = str(R(a)) ++ str(R(b))`
     Concat(u8, u8, u8),
 
-    // ── Collections ─────────────────────────────────────────────────
+    // --- Collections ---
     /// `R(dst) = Array(R(start)..R(start+count))`
     MakeArray(u8, u8, u8),
     /// `R(dst) = Dict` from `R(start)..R(start+2*count)` (key/value pairs)
@@ -215,19 +215,19 @@ pub enum Instruction {
     /// Spread `R(src)` into enclosing collection literal.
     Spread(u8),
 
-    // ── Fields ──────────────────────────────────────────────────────
+    // --- Fields ---
     /// `R(dst) = R(obj).field[hash]`
     GetField(u8, u8, u32),
     /// `R(obj).field[hash] = R(val)`. Pushes modified struct back if value type.
     SetField(u8, u32, u8),
 
-    // ── Structs & Classes ───────────────────────────────────────────
+    // --- Structs & Classes ---
     /// `R(dst) = Struct(name_hash, R(start)..R(start+count))`
     MakeStruct(u8, u32, u8, u8),
     /// `R(dst) = Class(name_hash, R(start)..R(start+count))`
     MakeClass(u8, u32, u8, u8),
 
-    // ── Closures & Upvalues ─────────────────────────────────────────
+    // --- Closures & Upvalues ---
     /// `R(dst) = upvalue_cell[idx].borrow().clone()`
     LoadUpvalue(u8, u8),
     /// `*upvalue_cell[idx].borrow_mut() = R(src).cheap_clone()`
@@ -237,10 +237,10 @@ pub enum Instruction {
     /// Close upvalue at register `reg` (move stack value to heap cell).
     CloseUpvalue(u8),
 
-    // ── Coroutines ──────────────────────────────────────────────────
+    // --- Coroutines ---
     /// Start coroutine. `R(base)` is callee, args follow. Result in `R(base)`.
     StartCoroutine(u8, u8),
-    /// Bare yield — suspend for one frame.
+    /// Bare yield -- suspend for one frame.
     Yield,
     /// Yield for N seconds. Pops `R(src)` as Float.
     YieldSeconds(u8),
@@ -251,11 +251,11 @@ pub enum Instruction {
     /// Yield until child coroutine completes. `R(dst) = yield R(src)`.
     YieldCoroutine(u8, u8),
 
-    // ── AoSoA (mobile only) ─────────────────────────────────────────
+    // --- AoSoA (mobile only) ---
     #[cfg(feature = "mobile-aosoa")]
     ConvertToAoSoA(u8),
 
-    // ── Quickened instructions (runtime-specialized) ────────────────
+    // --- Quickened instructions (runtime-specialized) ---
     // Generic instructions rewrite to these after type observation.
     // Fast path tries typed op; mismatch deopts back to generic.
     QAddInt(u8, u8, u8),
@@ -286,7 +286,7 @@ impl Instruction {
     pub fn encode(&self) -> (u32, Option<u32>) {
         use super::opcode::{a_w, ab_w, abc, abx, op, z};
         match *self {
-            // ── Load/Store ──
+            // --- Load/Store ---
             Instruction::LoadInt(d, v) => (a_w(op::LoadInt, d), Some(v as u32)),
             Instruction::LoadConstInt(d, idx) => (abx(op::LoadConstInt, d, idx), None),
             Instruction::LoadFloat(d, v) => (a_w(op::LoadFloat, d), Some(v.to_bits())),
@@ -297,14 +297,14 @@ impl Instruction {
             Instruction::Move(d, s) => (abc(op::Move, d, s, 0), None),
             Instruction::LoadGlobal(d, hash) => (a_w(op::LoadGlobal, d), Some(hash)),
 
-            // ── Arithmetic generic ──
+            // --- Arithmetic generic ---
             Instruction::Add(d, a, b) => (abc(op::Add, d, a, b), None),
             Instruction::Sub(d, a, b) => (abc(op::Sub, d, a, b), None),
             Instruction::Mul(d, a, b) => (abc(op::Mul, d, a, b), None),
             Instruction::Div(d, a, b) => (abc(op::Div, d, a, b), None),
             Instruction::Mod(d, a, b) => (abc(op::Mod, d, a, b), None),
 
-            // ── Arithmetic typed ──
+            // --- Arithmetic typed ---
             Instruction::AddInt(d, a, b) => (abc(op::AddInt, d, a, b), None),
             Instruction::AddFloat(d, a, b) => (abc(op::AddFloat, d, a, b), None),
             Instruction::SubInt(d, a, b) => (abc(op::SubInt, d, a, b), None),
@@ -314,18 +314,18 @@ impl Instruction {
             Instruction::DivInt(d, a, b) => (abc(op::DivInt, d, a, b), None),
             Instruction::DivFloat(d, a, b) => (abc(op::DivFloat, d, a, b), None),
 
-            // ── Arithmetic immediate ──
+            // --- Arithmetic immediate ---
             Instruction::AddIntImm(d, s, imm) => (ab_w(op::AddIntImm, d, s), Some(imm as u32)),
             Instruction::SubIntImm(d, s, imm) => (ab_w(op::SubIntImm, d, s), Some(imm as u32)),
 
-            // ── Type coercion ──
+            // --- Type coercion ---
             Instruction::IntToFloat(d, s) => (abc(op::IntToFloat, d, s, 0), None),
 
-            // ── Unary ──
+            // --- Unary ---
             Instruction::Neg(d, s) => (abc(op::Neg, d, s, 0), None),
             Instruction::Not(d, s) => (abc(op::Not, d, s, 0), None),
 
-            // ── Comparison generic ──
+            // --- Comparison generic ---
             Instruction::Eq(d, a, b) => (abc(op::Eq, d, a, b), None),
             Instruction::Ne(d, a, b) => (abc(op::Ne, d, a, b), None),
             Instruction::Lt(d, a, b) => (abc(op::Lt, d, a, b), None),
@@ -333,7 +333,7 @@ impl Instruction {
             Instruction::Gt(d, a, b) => (abc(op::Gt, d, a, b), None),
             Instruction::Ge(d, a, b) => (abc(op::Ge, d, a, b), None),
 
-            // ── Comparison typed ──
+            // --- Comparison typed ---
             Instruction::EqInt(d, a, b) => (abc(op::EqInt, d, a, b), None),
             Instruction::EqFloat(d, a, b) => (abc(op::EqFloat, d, a, b), None),
             Instruction::NeInt(d, a, b) => (abc(op::NeInt, d, a, b), None),
@@ -347,16 +347,16 @@ impl Instruction {
             Instruction::GeInt(d, a, b) => (abc(op::GeInt, d, a, b), None),
             Instruction::GeFloat(d, a, b) => (abc(op::GeFloat, d, a, b), None),
 
-            // ── Logical ──
+            // --- Logical ---
             Instruction::And(d, a, b) => (abc(op::And, d, a, b), None),
             Instruction::Or(d, a, b) => (abc(op::Or, d, a, b), None),
 
-            // ── Control flow ──
+            // --- Control flow ---
             Instruction::Jump(off) => (z(op::Jump), Some(off as u32)),
             Instruction::JumpIfFalsy(s, off) => (a_w(op::JumpIfFalsy, s), Some(off as u32)),
             Instruction::JumpIfTruthy(s, off) => (a_w(op::JumpIfTruthy, s), Some(off as u32)),
 
-            // ── Fused test-and-jump int ──
+            // --- Fused test-and-jump int ---
             Instruction::TestLtInt(a, b, off) => (ab_w(op::TestLtInt, a, b), Some(off as u32)),
             Instruction::TestLeInt(a, b, off) => (ab_w(op::TestLeInt, a, b), Some(off as u32)),
             Instruction::TestGtInt(a, b, off) => (ab_w(op::TestGtInt, a, b), Some(off as u32)),
@@ -364,7 +364,7 @@ impl Instruction {
             Instruction::TestEqInt(a, b, off) => (ab_w(op::TestEqInt, a, b), Some(off as u32)),
             Instruction::TestNeInt(a, b, off) => (ab_w(op::TestNeInt, a, b), Some(off as u32)),
 
-            // ── Fused test-and-jump int immediate (dead) ──
+            // --- Fused test-and-jump int immediate (dead) ---
             Instruction::TestLtIntImm(a, _imm, off) => {
                 (ab_w(op::TestLtIntImm, a, 0), Some(off as u32))
             }
@@ -378,17 +378,17 @@ impl Instruction {
                 (ab_w(op::TestGeIntImm, a, 0), Some(off as u32))
             }
 
-            // ── Fused test-and-jump float ──
+            // --- Fused test-and-jump float ---
             Instruction::TestLtFloat(a, b, off) => (ab_w(op::TestLtFloat, a, b), Some(off as u32)),
             Instruction::TestLeFloat(a, b, off) => (ab_w(op::TestLeFloat, a, b), Some(off as u32)),
             Instruction::TestGtFloat(a, b, off) => (ab_w(op::TestGtFloat, a, b), Some(off as u32)),
             Instruction::TestGeFloat(a, b, off) => (ab_w(op::TestGeFloat, a, b), Some(off as u32)),
 
-            // ── Return ──
+            // --- Return ---
             Instruction::Return(s) => (a_w(op::Return, s), None),
             Instruction::ReturnNull => (z(op::ReturnNull), None),
 
-            // ── Function calls ──
+            // --- Function calls ---
             Instruction::Call(base, arity) => (abc(op::Call, base, arity, 0), None),
             Instruction::CallDirect(base, func_idx, arity) => {
                 (ab_w(op::CallDirect, base, arity), Some(func_idx as u32))
@@ -403,24 +403,24 @@ impl Instruction {
                 (ab_w(op::TailCallDirect, base, arity), Some(func_idx as u32))
             }
 
-            // ── Null handling ──
+            // --- Null handling ---
             Instruction::NullCoalesce(d, a, b) => (abc(op::NullCoalesce, d, a, b), None),
 
-            // ── String ──
+            // --- String ---
             Instruction::Concat(d, a, b) => (abc(op::Concat, d, a, b), None),
 
-            // ── Collections ──
+            // --- Collections ---
             Instruction::MakeArray(d, s, count) => (abc(op::MakeArray, d, s, count), None),
             Instruction::MakeDict(d, s, count) => (abc(op::MakeDict, d, s, count), None),
             Instruction::GetIndex(d, a, b) => (abc(op::GetIndex, d, a, b), None),
             Instruction::SetIndex(a, b, c) => (abc(op::SetIndex, a, b, c), None),
             Instruction::Spread(s) => (a_w(op::Spread, s), None),
 
-            // ── Fields ──
+            // --- Fields ---
             Instruction::GetField(d, obj, hash) => (ab_w(op::GetField, d, obj), Some(hash)),
             Instruction::SetField(obj, hash, val) => (ab_w(op::SetField, obj, val), Some(hash)),
 
-            // ── Structs & Classes ──
+            // --- Structs & Classes ---
             Instruction::MakeStruct(d, name_hash, start, count) => {
                 (abc(op::MakeStruct, d, start, count), Some(name_hash))
             }
@@ -428,13 +428,13 @@ impl Instruction {
                 (abc(op::MakeClass, d, start, count), Some(name_hash))
             }
 
-            // ── Closures & Upvalues ──
+            // --- Closures & Upvalues ---
             Instruction::LoadUpvalue(d, idx) => (abc(op::LoadUpvalue, d, idx, 0), None),
             Instruction::StoreUpvalue(v, idx) => (abc(op::StoreUpvalue, v, idx, 0), None),
             Instruction::MakeClosure(d, func_idx) => (abx(op::MakeClosure, d, func_idx), None),
             Instruction::CloseUpvalue(r) => (a_w(op::CloseUpvalue, r), None),
 
-            // ── Coroutines ──
+            // --- Coroutines ---
             Instruction::StartCoroutine(base, arity) => {
                 (abc(op::StartCoroutine, base, arity, 0), None)
             }
@@ -444,11 +444,11 @@ impl Instruction {
             Instruction::YieldUntil(s) => (a_w(op::YieldUntil, s), None),
             Instruction::YieldCoroutine(d, s) => (abc(op::YieldCoroutine, d, s, 0), None),
 
-            // ── AoSoA ──
+            // --- AoSoA ---
             #[cfg(feature = "mobile-aosoa")]
             Instruction::ConvertToAoSoA(s) => (a_w(op::ConvertToAoSoA, s), None),
 
-            // ── Quickened ──
+            // --- Quickened ---
             Instruction::QAddInt(d, a, b) => (abc(op::QAddInt, d, a, b), None),
             Instruction::QAddFloat(d, a, b) => (abc(op::QAddFloat, d, a, b), None),
             Instruction::QSubInt(d, a, b) => (abc(op::QSubInt, d, a, b), None),
@@ -481,7 +481,7 @@ impl Instruction {
         let c = decode_c(w0);
         let bx = decode_bx(w0);
         match decode_op(w0) {
-            // ── Load/Store ──
+            // --- Load/Store ---
             op::LoadInt => Instruction::LoadInt(a, w1 as i32),
             op::LoadConstInt => Instruction::LoadConstInt(a, bx),
             op::LoadFloat => Instruction::LoadFloat(a, f32::from_bits(w1)),
@@ -492,7 +492,7 @@ impl Instruction {
             op::Move => Instruction::Move(a, b),
             op::LoadGlobal => Instruction::LoadGlobal(a, w1),
 
-            // ── Arithmetic ──
+            // --- Arithmetic ---
             op::Add => Instruction::Add(a, b, c),
             op::Sub => Instruction::Sub(a, b, c),
             op::Mul => Instruction::Mul(a, b, c),
@@ -512,7 +512,7 @@ impl Instruction {
             op::Neg => Instruction::Neg(a, b),
             op::Not => Instruction::Not(a, b),
 
-            // ── Comparison ──
+            // --- Comparison ---
             op::Eq => Instruction::Eq(a, b, c),
             op::Ne => Instruction::Ne(a, b, c),
             op::Lt => Instruction::Lt(a, b, c),
@@ -532,16 +532,16 @@ impl Instruction {
             op::GeInt => Instruction::GeInt(a, b, c),
             op::GeFloat => Instruction::GeFloat(a, b, c),
 
-            // ── Logical ──
+            // --- Logical ---
             op::And => Instruction::And(a, b, c),
             op::Or => Instruction::Or(a, b, c),
 
-            // ── Control flow ──
+            // --- Control flow ---
             op::Jump => Instruction::Jump(w1 as i32),
             op::JumpIfFalsy => Instruction::JumpIfFalsy(a, w1 as i32),
             op::JumpIfTruthy => Instruction::JumpIfTruthy(a, w1 as i32),
 
-            // ── Fused test-and-jump ──
+            // --- Fused test-and-jump ---
             op::TestLtInt => Instruction::TestLtInt(a, b, w1 as i32),
             op::TestLeInt => Instruction::TestLeInt(a, b, w1 as i32),
             op::TestGtInt => Instruction::TestGtInt(a, b, w1 as i32),
@@ -557,45 +557,45 @@ impl Instruction {
             op::TestGtFloat => Instruction::TestGtFloat(a, b, w1 as i32),
             op::TestGeFloat => Instruction::TestGeFloat(a, b, w1 as i32),
 
-            // ── Return ──
+            // --- Return ---
             op::Return => Instruction::Return(a),
             op::ReturnNull => Instruction::ReturnNull,
 
-            // ── Function calls ──
+            // --- Function calls ---
             op::Call => Instruction::Call(a, b),
             op::CallDirect => Instruction::CallDirect(a, w1 as u16, b),
             op::CallNative => Instruction::CallNative(a, w1, b),
             op::CallMethod => Instruction::CallMethod(a, w1, b),
             op::TailCallDirect => Instruction::TailCallDirect(a, w1 as u16, b),
 
-            // ── Null handling ──
+            // --- Null handling ---
             op::NullCoalesce => Instruction::NullCoalesce(a, b, c),
 
-            // ── String ──
+            // --- String ---
             op::Concat => Instruction::Concat(a, b, c),
 
-            // ── Collections ──
+            // --- Collections ---
             op::MakeArray => Instruction::MakeArray(a, b, c),
             op::MakeDict => Instruction::MakeDict(a, b, c),
             op::GetIndex => Instruction::GetIndex(a, b, c),
             op::SetIndex => Instruction::SetIndex(a, b, c),
             op::Spread => Instruction::Spread(a),
 
-            // ── Fields ──
+            // --- Fields ---
             op::GetField => Instruction::GetField(a, b, w1),
             op::SetField => Instruction::SetField(a, w1, b),
 
-            // ── Structs & Classes ──
+            // --- Structs & Classes ---
             op::MakeStruct => Instruction::MakeStruct(a, w1, b, c),
             op::MakeClass => Instruction::MakeClass(a, w1, b, c),
 
-            // ── Closures & Upvalues ──
+            // --- Closures & Upvalues ---
             op::LoadUpvalue => Instruction::LoadUpvalue(a, b),
             op::StoreUpvalue => Instruction::StoreUpvalue(a, b),
             op::MakeClosure => Instruction::MakeClosure(a, bx),
             op::CloseUpvalue => Instruction::CloseUpvalue(a),
 
-            // ── Coroutines ──
+            // --- Coroutines ---
             op::StartCoroutine => Instruction::StartCoroutine(a, b),
             op::Yield => Instruction::Yield,
             op::YieldSeconds => Instruction::YieldSeconds(a),
@@ -603,7 +603,7 @@ impl Instruction {
             op::YieldUntil => Instruction::YieldUntil(a),
             op::YieldCoroutine => Instruction::YieldCoroutine(a, b),
 
-            // ── Quickened ──
+            // --- Quickened ---
             op::QAddInt => Instruction::QAddInt(a, b, c),
             op::QAddFloat => Instruction::QAddFloat(a, b, c),
             op::QSubInt => Instruction::QSubInt(a, b, c),
@@ -665,7 +665,7 @@ mod tests {
         assert_eq!(
             std::mem::size_of::<Instruction>(),
             12,
-            "Instruction enum size changed — check for oversized variants"
+            "Instruction enum size changed -- check for oversized variants"
         );
     }
 
@@ -694,7 +694,7 @@ mod tests {
             Instruction::Yield,
             // A+W (2-word)
             Instruction::LoadInt(2, -42),
-            Instruction::LoadFloat(1, 3.14),
+            Instruction::LoadFloat(1, 3.125),
             Instruction::LoadStr(0, 999),
             Instruction::LoadGlobal(3, 0xDEAD_BEEF),
             Instruction::JumpIfFalsy(1, 100),

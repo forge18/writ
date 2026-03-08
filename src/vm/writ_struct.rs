@@ -5,7 +5,7 @@ use crate::compiler::string_hash;
 use super::field_layout::FieldLayout;
 use super::value::Value;
 
-/// A Writ struct instance — a value-type collection of named fields.
+/// A Writ struct instance -- a value-type collection of named fields.
 ///
 /// Structs are copied on assignment (value semantics). They support
 /// field access and method calls but have no inheritance.

@@ -3,7 +3,7 @@
 //! Each test calls at least one function/method from a stdlib module so that
 //! the native Rust implementation code is instrumented by tarpaulin.
 //!
-//! All tests use `disable_type_checking()` — we are testing the stdlib
+//! All tests use `disable_type_checking()` -- we are testing the stdlib
 //! implementations, not the type checker.
 
 use writ::{Value, Writ};
@@ -13,8 +13,6 @@ fn w() -> Writ {
     w.disable_type_checking();
     w
 }
-
-// ── Math ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_math_abs_int() {
@@ -128,8 +126,6 @@ fn test_math_infinity_constant() {
     let r = w().run("return INFINITY > 1000000.0").unwrap();
     assert_eq!(r, Value::Bool(true));
 }
-
-// ── String methods ────────────────────────────────────────────────────
 
 #[test]
 fn test_string_len() {
@@ -255,8 +251,6 @@ fn test_string_parse_error() {
     let r = w().run(r#"return "abc".parse()"#);
     assert!(r.is_err());
 }
-
-// ── Array methods ─────────────────────────────────────────────────────
 
 #[test]
 fn test_array_push_and_len() {
@@ -393,8 +387,6 @@ fn test_array_join() {
     assert_eq!(r, Value::Str(std::rc::Rc::from("a,b,c")));
 }
 
-// ── Dict methods ──────────────────────────────────────────────────────
-
 #[test]
 fn test_dict_len() {
     let r = w()
@@ -503,8 +495,6 @@ return d1.len()"#,
     assert_eq!(r, Value::I32(2));
 }
 
-// ── Interpolation ─────────────────────────────────────────────────────
-
 #[test]
 fn test_interp_lerp() {
     let r = w().run("return lerp(0.0, 10.0, 0.5)").unwrap();
@@ -538,16 +528,14 @@ fn test_interp_smootherstep() {
 
 #[test]
 fn test_interp_remap() {
-    // remap 5 from [0,10] to [0,100] → 50
+    // remap 5 from [0,10] to [0,100] -> 50
     let r = w().run("return remap(5.0, 0.0, 10.0, 0.0, 100.0)").unwrap();
     assert!(matches!(r, Value::F64(v) if (v - 50.0).abs() < 0.001));
 }
 
-// ── Timer ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_timer_basic_lifecycle() {
-    // Timer is not running by default — isFinished returns false
+    // Timer is not running by default -- isFinished returns false
     let r = w()
         .run("let t = Timer(0.5)\nreturn t.isFinished()")
         .unwrap();
@@ -619,8 +607,6 @@ fn test_timer_not_started_update_noop() {
         .unwrap();
     assert_eq!(r, Value::Bool(false));
 }
-
-// ── Vector types ──────────────────────────────────────────────────────
 
 #[test]
 fn test_vector2_construction() {
@@ -715,8 +701,6 @@ fn test_vector4_construction() {
     assert!(matches!(r, Value::F64(v) if (v - 4.0).abs() < 0.001));
 }
 
-// ── Color ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_color_construction() {
     let r = w()
@@ -758,8 +742,6 @@ fn test_color_with_alpha() {
     assert!(matches!(r, Value::F64(_) | Value::F32(_)));
 }
 
-// ── Random ────────────────────────────────────────────────────────────
-
 #[test]
 fn test_random_returns_float() {
     let r = w().run("let n = random()\nreturn n >= 0.0").unwrap();
@@ -787,8 +769,6 @@ fn test_random_shuffle() {
         .unwrap();
     assert_eq!(r, Value::I32(5));
 }
-
-// ── Basic ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_basic_print() {
@@ -824,8 +804,6 @@ fn test_basic_assert_fail() {
     assert!(r.is_err());
 }
 
-// ── Time ──────────────────────────────────────────────────────────────
-
 #[test]
 fn test_time_now() {
     let r = w().run("let t = now()\nreturn t > 0.0").unwrap();
@@ -839,8 +817,6 @@ fn test_time_elapsed() {
         .unwrap();
     assert_eq!(r, Value::Bool(true));
 }
-
-// ── Noise ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_noise_2d() {
@@ -857,8 +833,6 @@ fn test_noise_3d() {
         .unwrap();
     assert_eq!(r, Value::Bool(true));
 }
-
-// ── Rectangle ─────────────────────────────────────────────────────────
 
 #[test]
 fn test_rectangle_construction() {
@@ -888,8 +862,6 @@ fn test_rectangle_contains() {
     assert_eq!(r, Value::Bool(true));
 }
 
-// ── Tween ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_tween_value_at_midpoint() {
     // fresh tween returns the from-value (0.0)
@@ -913,11 +885,9 @@ fn test_tween_not_started() {
     let r = w()
         .run("let t = Tween(0.0, 10.0, 1.0)\nreturn t.value()")
         .unwrap();
-    // Not started — value should be the from value (0.0)
+    // Not started -- value should be the from value (0.0)
     assert!(matches!(r, Value::F64(v) if v.abs() < 0.001));
 }
-
-// ── IO ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_io_file_exists_false() {
@@ -969,8 +939,6 @@ fn test_io_file_exists_after_write() {
 
     std::fs::remove_dir_all(dir).ok();
 }
-
-// ── Quaternion module ─────────────────────────────────────────────────────────
 
 #[test]
 fn test_quat_identity_dot_self_is_one() {
@@ -1057,8 +1025,6 @@ fn test_quat_inverse_ok() {
     );
 }
 
-// ── Matrix module ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_matrix3_identity_constant() {
     assert!(w().run("return Matrix3_IDENTITY").is_ok());
@@ -1109,8 +1075,6 @@ fn test_matrix3_transpose_determinant() {
     assert!(matches!(r, Value::F64(v) if (v - 1.0).abs() < 0.001));
 }
 
-// ── Transform module ──────────────────────────────────────────────────────────
-
 #[test]
 fn test_transform2d_default_rotation_is_zero() {
     let r = w().run("let t = Transform2D()\nreturn t.rotation").unwrap();
@@ -1153,8 +1117,6 @@ fn test_transform2d_inverse_ok() {
     assert!(w().run("let t = Transform2D()\nreturn t.inverse()").is_ok());
 }
 
-// ── Input constants ───────────────────────────────────────────────────────────
-
 #[test]
 fn test_input_key_a_is_integer() {
     let r = w().run("return Key_A").unwrap();
@@ -1183,8 +1145,6 @@ fn test_input_key_usable_in_expression() {
     let r = w().run("return Key_A + 0").unwrap();
     assert!(matches!(r, Value::I32(_) | Value::I64(_)));
 }
-
-// ── Vector2 additional methods ────────────────────────────────────────────────
 
 #[test]
 fn test_vector2_distance_3_4_5() {
@@ -1223,8 +1183,6 @@ fn test_vector2_field_set() {
     assert!(matches!(&r, Value::F32(_) | Value::F64(_)) && (r.as_f64() - 99.0).abs() < 0.01);
 }
 
-// ── Vector3 additional methods ────────────────────────────────────────────────
-
 #[test]
 fn test_vector3_length_unit_z() {
     let r = w()
@@ -1258,8 +1216,6 @@ fn test_vector3_lerp_midpoint() {
     assert!(matches!(&r, Value::F32(_) | Value::F64(_)) && (r.as_f64() - 5.0).abs() < 0.01);
 }
 
-// ── Color field reads ─────────────────────────────────────────────────────────
-
 #[test]
 fn test_color_field_r() {
     let r = w()
@@ -1276,8 +1232,6 @@ fn test_color_field_a() {
     assert!(matches!(&r, Value::F32(_) | Value::F64(_)) && (r.as_f64() - 0.5).abs() < 0.001);
 }
 
-// ── Tween additional ──────────────────────────────────────────────────────────
-
 #[test]
 fn test_tween_value_at_start_near_zero() {
     let r = w()
@@ -1293,8 +1247,6 @@ fn test_tween_not_finished_at_start() {
         .unwrap();
     assert_eq!(r, Value::Bool(false));
 }
-
-// ── Dict has, isEmpty, remove, and len ───────────────────────────────────────
 
 #[test]
 fn test_dict_has_missing_key() {
@@ -1332,15 +1284,11 @@ fn test_dict_is_empty_after_remove() {
     assert_eq!(r, Value::Bool(true));
 }
 
-// ── Interpolation remap ───────────────────────────────────────────────────────
-
 #[test]
 fn test_interpolation_remap() {
     let r = w().run("return remap(5.0, 0.0, 10.0, 0.0, 100.0)").unwrap();
     assert!(matches!(&r, Value::F32(_) | Value::F64(_)) && (r.as_f64() - 50.0).abs() < 0.1);
 }
-
-// ── Noise configuration ───────────────────────────────────────────────────────
 
 #[test]
 fn test_noise_seed_changes_output() {
@@ -1375,8 +1323,6 @@ fn test_noise_fractal_ok() {
     );
 }
 
-// ── Tween update / setEasing ──────────────────────────────────────────────────
-
 #[test]
 fn test_tween_update_advances_value() {
     let r = w()
@@ -1398,7 +1344,7 @@ fn test_tween_set_easing_ok() {
     assert!(
         w().run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeInOut\")\nreturn t.value()")
             .is_err()
-    ); // "easeInOut" is not a valid easing name — only "easeInOutQuad" etc. are
+    ); // "easeInOut" is not a valid easing name -- only "easeInOutQuad" etc. are
 }
 
 #[test]
@@ -1408,8 +1354,6 @@ fn test_tween_set_easing_ease_in_quad_ok() {
         .unwrap();
     assert!(matches!(&r, Value::F64(_)) && (r.as_f64() - 25.0).abs() < 1.0);
 }
-
-// ── Transform missing methods ─────────────────────────────────────────────────
 
 #[test]
 fn test_transform2d_transform_point_ok() {
@@ -1431,8 +1375,6 @@ fn test_transform3d_to_matrix_ok() {
 fn test_transform3d_inverse_ok() {
     assert!(w().run("let t = Transform3D()\nreturn t.inverse()").is_ok());
 }
-
-// ── IO readFile ───────────────────────────────────────────────────────────────
 
 #[test]
 fn test_io_read_file_after_write() {
@@ -1457,8 +1399,6 @@ fn test_io_read_nonexistent_errors() {
             .is_err()
     );
 }
-
-// ── Interpolation easing functions ────────────────────────────────────────────
 
 #[test]
 fn test_ease_in_quad_at_half() {
@@ -1493,8 +1433,6 @@ fn test_smoothstep_boundary_values() {
     assert!(r0.as_f64().abs() < 0.001);
     assert!((r1.as_f64() - 1.0).abs() < 0.001);
 }
-
-// ── Vector2 missing ops ──────────────────────────────────────────────
 
 #[test]
 fn test_vector2_length_squared() {
@@ -1587,8 +1525,6 @@ fn test_vector2_set_field_y() {
         .unwrap();
     assert!((r.as_f64() - 99.0).abs() < 0.001);
 }
-
-// ── Vector3 missing ops ──────────────────────────────────────────────
 
 #[test]
 fn test_vector3_length_squared() {
@@ -1691,8 +1627,6 @@ fn test_vector3_distance() {
         .unwrap();
     assert!((r.as_f64() - 3.0).abs() < 0.001);
 }
-
-// ── Vector4 full coverage ────────────────────────────────────────────
 
 #[test]
 fn test_vector4_field_reads() {
@@ -1858,8 +1792,6 @@ fn test_vector4_negate() {
     assert!((r.as_f64() - (-1.0)).abs() < 0.001);
 }
 
-// ── Rectangle ────────────────────────────────────────────────────────
-
 #[test]
 fn test_rect_construction_and_fields() {
     let r = w()
@@ -1972,8 +1904,6 @@ fn test_rect_from_points() {
     assert!((r.as_f64() - 16.0).abs() < 0.001);
 }
 
-// ── BoundingBox ──────────────────────────────────────────────────────
-
 #[test]
 fn test_bbox_construction_and_fields() {
     let r = w()
@@ -2045,8 +1975,6 @@ fn test_bbox_set_fields() {
     let r = w().run("let b = BoundingBox(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 1.0, 1.0))\nb.min = Vector3(-1.0, -1.0, -1.0)\nreturn b.volume()").unwrap();
     assert!((r.as_f64() - 8.0).abs() < 0.001);
 }
-
-// ── Color ────────────────────────────────────────────────────────────
 
 #[test]
 fn test_color_field_reads_g_b() {
@@ -2170,8 +2098,6 @@ fn test_color_constants() {
     assert_eq!(w().run("return Color_TRANSPARENT.a").unwrap().as_f64(), 0.0);
 }
 
-// ── Matrix ───────────────────────────────────────────────────────────
-
 #[test]
 fn test_matrix3_multiply() {
     // identity * identity = identity; determinant still 1
@@ -2277,8 +2203,6 @@ fn test_matrix4_look_at() {
     let r = w().run("let m = Matrix4_lookAt(Vector3(0.0, 0.0, 5.0), Vector3(0.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))\nreturn typeof(m)").unwrap();
     assert_eq!(r, Value::Str(std::rc::Rc::from("Matrix4")));
 }
-
-// ── Transform ────────────────────────────────────────────────────────
 
 #[test]
 fn test_transform2d_set_fields() {
@@ -2392,7 +2316,6 @@ fn test_transform3d_look_at() {
     assert_eq!(r, Value::Str(std::rc::Rc::from("Transform3D")));
 }
 
-// ── Timer ────────────────────────────────────────────────────────────
 // NOTE: Timer.start() cannot be tested via writ scripts because `start`
 // is a reserved keyword (coroutine start). We test the paths we can.
 
@@ -2429,8 +2352,6 @@ fn test_timer_remaining_full() {
     let r = w().run("let t = Timer(2.0)\nreturn t.remaining()").unwrap();
     assert!((r.as_f64() - 2.0).abs() < 0.001);
 }
-
-// ── Tween ────────────────────────────────────────────────────────────
 
 #[test]
 fn test_tween_easing_linear() {
@@ -2512,8 +2433,6 @@ fn test_tween_zero_duration() {
     assert!((r.as_f64() - 10.0).abs() < 0.01);
 }
 
-// ── Quaternion ───────────────────────────────────────────────────────
-
 #[test]
 fn test_quaternion_lerp() {
     let r = w().run("let q1 = Quaternion_fromEuler(0.0, 0.0, 0.0)\nlet q2 = Quaternion_fromEuler(0.0, 0.0, 1.0)\nreturn q1.lerp(q2, 0.0).w").unwrap();
@@ -2556,8 +2475,6 @@ fn test_quaternion_field_reads_xyz() {
     assert!(r.as_f64().abs() < 0.001);
 }
 
-// ── Interpolation extras ─────────────────────────────────────────────
-
 #[test]
 fn test_inverse_lerp() {
     let r = w().run("return inverseLerp(0.0, 10.0, 5.0)").unwrap();
@@ -2593,8 +2510,6 @@ fn test_ease_in_out_sine() {
     let r = w().run("return easeInOutSine(0.0)").unwrap();
     assert!(r.as_f64().abs() < 0.001);
 }
-
-// ── Reflect ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_reflect_typeof() {
@@ -2688,7 +2603,6 @@ fn test_reflect_has_method_on_non_struct() {
     assert_eq!(r, Value::Bool(false));
 }
 
-// ── Timer: start → update → finish lifecycle ──────────────────────────
 // Note: `start` is a keyword in Writ (for coroutines), so `t.start()` can't
 // be called from script. We use a host function that invokes call_method("start")
 // on the timer object.
@@ -2914,8 +2828,6 @@ fn test_timer_get_field_error() {
     assert!(r.is_err());
 }
 
-// ── Reflect: additional dict / struct paths ───────────────────────────
-
 #[test]
 fn test_reflect_set_field_dict_roundtrip() {
     let r = w()
@@ -2973,8 +2885,6 @@ fn test_reflect_typeof_bool() {
     let r = w().run("return typeof(true)").unwrap();
     assert_eq!(r, Value::Str(std::rc::Rc::from("bool")));
 }
-
-// ── Tween: additional coverage ────────────────────────────────────────
 
 #[test]
 fn test_tween_zero_duration_clamps() {
@@ -3150,4 +3060,163 @@ fn test_reflect_set_field_struct_error() {
     let r =
         w().run("struct Point {\nx: int\ny: int\n}\nlet p = Point(1, 2)\nsetField(p, \"x\", 99)");
     assert!(r.is_err());
+}
+
+#[test]
+fn test_reflect_invoke_on_struct() {
+    let r = w()
+        .run(
+            r#"
+struct Pair {
+    a: int
+    b: int
+
+    func sum() -> int {
+        return self.a + self.b
+    }
+}
+
+let p = Pair(10, 5)
+return invoke(p, "sum")
+"#,
+        )
+        .unwrap();
+    assert_eq!(r, Value::I32(15));
+}
+
+#[test]
+fn test_reflect_invoke_no_args() {
+    let r = w()
+        .run(
+            r#"
+struct Tag {
+    label: string
+
+    func upper() -> string {
+        return self.label.toUpper()
+    }
+}
+
+let t = Tag("hello")
+return invoke(t, "upper")
+"#,
+        )
+        .unwrap();
+    assert_eq!(r, Value::Str(std::rc::Rc::from("HELLO")));
+}
+
+#[test]
+fn test_reflect_invoke_on_object() {
+    let r = w()
+        .run(
+            r#"
+let t = Timer(5.0)
+invoke(t, "start")
+return invoke(t, "isRunning")
+"#,
+        )
+        .unwrap();
+    assert_eq!(r, Value::Bool(true));
+}
+
+#[test]
+fn test_reflect_invoke_invalid_type() {
+    let r = w().run(r#"invoke(42, "foo")"#);
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_ease_in_expo_mid() {
+    let r = w().run("return easeInExpo(0.5)").unwrap();
+    let v = r.as_f64();
+    assert!(v > 0.0 && v < 0.5, "easeInExpo(0.5) = {v}");
+}
+
+#[test]
+fn test_ease_out_expo_mid() {
+    let r = w().run("return easeOutExpo(0.5)").unwrap();
+    let v = r.as_f64();
+    assert!(v > 0.5 && v < 1.0, "easeOutExpo(0.5) = {v}");
+}
+
+#[test]
+fn test_ease_in_out_expo_first_half() {
+    let r = w().run("return easeInOutExpo(0.25)").unwrap();
+    let v = r.as_f64();
+    assert!(v > 0.0 && v < 0.5, "easeInOutExpo(0.25) = {v}");
+}
+
+#[test]
+fn test_ease_in_out_expo_second_half() {
+    let r = w().run("return easeInOutExpo(0.75)").unwrap();
+    let v = r.as_f64();
+    assert!(v > 0.5 && v < 1.0, "easeInOutExpo(0.75) = {v}");
+}
+
+#[test]
+fn test_ease_in_elastic_mid() {
+    let r = w().run("return easeInElastic(0.5)").unwrap();
+    // easeInElastic oscillates -- just check it's finite
+    assert!(r.as_f64().is_finite());
+}
+
+#[test]
+fn test_ease_out_elastic_mid() {
+    let r = w().run("return easeOutElastic(0.5)").unwrap();
+    assert!(r.as_f64().is_finite());
+}
+
+#[test]
+fn test_ease_in_bounce_mid() {
+    let r = w().run("return easeInBounce(0.5)").unwrap();
+    let v = r.as_f64();
+    assert!((0.0..=1.0).contains(&v), "easeInBounce(0.5) = {v}");
+}
+
+#[test]
+fn test_ease_out_bounce_branch1() {
+    // t = 0.2 -> t < 1/2.75 ≈ 0.3636 -> first branch
+    let r = w().run("return easeOutBounce(0.2)").unwrap();
+    let v = r.as_f64();
+    assert!((0.0..=1.0).contains(&v), "easeOutBounce(0.2) = {v}");
+}
+
+#[test]
+fn test_ease_out_bounce_branch2() {
+    // t = 0.5 -> 0.3636 < 0.5 < 0.7272 -> second branch
+    let r = w().run("return easeOutBounce(0.5)").unwrap();
+    let v = r.as_f64();
+    assert!((0.0..=1.0).contains(&v), "easeOutBounce(0.5) = {v}");
+}
+
+#[test]
+fn test_ease_out_bounce_branch3() {
+    // t = 0.85 -> 0.7272 < 0.85 < 0.9090 -> third branch
+    let r = w().run("return easeOutBounce(0.85)").unwrap();
+    let v = r.as_f64();
+    assert!((0.0..=1.0).contains(&v), "easeOutBounce(0.85) = {v}");
+}
+
+#[test]
+fn test_ease_out_bounce_branch4() {
+    // t = 0.97 -> t >= 2.5/2.75 ≈ 0.9090 -> fourth branch
+    let r = w().run("return easeOutBounce(0.97)").unwrap();
+    let v = r.as_f64();
+    assert!((0.0..=1.0).contains(&v), "easeOutBounce(0.97) = {v}");
+}
+
+#[test]
+fn test_ease_in_out_quad_first_half() {
+    // t = 0.25 -> t < 0.5 -> first branch: 2 * 0.25^2 = 0.125
+    let r = w().run("return easeInOutQuad(0.25)").unwrap();
+    let v = r.as_f64();
+    assert!((v - 0.125).abs() < 0.001, "easeInOutQuad(0.25) = {v}");
+}
+
+#[test]
+fn test_ease_in_out_cubic_first_half() {
+    // t = 0.25 -> t < 0.5 -> first branch: 4 * 0.25^3 = 0.0625
+    let r = w().run("return easeInOutCubic(0.25)").unwrap();
+    let v = r.as_f64();
+    assert!((v - 0.0625).abs() < 0.001, "easeInOutCubic(0.25) = {v}");
 }

@@ -62,13 +62,13 @@ vm.call("onStart", &[]).unwrap();
 Use `register_host_fn` to make Rust functions callable from scripts. This registers the function in both the VM and the type checker so scripts get proper type errors:
 
 ```rust
-use writ::{Type, Value, fn2};
+use writ::{Type, Value, fn3};
 
 vm.register_host_fn(
     "clamp",
     vec![Type::Float, Type::Float, Type::Float],
     Type::Float,
-    fn2(|value: f64, min: f64, max: f64| -> Result<f64, String> {
+    fn3(|value: f64, min: f64, max: f64| -> Result<f64, String> {
         Ok(value.clamp(min, max))
     }),
 );

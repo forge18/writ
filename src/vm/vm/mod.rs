@@ -11,20 +11,16 @@ use super::debug::{BreakpointAction, BreakpointContext};
 use super::debug::{BreakpointHandler, BreakpointKey, CallHook, LineHook, StepState};
 use super::error::{RuntimeError, StackFrame, StackTrace};
 use super::frame::{CallFrame, ChunkId};
-use super::native::{NativeFunction, NativeMethod};
+use super::native::{NativeFunction, NativeMethod, SeqNativeFunction, SeqNativeMethod};
 use super::object::WritObject;
+use super::sequence::SequenceAction;
 use super::value::{Value, ValueTag};
 
-/// Internal result type for the run loop, distinguishing normal returns
-/// from coroutine yield points.
 enum RunResult {
-    /// Normal return (function completed or end of script).
     Return(Value),
-    /// Coroutine yielded with a wait condition.
     Yield(WaitCondition),
 }
 
-/// Bundled operation function pointers for binary arithmetic helpers.
 struct ArithOps {
     i32_op: fn(i32, i32) -> Option<i32>,
     i64_op: fn(i64, i64) -> Option<i64>,
@@ -32,7 +28,6 @@ struct ArithOps {
     method_name: &'static str,
 }
 
-/// Bundled comparison function pointers for comparison helpers.
 struct CmpOps {
     i64_cmp: fn(&i64, &i64) -> bool,
     f64_cmp: fn(&f64, &f64) -> bool,
@@ -40,103 +35,75 @@ struct CmpOps {
 }
 
 /// The Writ bytecode virtual machine.
-///
-/// Executes compiled bytecode chunks produced by the Writ compiler.
-/// Supports function calls, local variables, control flow, and collections.
 // Hot-field layout: `#[repr(C)]` pins field order so the dispatch loop's
 // most-touched fields land on the first two 64-byte cache lines.
 //
-// Cache line 0 (0–63):   stack(24) + frames(24) + instruction_count(8)
+// Cache line 0 (0-63):   stack(24) + frames(24) + instruction_count(8)
 //                         + has_debug_hooks(1) + has_open_upvalues(1) + pad(6) = 64
-// Cache line 1 (64–127): func_ip_cache(24) + functions(24) + instruction_limit(16) = 64
-// Cache line 2 (128–175): open_upvalues(24) + main_chunk (starts here, cold)
-// Cache lines 3+:        cold fields (maps, debug state, coroutines…)
+// Cache line 1 (64-127): func_ip_cache(24) + functions(24) + instruction_limit(16) = 64
+// Cache line 2 (128-175): open_upvalues(24) + main_chunk (starts here, cold)
+// Cache lines 3+:        cold fields (maps, debug state, coroutines...)
 #[repr(C)]
 pub struct VM {
-    // ── Cache line 0: every-instruction hot fields ───────────────
-    /// The operand stack.
+    // --- Cache line 0: every-instruction hot fields ---
     stack: Vec<Value>,
-    /// The call stack.
     frames: Vec<CallFrame>,
-    /// Current instruction counter, reset per `execute_program` call.
+    /// Reset per `execute_program` call.
     instruction_count: u64,
-    /// Fast-path guard: true when any debug hook or breakpoint is active.
+    /// True when any debug hook or breakpoint is active.
     has_debug_hooks: bool,
-    /// Cached flag: true when any open upvalue exists. Avoids scanning the
-    /// vec on every LoadLocal/StoreLocal.
+    /// Avoids scanning open_upvalues on every LoadLocal/StoreLocal.
     has_open_upvalues: bool,
 
-    // ── Cache line 1: call/return hot fields ─────────────────────
-    /// Pre-computed code pointer + word length for each function chunk.
-    /// Index 0 = main chunk, index 1..N = function chunks.
-    /// Points to the compact u32-encoded bytecode (`chunk.code()`).
+    // --- Cache line 1: call/return hot fields ---
+    /// Code pointer + word length per chunk. Index 0 = main, 1..N = functions.
     func_ip_cache: Vec<(*const u32, usize)>,
-    /// Function table: compiled functions indexed by position.
     functions: Vec<CompiledFunction>,
-    /// Maximum number of instructions before termination. `None` = unlimited.
+    /// `None` = unlimited.
     instruction_limit: Option<u64>,
 
-    // ── Cache line 2: warm fields (closures) ─────────────────────
-    /// Upvalue index arrays for each call frame, kept in sync with `frames`.
-    /// `None` for non-closure frames, `Some(indices)` for closures.
+    // --- Cache line 2: warm fields (closures) ---
+    /// Parallel to `frames`. `None` for non-closure frames.
     frame_upvalues: Vec<Option<Vec<u32>>>,
-    /// Open upvalues: indexed by absolute stack slot. `Some(idx)` when a
-    /// local has been captured; the value is an index into `upvalue_store`.
+    /// Indexed by absolute stack slot. `Some(idx)` -> index into `upvalue_store`.
     open_upvalues: Vec<Option<u32>>,
-    /// Flat upvalue value store. Closures reference slots by `u32` index.
     upvalue_store: Vec<Value>,
-    /// Pre-captured upvalue index arrays for top-level functions, indexed by func_idx.
     /// Populated by `MakeClosure` while the main chunk stack is live.
-    /// Enables `call_function` to provide correct upvalues after the main chunk exits.
+    /// Lets `call_function` provide correct upvalues after main chunk exits.
     closure_map: Vec<Option<Vec<u32>>>,
 
-    // ── Cold fields: setup, metadata, debug ──────────────────────
-    /// The top-level/main chunk being executed.
+    // --- Cold fields: setup, metadata, debug ---
     main_chunk: Chunk,
-    /// Fast lookup: function name → index in `functions`.
     function_map: HashMap<String, usize>,
-    /// Reverse lookup: field name hash → original string name.
-    /// Built from chunk string pools at load time.
+    /// Field name hash -> original string. Built from chunk string pools at load time.
     field_names: HashMap<u32, String>,
-    /// Host-registered native functions, keyed by name.
     native_functions: HashMap<String, NativeFunction>,
-    /// Indexed native function table for `CallNative` fast-path dispatch.
+    /// For `CallNative` fast-path dispatch.
     native_fn_vec: Vec<NativeFunction>,
-    /// Maps function name → index in `native_fn_vec` for compiler use.
     native_fn_name_to_idx: HashMap<String, u32>,
-    /// Host-registered methods on value types, keyed by (value tag, method name hash).
+    /// Keyed by (value tag, method name hash).
     methods: HashMap<(ValueTag, u32), NativeMethod>,
-    /// Global constants/variables, keyed by name hash → (name, value).
+    /// Keyed by name hash -> (name, value).
     globals: HashMap<u32, (String, Value)>,
-    /// Struct metadata for constructing struct instances at runtime.
     struct_metas: HashMap<String, StructMeta>,
-    /// Class metadata for constructing class instances at runtime.
     class_metas: HashMap<String, ClassMeta>,
-    /// Pre-built shared field layouts for struct types (hash→index maps).
     struct_layouts: HashMap<String, Rc<super::field_layout::FieldLayout>>,
-    /// Pre-built shared field layouts for class types (hash→index maps).
     class_layouts: HashMap<String, Rc<super::field_layout::FieldLayout>>,
-    /// Set of disabled module names (blocks native function calls).
     disabled_modules: HashSet<String>,
-    /// All active coroutines managed by the scheduler.
+    /// Sequence-capable native functions (may invoke script callbacks).
+    seq_native_functions: HashMap<String, SeqNativeFunction>,
+    /// Sequence-capable native methods, keyed by (value tag, method name hash).
+    seq_methods: HashMap<(ValueTag, u32), SeqNativeMethod>,
     coroutines: Vec<Coroutine>,
-    /// Next coroutine ID to assign.
     next_coroutine_id: CoroutineId,
-    /// Index of the coroutine currently being executed (None = main script).
+    /// `None` = main script.
     active_coroutine: Option<usize>,
-    /// Active breakpoint locations.
     breakpoints: HashSet<BreakpointKey>,
-    /// Callback invoked when a breakpoint is hit.
     breakpoint_handler: Option<BreakpointHandler>,
-    /// Debug hook: called before each new source line executes.
     on_line_hook: Option<LineHook>,
-    /// Debug hook: called when a function is entered.
     on_call_hook: Option<CallHook>,
-    /// Debug hook: called when a function returns.
     on_return_hook: Option<CallHook>,
-    /// Current stepping state for the debugger.
     step_state: StepState,
-    /// Last line number seen (for detecting line changes).
     last_line: u32,
     /// Last file path seen (for detecting line changes).
     last_file: String,
@@ -172,6 +139,8 @@ impl VM {
             struct_layouts: HashMap::new(),
             class_layouts: HashMap::new(),
             disabled_modules: HashSet::new(),
+            seq_native_functions: HashMap::new(),
+            seq_methods: HashMap::new(),
             instruction_limit: None,
             instruction_count: 0,
             coroutines: Vec::new(),
@@ -201,7 +170,7 @@ impl VM {
     ///
     /// The function's parameter and return types must implement [`FromValue`]
     /// and [`IntoValue`] respectively. Arity is inferred from the function
-    /// signature — no manual arity argument is needed.
+    /// signature -- no manual arity argument is needed.
     pub fn register_fn<H>(&mut self, name: &str, handler: H) -> &mut Self
     where
         H: super::binding::IntoNativeHandler,
@@ -246,6 +215,85 @@ impl VM {
         );
         self.field_names.insert(hash, name.to_string());
         self
+    }
+
+    /// Registers a sequence-capable native function (can invoke script callbacks).
+    ///
+    /// The handler returns [`NativeResult`] which may be an immediate value or
+    /// a [`Sequence`](super::sequence::Sequence) that the VM polls to drive
+    /// deferred callback invocations.
+    pub fn register_seq_fn(&mut self, name: &str, body: super::native::NativeSeqFn) -> &mut Self {
+        self.seq_native_functions.insert(
+            name.to_string(),
+            SeqNativeFunction {
+                module: None,
+                arity: None,
+                body,
+            },
+        );
+        self
+    }
+
+    /// Registers a sequence-capable native method on a specific value type.
+    pub fn register_seq_method(
+        &mut self,
+        tag: ValueTag,
+        name: &str,
+        module: Option<&str>,
+        body: super::native::NativeSeqMethodFn,
+    ) -> &mut Self {
+        let hash = string_hash(name);
+        self.seq_methods.insert(
+            (tag, hash),
+            SeqNativeMethod {
+                name: name.to_string(),
+                module: module.map(|m| m.to_string()),
+                arity: None,
+                body,
+            },
+        );
+        self.field_names.insert(hash, name.to_string());
+        self
+    }
+
+    /// Drives a sequence to completion, executing script callbacks as requested.
+    ///
+    /// The VM polls the sequence repeatedly. When it yields a `Call` request,
+    /// the VM invokes the callee through normal frame dispatch, then feeds
+    /// the result back on the next poll.
+    fn drive_sequence(
+        &mut self,
+        mut seq: Box<dyn super::sequence::Sequence>,
+        result_slot: usize,
+    ) -> Result<(), RuntimeError> {
+        let mut last_result: Option<Value> = None;
+
+        loop {
+            match seq.poll(last_result.take()) {
+                SequenceAction::Done(value) => {
+                    self.stack[result_slot] = value;
+                    return Ok(());
+                }
+                SequenceAction::Error(msg) => {
+                    return Err(self.make_error(msg));
+                }
+                SequenceAction::Call { callee, args } => {
+                    let result = match &callee {
+                        Value::Closure(data) => {
+                            self.call_compiled_function(data.func_idx, &args)?
+                        }
+                        Value::Str(name) => self.call_function(name, &args)?,
+                        other => {
+                            return Err(self.make_error(format!(
+                                "sequence attempted to call non-function: {}",
+                                other.type_name()
+                            )));
+                        }
+                    };
+                    last_result = Some(result);
+                }
+            }
+        }
     }
 
     /// Registers a global constant or variable accessible by name from scripts.
@@ -295,7 +343,7 @@ impl VM {
         self.native_functions.insert(name.to_string(), nf);
     }
 
-    /// Returns the native function name→index map, for use by the compiler.
+    /// Returns the native function name->index map, for use by the compiler.
     pub fn native_fn_index_map(&self) -> &HashMap<String, u32> {
         &self.native_fn_name_to_idx
     }
@@ -315,7 +363,7 @@ impl VM {
         self
     }
 
-    // ── Debug API ───────────────────────────────────────────────────
+    // --- Debug API ---
 
     /// Registers a breakpoint at the given file and line.
     #[cfg(feature = "debug-hooks")]
@@ -402,7 +450,7 @@ impl VM {
     /// # Deprecation
     ///
     /// This method bypasses the type checker. Use [`Writ::reload`] instead,
-    /// which runs the full lex → parse → type-check → compile pipeline before
+    /// which runs the full lex -> parse -> type-check -> compile pipeline before
     /// swapping bytecode. If you must call the VM directly, use
     /// [`reload_compiled`](VM::reload_compiled) with pre-compiled output.
     #[deprecated(note = "bypasses type checking; use Writ::reload or VM::reload_compiled instead")]
@@ -456,7 +504,7 @@ impl VM {
     /// It replaces existing functions by name and upserts new ones, but does
     /// not execute the main chunk (hot reload preserves existing VM state).
     ///
-    /// Callers are responsible for running lex → parse → type-check → compile
+    /// Callers are responsible for running lex -> parse -> type-check -> compile
     /// before calling this method. Use [`Writ::reload`] rather than calling
     /// this directly when an embedder-level type check is needed.
     pub fn reload_compiled(
@@ -744,7 +792,7 @@ impl VM {
         }
     }
 
-    /// Builds the reverse hash → name lookup from all chunk string pools.
+    /// Builds the reverse hash -> name lookup from all chunk string pools.
     /// Interns all string pool entries in main chunk and function chunks.
     fn intern_chunk_strings(&mut self) {
         self.main_chunk.intern_strings(&mut self.interner);
@@ -990,7 +1038,7 @@ impl VM {
             let bx = (w0 >> 16) as u16;
 
             match opc {
-                // ── Literals ──────────────────────────────────────────
+                // --- Literals ---
                 op::LoadInt => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -1061,7 +1109,7 @@ impl VM {
                     self.stack[base + a as usize] = val;
                 }
 
-                // ── Arithmetic (generic, quickenable) ────────────────
+                // --- Arithmetic (generic, quickenable) ---
                 op::Add => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
                     let lhs = &self.stack[base + b as usize];
@@ -1147,7 +1195,7 @@ impl VM {
                     self.exec_mod_reg(base, a, b, c)?;
                 }
 
-                // ── Unary ────────────────────────────────────────────
+                // --- Unary ---
                 op::Neg => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
                     let val = &self.stack[base + b as usize];
@@ -1184,7 +1232,7 @@ impl VM {
                     }
                 }
 
-                // ── Type coercion ──────────────────────────────────────
+                // --- Type coercion ---
                 op::IntToFloat => {
                     let val = &self.stack[base + b as usize];
                     let result = match val {
@@ -1195,7 +1243,7 @@ impl VM {
                     unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
 
-                // ── Comparison (generic, quickenable) ────────────────
+                // --- Comparison (generic, quickenable) ---
                 op::Eq => {
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
@@ -1327,7 +1375,7 @@ impl VM {
                     )?;
                 }
 
-                // ── Logical ──────────────────────────────────────────
+                // --- Logical ---
                 op::And => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
                     match (
@@ -1365,7 +1413,7 @@ impl VM {
                     }
                 }
 
-                // ── Return ───────────────────────────────────────────
+                // --- Return ---
                 op::Return => {
                     let src = a;
                     #[cfg(feature = "debug-hooks")]
@@ -1445,7 +1493,7 @@ impl VM {
                     reload_ip!(self, chunk_id, caller.pc);
                 }
 
-                // ── Jumps ────────────────────────────────────────────
+                // --- Jumps ---
                 op::Jump => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -1466,7 +1514,7 @@ impl VM {
                     }
                 }
 
-                // ── Function calls ───────────────────────────────────
+                // --- Function calls ---
                 op::Call => {
                     let callee_abs = base + a as usize;
                     if let Value::Closure(data) = &self.stack[callee_abs] {
@@ -1654,11 +1702,11 @@ impl VM {
                     let callee_abs = base + a as usize;
                     let arg_start = callee_abs;
                     let native = unsafe { self.native_fn_vec.get_unchecked(native_idx) };
-                    if let Some(module) = native.module.as_deref() {
-                        if self.disabled_modules.contains(module) {
-                            self.frames.last_mut().unwrap().pc = save_pc!();
-                            return Err(self.make_error(format!("module '{module}' is disabled")));
-                        }
+                    if let Some(module) = native.module.as_deref()
+                        && self.disabled_modules.contains(module)
+                    {
+                        self.frames.last_mut().unwrap().pc = save_pc!();
+                        return Err(self.make_error(format!("module '{module}' is disabled")));
                     }
                     // Use raw pointer to body to avoid Rc::clone refcount bump.
                     // SAFETY: native_fn_vec is not modified during run_until.
@@ -1673,7 +1721,7 @@ impl VM {
                     self.stack[callee_abs] = result;
                 }
 
-                // ── Null handling ────────────────────────────────────
+                // --- Null handling ---
                 op::NullCoalesce => {
                     let val = &self.stack[base + b as usize];
                     if val.is_null() {
@@ -1685,7 +1733,7 @@ impl VM {
                     }
                 }
 
-                // ── String concatenation ─────────────────────────────
+                // --- String concatenation ---
                 op::Concat => {
                     // Fast path: Str + Str uses a reusable scratch buffer,
                     // avoiding a String allocation per concat.
@@ -1708,7 +1756,7 @@ impl VM {
                     self.stack[base + a as usize] = Value::Str(result);
                 }
 
-                // ── Collections ──────────────────────────────────────
+                // --- Collections ---
                 op::MakeArray => {
                     let n = c as usize;
                     let s = base + b as usize;
@@ -1731,7 +1779,7 @@ impl VM {
                     self.stack[base + a as usize] = Value::Dict(Rc::new(RefCell::new(map)));
                 }
 
-                // ── Field/Index access ───────────────────────────────
+                // --- Field/Index access ---
                 op::GetField => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -1815,7 +1863,7 @@ impl VM {
                     }
                 }
 
-                // ── Coroutines ───────────────────────────────────────
+                // --- Coroutines ---
                 op::StartCoroutine => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
                     self.exec_start_coroutine_reg(base, a, b)?;
@@ -1881,7 +1929,7 @@ impl VM {
                     }));
                 }
 
-                // ── Spread ───────────────────────────────────────────
+                // --- Spread ---
                 op::Spread => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
                     let val = self.stack[base + a as usize].clone();
@@ -1900,7 +1948,7 @@ impl VM {
                     }
                 }
 
-                // ── Structs ──────────────────────────────────────────
+                // --- Structs ---
                 op::MakeStruct => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -1909,7 +1957,7 @@ impl VM {
                     self.exec_make_struct_reg(base, a, w1, b, c, chunk_id)?;
                 }
 
-                // ── Classes ─────────────────────────────────────────
+                // --- Classes ---
                 op::MakeClass => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -1917,7 +1965,7 @@ impl VM {
                     self.exec_make_class_reg(base, a, w1, b, c, chunk_id)?;
                 }
 
-                // ── Method calls ─────────────────────────────────────
+                // --- Method calls ---
                 op::CallMethod => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -1926,7 +1974,7 @@ impl VM {
                     self.exec_call_method_reg(base, a, w1, b)?;
                 }
 
-                // ── Closures ─────────────────────────────────────────
+                // --- Closures ---
                 op::LoadUpvalue => {
                     let uv_idx = self
                         .frame_upvalues
@@ -1969,13 +2017,13 @@ impl VM {
                     }
                 }
 
-                // ── AoSoA conversion (mobile only) ────────────────
+                // --- AoSoA conversion (mobile only) ---
                 #[cfg(feature = "mobile-aosoa")]
                 op::ConvertToAoSoA => {
                     self.exec_convert_to_aosoa_reg(base, a)?;
                 }
 
-                // ── Typed arithmetic (compiler-guaranteed types) ────────
+                // --- Typed arithmetic (compiler-guaranteed types) ---
                 op::AddInt => {
                     let abs_b = base + b as usize;
                     let abs_c = base + c as usize;
@@ -2094,7 +2142,7 @@ impl VM {
                     unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
 
-                // ── Immediate arithmetic ────────────────────────────────
+                // --- Immediate arithmetic ---
                 op::AddIntImm => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -2132,7 +2180,7 @@ impl VM {
                     unsafe { self.write_stack_nodrop(base + a as usize, result) };
                 }
 
-                // ── Typed comparison ─────────────────────────────────────
+                // --- Typed comparison ---
                 op::LtInt => {
                     let r = self.stack[base + b as usize].as_i64()
                         < self.stack[base + c as usize].as_i64();
@@ -2190,7 +2238,7 @@ impl VM {
                     unsafe { self.write_stack_nodrop(base + a as usize, Value::Bool(r)) };
                 }
 
-                // ── Fused compare-and-jump (int) ────────────────────────
+                // --- Fused compare-and-jump (int) ---
                 op::TestLtInt => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -2242,12 +2290,12 @@ impl VM {
                     }
                 }
 
-                // ── Fused compare-and-jump (int immediate, DEAD) ──────────
+                // --- Fused compare-and-jump (int immediate, DEAD) ---
                 op::TestLtIntImm | op::TestLeIntImm | op::TestGtIntImm | op::TestGeIntImm => unsafe {
                     std::hint::unreachable_unchecked()
                 },
 
-                // ── Fused compare-and-jump (float) ──────────────────────
+                // --- Fused compare-and-jump (float) ---
                 op::TestLtFloat => {
                     let w1 = unsafe { *ip };
                     ip = unsafe { ip.add(1) };
@@ -2291,7 +2339,7 @@ impl VM {
                     }
                 }
 
-                // ── Quickened arithmetic (runtime-specialized) ──────────
+                // --- Quickened arithmetic (runtime-specialized) ---
                 // In quickened ops: a=dst, b=lhs, c=rhs (same ABC layout)
                 op::QAddInt => {
                     let lhs = &self.stack[base + b as usize];
@@ -2502,7 +2550,7 @@ impl VM {
                     }
                 }
 
-                // ── Quickened comparison ─────────────────────────────────
+                // --- Quickened comparison ---
                 op::QLtInt => {
                     let lhs = &self.stack[base + b as usize];
                     let rhs = &self.stack[base + c as usize];
@@ -2740,7 +2788,7 @@ impl VM {
                     }
                 }
 
-                // ── Unknown opcode ─────────────────────────────────────
+                // --- Unknown opcode ---
                 _ => {
                     let words = INSTR_WORDS[opc as usize] as usize;
                     if words > 1 {
@@ -2760,7 +2808,7 @@ impl Default for VM {
 }
 
 /// Returns a display-friendly function name from an optional function index.
-/// Translates internal names: `None` → `<script>`, `__lambda_N` → `<lambda>`.
+/// Translates internal names: `None` -> `<script>`, `__lambda_N` -> `<lambda>`.
 pub(super) fn display_function_name(
     func_index: Option<usize>,
     functions: &[CompiledFunction],

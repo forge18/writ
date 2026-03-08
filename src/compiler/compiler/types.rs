@@ -6,7 +6,7 @@ impl Compiler {
         decl: &StructDecl,
         span: &Span,
     ) -> Result<(), CompileError> {
-        // Generic templates are not compiled — only their monomorphic instantiations are.
+        // Generic templates are not compiled -- only their monomorphic instantiations are.
         if !decl.type_params.is_empty() {
             return Ok(());
         }
@@ -91,14 +91,14 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Class compilation ──────────────────────────────────────
+    // --- Class compilation ---
 
     pub(super) fn compile_class_decl(
         &mut self,
         decl: &ClassDecl,
         span: &Span,
     ) -> Result<(), CompileError> {
-        // Generic templates are not compiled — only their monomorphic instantiations are.
+        // Generic templates are not compiled -- only their monomorphic instantiations are.
         if !decl.type_params.is_empty() {
             return Ok(());
         }
@@ -248,7 +248,7 @@ impl Compiler {
                 decl.methods.iter().map(|m| m.name.clone()).collect();
             self.class_metas.push(ClassMeta {
                 name: decl.name.clone(),
-                field_names: own_field_names.clone(), // temporary — resolved in pass 2
+                field_names: own_field_names.clone(), // temporary -- resolved in pass 2
                 own_field_names,
                 public_fields,
                 public_methods,
@@ -352,7 +352,7 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compile `super.method(args)` — directly calls the parent class's method
+    /// Compile `super.method(args)` -- directly calls the parent class's method
     /// implementation, bypassing the VM's runtime method lookup.
     pub(super) fn compile_super(
         &mut self,

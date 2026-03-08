@@ -39,10 +39,12 @@ vm.register_host_fn(
 Use `register_host_fn_untyped` for dynamic dispatch or FFI wrappers where types can't be expressed statically. The type checker allows any arguments; all other checking still runs.
 
 ```rust
-vm.register_host_fn_untyped("dispatch", |args| {
-    // handle args dynamically
+use writ::fn1;
+
+vm.register_host_fn_untyped("dispatch", fn1(|arg: writ::Value| -> Result<writ::Value, String> {
+    // handle arg dynamically
     Ok(writ::Value::Null)
-});
+}));
 ```
 
 ### Helper macros
@@ -224,11 +226,11 @@ match vm.run(source) {
     Ok(value) => { /* use value */ }
     Err(writ::WritError::Type(e)) => eprintln!("Type error: {e}"),
     Err(writ::WritError::Runtime(e)) => {
-        eprintln!("Runtime error: {e}");
-        eprintln!("{}", e.stack_trace());
+        // Display includes the full stack trace automatically
+        eprintln!("{e}");
     }
     Err(e) => eprintln!("Error: {e}"),
 }
 ```
 
-Runtime errors include a full stack trace with file, line, and function name at each frame.
+Runtime errors include a full stack trace with file, line, and function name at each frame. The stack trace is printed automatically via the `Display` implementation. Individual frames are also accessible via `e.trace.frames`.

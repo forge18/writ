@@ -6,7 +6,7 @@ use glam::{Mat3, Mat4, Vec3};
 
 use super::vector::{extract_f32, vec2_value, vec3_value};
 
-// ── Matrix3 ─────────────────────────────────────────────────────────
+// --- Matrix3 ---
 
 #[derive(Debug, Clone)]
 pub struct WritMatrix3(pub Mat3);
@@ -52,7 +52,7 @@ impl WritObject for WritMatrix3 {
     }
 }
 
-// ── Matrix4 ─────────────────────────────────────────────────────────
+// --- Matrix4 ---
 
 #[derive(Debug, Clone)]
 pub struct WritMatrix4(pub Mat4);
@@ -96,7 +96,7 @@ impl WritObject for WritMatrix4 {
     }
 }
 
-// ── Value constructors ──────────────────────────────────────────────
+// --- Value constructors ---
 
 pub fn mat3_value(m: Mat3) -> Value {
     Value::Object(Rc::new(RefCell::new(WritMatrix3(m))))
@@ -106,7 +106,7 @@ pub fn mat4_value(m: Mat4) -> Value {
     Value::Object(Rc::new(RefCell::new(WritMatrix4(m))))
 }
 
-// ── Extraction helpers ──────────────────────────────────────────────
+// --- Extraction helpers ---
 
 pub fn extract_mat3(args: &[Value], idx: usize) -> Result<Mat3, String> {
     let v = args.get(idx).ok_or("missing Matrix3 argument")?;
@@ -136,7 +136,7 @@ pub fn extract_mat4(args: &[Value], idx: usize) -> Result<Mat4, String> {
     }
 }
 
-// ── Registration ────────────────────────────────────────────────────
+// --- Registration ---
 
 pub fn register(vm: &mut VM) {
     // Matrix3 constants
@@ -202,7 +202,7 @@ pub fn register(vm: &mut VM) {
         }),
     );
 
-    // Matrix4.perspective — 4 args, use raw NativeFn
+    // Matrix4.perspective -- 4 args, use raw NativeFn
     let perspective_fn: RawNativeFn = Rc::new(|args: &[Value]| {
         let fov = extract_f32(args.first().ok_or("missing fov")?, "fov")?;
         let aspect = extract_f32(args.get(1).ok_or("missing aspect")?, "aspect")?;
@@ -212,7 +212,7 @@ pub fn register(vm: &mut VM) {
     });
     vm.register_fn_in_module("Matrix4_perspective", "matrix", RawFn(perspective_fn));
 
-    // Matrix4.orthographic — 6 args
+    // Matrix4.orthographic -- 6 args
     let ortho_fn: RawNativeFn = Rc::new(|args: &[Value]| {
         let left = extract_f32(args.first().ok_or("missing left")?, "left")?;
         let right = extract_f32(args.get(1).ok_or("missing right")?, "right")?;
@@ -241,10 +241,9 @@ pub fn register(vm: &mut VM) {
     );
 }
 
-/// Type alias for raw native function closures.
 pub(crate) type RawNativeFn = Rc<dyn Fn(&[Value]) -> Result<Value, String>>;
 
-/// Raw function handler for functions with >3 args.
+/// For functions with >3 args.
 pub(crate) struct RawFn(pub RawNativeFn);
 
 impl crate::vm::IntoNativeHandler for RawFn {

@@ -196,7 +196,7 @@ impl TypeChecker {
         Ok(Type::Struct(struct_info.name.clone()))
     }
 
-    // ── Collection literal inference ────────────────────────────────────
+    // --- Collection literal inference ---
 
     pub(super) fn infer_array_literal(
         &mut self,
@@ -329,7 +329,7 @@ impl TypeChecker {
             })
     }
 
-    // ── Module resolution ─────────────────────────────────────────────
+    // --- Module resolution ---
 
     pub(super) fn check_import(
         &mut self,
@@ -390,7 +390,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    // ── Member access resolution ─────────────────────────────────────
+    // --- Member access resolution ---
 
     pub(super) fn resolve_member_access(
         &self,

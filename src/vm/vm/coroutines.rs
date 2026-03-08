@@ -103,50 +103,45 @@ impl VM {
 
         let abs = base + src as usize;
         let val = &self.stack[abs];
-        match val {
-            Value::Array(arr) => {
-                let elements = arr.borrow();
+        if let Value::Array(arr) = val {
+            let elements = arr.borrow();
 
-                let first_type = match elements.first() {
-                    Some(Value::Struct(s)) => Some(s.layout.type_name.clone()),
-                    _ => None,
-                };
+            let first_type = match elements.first() {
+                Some(Value::Struct(s)) => Some(s.layout.type_name.clone()),
+                _ => None,
+            };
 
-                let type_name = match first_type {
-                    Some(name)
-                        if elements.iter().all(
-                            |v| matches!(v, Value::Struct(s) if s.layout.type_name == name),
-                        ) =>
-                    {
-                        name
-                    }
-                    _ => {
-                        return Ok(());
-                    }
-                };
-
-                let layout = match self.struct_layouts.get(&type_name) {
-                    Some(layout) => Rc::clone(layout),
-                    None => {
-                        return Ok(());
-                    }
-                };
-
-                let mut container = AoSoAContainer::new(layout, elements.len());
-                for elem in elements.iter() {
-                    if let Value::Struct(s) = elem {
-                        container.push(s).map_err(|e| self.make_error(e))?;
-                    }
+            let type_name = match first_type {
+                Some(name)
+                    if elements
+                        .iter()
+                        .all(|v| matches!(v, Value::Struct(s) if s.layout.type_name == name)) =>
+                {
+                    name
                 }
-                drop(elements);
-                self.stack[abs] = Value::AoSoA(Rc::new(RefCell::new(container)));
+                _ => {
+                    return Ok(());
+                }
+            };
+
+            let layout = match self.struct_layouts.get(&type_name) {
+                Some(layout) => Rc::clone(layout),
+                None => {
+                    return Ok(());
+                }
+            };
+
+            let mut container = AoSoAContainer::new(layout, elements.len());
+            for elem in elements.iter() {
+                if let Value::Struct(s) = elem {
+                    container.push(s).map_err(|e| self.make_error(e))?;
+                }
             }
-            _ => {}
+            drop(elements);
+            self.stack[abs] = Value::AoSoA(Rc::new(RefCell::new(container)));
         }
         Ok(())
     }
-
-    // ── Coroutine scheduler (public) ─────────────────────────────
 
     /// Advances the coroutine scheduler by one frame.
     ///

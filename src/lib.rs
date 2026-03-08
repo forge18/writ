@@ -1,7 +1,7 @@
-//! Writ — an embeddable scripting language for Rust.
+//! Writ -- an embeddable scripting language for Rust.
 //!
 //! The [`Writ`] struct is the primary entry point. It composes the full
-//! pipeline (lexer → parser → type checker → compiler → VM) behind a
+//! pipeline (lexer -> parser -> type checker -> compiler -> VM) behind a
 //! simple API suitable for embedding in game engines and other host
 //! applications.
 //!
@@ -39,28 +39,22 @@ pub use types::{Type, TypeError};
 #[cfg(feature = "debug-hooks")]
 pub use vm::{BreakpointAction, BreakpointContext};
 pub use vm::{Fn0, Fn1, Fn2, Fn3, MFn0, MFn1, MFn2, MFn3};
+pub use vm::{NativeResult, Sequence, SequenceAction, WritFn};
 pub use vm::{RuntimeError, StackFrame, StackTrace, Value, ValueTag, WritObject};
+pub use vm::{SeqFn1, SeqFn2, SeqFn3, SeqMFn0, SeqMFn1, SeqMFn2, SeqMFn3};
 pub use vm::{fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
+pub use vm::{seq_fn1, seq_fn2, seq_fn3, seq_mfn0, seq_mfn1, seq_mfn2, seq_mfn3};
 
 // Re-export codegen for embedders that want Rust source output.
 pub use codegen::RustCodegen;
 
-/// Unified error type for the Writ pipeline.
-///
-/// Each variant wraps the error type from the corresponding pipeline stage.
 #[derive(Debug)]
 pub enum WritError {
-    /// Error during lexical analysis.
     Lex(LexError),
-    /// Error during parsing.
     Parse(ParseError),
-    /// Error during type checking.
     Type(TypeError),
-    /// Error during bytecode compilation.
     Compile(CompileError),
-    /// Error during VM execution.
     Runtime(RuntimeError),
-    /// I/O error (e.g. file not found in [`Writ::load`]).
     Io(std::io::Error),
 }
 
@@ -128,7 +122,7 @@ impl From<std::io::Error> for WritError {
 
 /// The Writ scripting engine.
 ///
-/// Composes the full pipeline (lexer → parser → type checker → compiler → VM)
+/// Composes the full pipeline (lexer -> parser -> type checker -> compiler -> VM)
 /// behind a single struct. Create one instance per scripting context.
 pub struct Writ {
     vm: VM,
@@ -156,7 +150,7 @@ impl Writ {
 
     /// Runs a source string through the full pipeline and returns the result.
     ///
-    /// Pipeline: lex → parse → type check → compile → execute.
+    /// Pipeline: lex -> parse -> type check -> compile -> execute.
     pub fn run(&mut self, source: &str) -> Result<Value, WritError> {
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize()?;
@@ -299,6 +293,34 @@ impl Writ {
         self
     }
 
+    /// Registers a sequence-capable host function that can invoke script callbacks.
+    ///
+    /// The handler returns [`NativeResult`] — either an immediate value or a
+    /// [`Sequence`] that the VM polls to drive deferred callback invocations.
+    pub fn register_seq_fn<H>(&mut self, name: &str, handler: H) -> &mut Self
+    where
+        H: vm::binding::IntoNativeSeqHandler,
+    {
+        self.vm.register_seq_fn(name, handler.into_seq_handler());
+        self
+    }
+
+    /// Registers a sequence-capable method that can invoke script callbacks.
+    pub fn register_seq_method<H>(
+        &mut self,
+        tag: ValueTag,
+        name: &str,
+        module: Option<&str>,
+        handler: H,
+    ) -> &mut Self
+    where
+        H: vm::binding::IntoNativeSeqMethodHandler,
+    {
+        self.vm
+            .register_seq_method(tag, name, module, handler.into_seq_method_handler());
+        self
+    }
+
     /// Registers a global constant or variable accessible from scripts.
     pub fn register_global(&mut self, name: &str, value: Value) -> &mut Self {
         self.vm.register_global(name, value);
@@ -316,8 +338,8 @@ impl Writ {
         self
     }
 
-    /// Reloads a script file through the full pipeline (lex → parse →
-    /// type-check → compile) and swaps function bytecode in place.
+    /// Reloads a script file through the full pipeline (lex -> parse ->
+    /// type-check -> compile) and swaps function bytecode in place.
     ///
     /// Existing VM state (globals, live coroutines) is preserved. Only
     /// function bodies are updated; the main chunk is discarded because it
@@ -400,7 +422,7 @@ impl Writ {
     /// [`register_type`](Self::register_type)) are also cleared; re-register
     /// them after calling this method if type checking is enabled.
     ///
-    /// Use this when you need strict per-invocation isolation — for example,
+    /// Use this when you need strict per-invocation isolation -- for example,
     /// when executing untrusted or user-supplied scripts where previously
     /// accumulated definitions should not be visible.
     pub fn reset_script_types(&mut self) -> &mut Self {

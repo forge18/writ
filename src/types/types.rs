@@ -9,29 +9,29 @@
 /// as `f32` and promotes to `f64` when precision/range demands it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    /// `int` — starts as `i32`, promotes to `i64` on overflow.
+    /// `int` -- starts as `i32`, promotes to `i64` on overflow.
     Int,
-    /// `float` — starts as `f32`, promotes to `f64` when needed.
+    /// `float` -- starts as `f32`, promotes to `f64` when needed.
     Float,
-    /// `bool` — maps to Rust `bool`.
+    /// `bool` -- maps to Rust `bool`.
     Bool,
-    /// `string` — maps to Rust `String`.
+    /// `string` -- maps to Rust `String`.
     Str,
-    /// `void` — no value.
+    /// `void` -- no value.
     Void,
-    /// Unknown type — indicates an unresolved or error state.
+    /// Unknown type -- indicates an unresolved or error state.
     Unknown,
-    /// `Result<T>` — success with value of type `T` or error with string message.
+    /// `Result<T>` -- success with value of type `T` or error with string message.
     Result(Box<Type>),
-    /// `Optional<T>` — value of type `T` or no value.
+    /// `Optional<T>` -- value of type `T` or no value.
     Optional(Box<Type>),
-    /// `(T1, T2, ...)` — fixed-length typed tuple.
+    /// `(T1, T2, ...)` -- fixed-length typed tuple.
     Tuple(Vec<Type>),
-    /// `Array<T>` — ordered, typed, indexed collection.
+    /// `Array<T>` -- ordered, typed, indexed collection.
     Array(Box<Type>),
-    /// `Dictionary<K, V>` — key-value typed collection.
+    /// `Dictionary<K, V>` -- key-value typed collection.
     Dictionary(Box<Type>, Box<Type>),
-    /// Function type — parameter types and return type.
+    /// Function type -- parameter types and return type.
     Function {
         params: Vec<Type>,
         return_type: Box<Type>,

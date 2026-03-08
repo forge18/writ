@@ -324,7 +324,7 @@ impl TypeChecker {
         Ok(then_type)
     }
 
-    // ── Phase 6: Functions + Return Types ────────────────────────────────
+    // --- Phase 6: Functions + Return Types ---
 
     pub(super) fn infer_call(
         &mut self,
@@ -388,7 +388,7 @@ impl TypeChecker {
                 return_type,
             } => {
                 // Untyped sentinel: a single Unknown param signals "accept any args".
-                // Used by register_host_fn_untyped — still infers arg exprs for
+                // Used by register_host_fn_untyped -- still infers arg exprs for
                 // undefined-variable detection but skips arity and type checks.
                 if params.len() == 1 && params[0] == Type::Unknown {
                     for arg in args {
@@ -467,7 +467,7 @@ impl TypeChecker {
 
         // Type-check arguments against the parent method's parameter types.
         // Skip the implicit `self` parameter (first param in the method info is self's type,
-        // but MethodInfo.params only stores explicit params — consistent with infer_call).
+        // but MethodInfo.params only stores explicit params -- consistent with infer_call).
         let params = &method_info.params;
         if args.len() != params.len() {
             return Err(TypeError::simple(

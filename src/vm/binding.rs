@@ -2,17 +2,16 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::native::{NativeFn, NativeMethodFn};
+use super::native::{NativeFn, NativeMethodFn, NativeSeqFn, NativeSeqMethodFn};
 use super::object::WritObject;
+use super::sequence::{NativeResult, WritFn};
 use super::value::Value;
-
-// ── FromValue ────────────────────────────────────────────────────────────────
 
 /// Extracts a concrete Rust type from a [`Value`] at call-site position `pos`.
 ///
 /// Width coercion follows the spec:
-/// - Widening (e.g. `I32 → i64`) is free and always succeeds.
-/// - Narrowing (e.g. `I64 → i32`) performs a range check and returns `Err`
+/// - Widening (e.g. `I32 -> i64`) is free and always succeeds.
+/// - Narrowing (e.g. `I64 -> i32`) performs a range check and returns `Err`
 ///   on overflow.
 pub trait FromValue: Sized {
     fn from_value(v: &Value, pos: usize) -> Result<Self, String>;
@@ -168,7 +167,18 @@ impl FromValue for Rc<RefCell<HashMap<String, Value>>> {
     }
 }
 
-// ── IntoValue ────────────────────────────────────────────────────────────────
+impl FromValue for WritFn {
+    #[inline]
+    fn from_value(v: &Value, pos: usize) -> Result<Self, String> {
+        match v {
+            Value::Closure(_) | Value::Str(_) => Ok(WritFn::new(v.cheap_clone())),
+            other => Err(format!(
+                "arg {pos}: expected function or closure, got {}",
+                other.type_name()
+            )),
+        }
+    }
+}
 
 /// Wraps a concrete Rust type back into a [`Value`] after a native call returns.
 pub trait IntoValue {
@@ -245,8 +255,6 @@ impl<T: IntoValue> IntoValue for Option<T> {
     }
 }
 
-// ── IntoNativeHandler ────────────────────────────────────────────────────────
-
 /// Converts a typed Rust function into a type-erased [`NativeFn`].
 ///
 /// Each arity uses a distinct wrapper struct carrying argument types as phantom
@@ -257,7 +265,7 @@ pub trait IntoNativeHandler {
     fn into_handler(self) -> NativeFn;
 }
 
-// Wrapper structs — one per arity, with phantom type params for arg types.
+// Wrapper structs -- one per arity, with phantom type params for arg types.
 // Constructor functions (fn0, fn1, ...) fill in PhantomData automatically so
 // call sites can write `fn1(|x: f64| ...)` without spelling out type args.
 pub struct Fn0<F>(pub F);
@@ -356,8 +364,6 @@ where
     }
 }
 
-// ── IntoNativeMethodHandler ──────────────────────────────────────────────────
-
 /// Converts a typed Rust method into a type-erased [`NativeMethodFn`].
 ///
 /// The receiver is the first argument, typed via `FromValue`. Uses the same
@@ -367,7 +373,7 @@ pub trait IntoNativeMethodHandler {
     fn into_method_handler(self) -> NativeMethodFn;
 }
 
-// Method wrappers — receiver is the first arg, typed via FromValue.
+// Method wrappers -- receiver is the first arg, typed via FromValue.
 type Ph<T> = std::marker::PhantomData<T>;
 pub struct MFn0<Recv, F>(pub F, pub Ph<fn(Recv)>);
 pub struct MFn1<Recv, A0, F>(pub F, pub Ph<fn(Recv, A0)>);
@@ -475,11 +481,205 @@ where
     }
 }
 
+// ===========================================================================
+// Sequence-capable handlers (callback support via trampoline)
+// ===========================================================================
+
+/// Converts a typed Rust function into a [`NativeSeqFn`] that may return
+/// a [`NativeResult::Sequence`] for deferred callback invocation.
+pub trait IntoNativeSeqHandler {
+    fn arity() -> Option<u8>;
+    fn into_seq_handler(self) -> NativeSeqFn;
+}
+
+// Wrapper structs for seq functions (parallel to Fn0-Fn3).
+pub struct SeqFn1<A0, F>(pub F, pub std::marker::PhantomData<fn(A0)>);
+pub struct SeqFn2<A0, A1, F>(pub F, pub std::marker::PhantomData<fn(A0, A1)>);
+pub struct SeqFn3<A0, A1, A2, F>(pub F, pub std::marker::PhantomData<fn(A0, A1, A2)>);
+
+/// Wrap a 1-argument sequence-capable function.
+#[inline]
+pub fn seq_fn1<A0, F>(f: F) -> SeqFn1<A0, F> {
+    SeqFn1(f, std::marker::PhantomData)
+}
+/// Wrap a 2-argument sequence-capable function.
+#[inline]
+pub fn seq_fn2<A0, A1, F>(f: F) -> SeqFn2<A0, A1, F> {
+    SeqFn2(f, std::marker::PhantomData)
+}
+/// Wrap a 3-argument sequence-capable function.
+#[inline]
+pub fn seq_fn3<A0, A1, A2, F>(f: F) -> SeqFn3<A0, A1, A2, F> {
+    SeqFn3(f, std::marker::PhantomData)
+}
+
+impl<A0, F> IntoNativeSeqHandler for SeqFn1<A0, F>
+where
+    A0: FromValue + 'static,
+    F: Fn(A0) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(1)
+    }
+    fn into_seq_handler(self) -> NativeSeqFn {
+        Rc::new(move |args: &[Value]| {
+            let a0 = A0::from_value(args.first().ok_or("missing arg 0")?, 0)?;
+            self.0(a0)
+        })
+    }
+}
+
+impl<A0, A1, F> IntoNativeSeqHandler for SeqFn2<A0, A1, F>
+where
+    A0: FromValue + 'static,
+    A1: FromValue + 'static,
+    F: Fn(A0, A1) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(2)
+    }
+    fn into_seq_handler(self) -> NativeSeqFn {
+        Rc::new(move |args: &[Value]| {
+            let a0 = A0::from_value(args.first().ok_or("missing arg 0")?, 0)?;
+            let a1 = A1::from_value(args.get(1).ok_or("missing arg 1")?, 1)?;
+            self.0(a0, a1)
+        })
+    }
+}
+
+impl<A0, A1, A2, F> IntoNativeSeqHandler for SeqFn3<A0, A1, A2, F>
+where
+    A0: FromValue + 'static,
+    A1: FromValue + 'static,
+    A2: FromValue + 'static,
+    F: Fn(A0, A1, A2) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(3)
+    }
+    fn into_seq_handler(self) -> NativeSeqFn {
+        Rc::new(move |args: &[Value]| {
+            let a0 = A0::from_value(args.first().ok_or("missing arg 0")?, 0)?;
+            let a1 = A1::from_value(args.get(1).ok_or("missing arg 1")?, 1)?;
+            let a2 = A2::from_value(args.get(2).ok_or("missing arg 2")?, 2)?;
+            self.0(a0, a1, a2)
+        })
+    }
+}
+
+/// Converts a typed Rust method into a [`NativeSeqMethodFn`] that may return
+/// a [`NativeResult::Sequence`] for deferred callback invocation.
+pub trait IntoNativeSeqMethodHandler {
+    fn arity() -> Option<u8>;
+    fn into_seq_method_handler(self) -> NativeSeqMethodFn;
+}
+
+// Wrapper structs for seq methods (parallel to MFn0-MFn3).
+pub struct SeqMFn0<Recv, F>(pub F, pub Ph<fn(Recv)>);
+pub struct SeqMFn1<Recv, A0, F>(pub F, pub Ph<fn(Recv, A0)>);
+pub struct SeqMFn2<Recv, A0, A1, F>(pub F, pub Ph<fn(Recv, A0, A1)>);
+pub struct SeqMFn3<Recv, A0, A1, A2, F>(pub F, pub Ph<fn(Recv, A0, A1, A2)>);
+
+/// Wrap a 0-arg sequence-capable method (receiver only).
+#[inline]
+pub fn seq_mfn0<Recv, F>(f: F) -> SeqMFn0<Recv, F> {
+    SeqMFn0(f, std::marker::PhantomData)
+}
+/// Wrap a 1-arg sequence-capable method.
+#[inline]
+pub fn seq_mfn1<Recv, A0, F>(f: F) -> SeqMFn1<Recv, A0, F> {
+    SeqMFn1(f, std::marker::PhantomData)
+}
+/// Wrap a 2-arg sequence-capable method.
+#[inline]
+pub fn seq_mfn2<Recv, A0, A1, F>(f: F) -> SeqMFn2<Recv, A0, A1, F> {
+    SeqMFn2(f, std::marker::PhantomData)
+}
+/// Wrap a 3-arg sequence-capable method.
+#[inline]
+pub fn seq_mfn3<Recv, A0, A1, A2, F>(f: F) -> SeqMFn3<Recv, A0, A1, A2, F> {
+    SeqMFn3(f, std::marker::PhantomData)
+}
+
+impl<Recv, F> IntoNativeSeqMethodHandler for SeqMFn0<Recv, F>
+where
+    Recv: FromValue + 'static,
+    F: Fn(Recv) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(0)
+    }
+    fn into_seq_method_handler(self) -> NativeSeqMethodFn {
+        Rc::new(move |receiver: &Value, _args: &[Value]| {
+            let recv = Recv::from_value(receiver, 0).map_err(|e| format!("receiver: {e}"))?;
+            self.0(recv)
+        })
+    }
+}
+
+impl<Recv, A0, F> IntoNativeSeqMethodHandler for SeqMFn1<Recv, A0, F>
+where
+    Recv: FromValue + 'static,
+    A0: FromValue + 'static,
+    F: Fn(Recv, A0) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(1)
+    }
+    fn into_seq_method_handler(self) -> NativeSeqMethodFn {
+        Rc::new(move |receiver: &Value, args: &[Value]| {
+            let recv = Recv::from_value(receiver, 0).map_err(|e| format!("receiver: {e}"))?;
+            let a0 = A0::from_value(args.first().ok_or("missing arg 0")?, 1)?;
+            self.0(recv, a0)
+        })
+    }
+}
+
+impl<Recv, A0, A1, F> IntoNativeSeqMethodHandler for SeqMFn2<Recv, A0, A1, F>
+where
+    Recv: FromValue + 'static,
+    A0: FromValue + 'static,
+    A1: FromValue + 'static,
+    F: Fn(Recv, A0, A1) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(2)
+    }
+    fn into_seq_method_handler(self) -> NativeSeqMethodFn {
+        Rc::new(move |receiver: &Value, args: &[Value]| {
+            let recv = Recv::from_value(receiver, 0).map_err(|e| format!("receiver: {e}"))?;
+            let a0 = A0::from_value(args.first().ok_or("missing arg 0")?, 1)?;
+            let a1 = A1::from_value(args.get(1).ok_or("missing arg 1")?, 2)?;
+            self.0(recv, a0, a1)
+        })
+    }
+}
+
+impl<Recv, A0, A1, A2, F> IntoNativeSeqMethodHandler for SeqMFn3<Recv, A0, A1, A2, F>
+where
+    Recv: FromValue + 'static,
+    A0: FromValue + 'static,
+    A1: FromValue + 'static,
+    A2: FromValue + 'static,
+    F: Fn(Recv, A0, A1, A2) -> Result<NativeResult, String> + 'static,
+{
+    fn arity() -> Option<u8> {
+        Some(3)
+    }
+    fn into_seq_method_handler(self) -> NativeSeqMethodFn {
+        Rc::new(move |receiver: &Value, args: &[Value]| {
+            let recv = Recv::from_value(receiver, 0).map_err(|e| format!("receiver: {e}"))?;
+            let a0 = A0::from_value(args.first().ok_or("missing arg 0")?, 1)?;
+            let a1 = A1::from_value(args.get(1).ok_or("missing arg 1")?, 2)?;
+            let a2 = A2::from_value(args.get(2).ok_or("missing arg 2")?, 3)?;
+            self.0(recv, a0, a1, a2)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── FromValue ────────────────────────────────────────────────────────────
 
     #[test]
     fn from_value_i32_direct() {
@@ -520,9 +720,9 @@ mod tests {
 
     #[test]
     fn from_value_f32_narrowed_from_f64() {
-        let v = Value::F64(3.14);
+        let v = Value::F64(3.125);
         let result = f32::from_value(&v, 0).unwrap();
-        assert!((result - 3.14_f32).abs() < 1e-5);
+        assert!((result - 3.125_f32).abs() < 1e-5);
     }
 
     #[test]
@@ -534,8 +734,8 @@ mod tests {
 
     #[test]
     fn from_value_bool_ok() {
-        assert_eq!(bool::from_value(&Value::Bool(true), 0).unwrap(), true);
-        assert_eq!(bool::from_value(&Value::Bool(false), 0).unwrap(), false);
+        assert!(bool::from_value(&Value::Bool(true), 0).unwrap());
+        assert!(!bool::from_value(&Value::Bool(false), 0).unwrap());
     }
 
     #[test]
@@ -606,8 +806,6 @@ mod tests {
         assert!(err.contains("expected dictionary"), "got: {err}");
     }
 
-    // ── IntoValue ────────────────────────────────────────────────────────────
-
     #[test]
     fn into_value_unit() {
         assert!(matches!(().into_value(), Value::Null));
@@ -655,8 +853,6 @@ mod tests {
         let v: Option<i32> = None;
         assert!(matches!(v.into_value(), Value::Null));
     }
-
-    // ── IntoNativeHandler ────────────────────────────────────────────────────
 
     #[test]
     fn fn0_handler_called() {

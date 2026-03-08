@@ -12,7 +12,7 @@ Use `start` to launch a coroutine in the background. Execution returns to the ca
 ```writ
 func openDoor() {
     playAnimation("door_open")
-    yield seconds(2.0)          // wait 2 seconds, then continue
+    yield waitForSeconds(2.0)    // wait 2 seconds, then continue
     setCollider(false)
     playAnimation("door_idle")
 }
@@ -24,10 +24,10 @@ doSomethingElse()   // runs right away
 ## Yield variants
 
 ```writ
-yield                            // wait one frame
-yield seconds(2.5)               // wait N seconds
-yield frames(10)                 // wait N frames
-yield until(() => enemy == null) // wait for a condition
+yield                                    // wait one frame
+yield waitForSeconds(2.5)                // wait N seconds
+yield waitForFrames(10)                  // wait N frames
+yield waitUntil(() => enemy == null)     // wait for a condition
 
 yield otherCoroutine()           // wait for another coroutine to finish
 ```
@@ -44,7 +44,7 @@ func spawnAndWait() {
 
 func spawnEnemy() {
     playAnimation("spawn")
-    yield seconds(1.0)
+    yield waitForSeconds(1.0)
     setActive(true)
 }
 ```
@@ -74,9 +74,9 @@ class Door extends Entity {
     }
 
     func openSequence() {
-        yield seconds(0.5)
+        yield waitForSeconds(0.5)
         playSound("creak")
-        yield seconds(1.5)
+        yield waitForSeconds(1.5)
         setCollider(false)
     }
 }
@@ -100,7 +100,7 @@ fn update(vm: &mut Writ, delta: f64) {
 }
 ```
 
-Without ticking, `yield seconds(...)` and `yield until(...)` will never advance.
+Without ticking, `yield waitForSeconds(...)` and `yield waitUntil(...)` will never advance.
 
 ## Common patterns
 
@@ -111,7 +111,7 @@ func countdown(from: int) {
     var n = from
     while n > 0 {
         print(n)
-        yield seconds(1.0)
+        yield waitForSeconds(1.0)
         n -= 1
     }
     print("Go!")
@@ -124,7 +124,7 @@ start countdown(from: 3)
 
 ```writ
 func delayedHeal(amount: float, after: float) {
-    yield seconds(after)
+    yield waitForSeconds(after)
     health += amount
 }
 
@@ -135,9 +135,9 @@ start delayedHeal(amount: 20.0, after: 3.0)
 
 ```writ
 func waitForDeath() {
-    yield until(() => health <= 0)
+    yield waitUntil(() => health <= 0)
     playDeathAnimation()
-    yield seconds(2.0)
+    yield waitForSeconds(2.0)
     despawn()
 }
 
@@ -149,9 +149,9 @@ start waitForDeath()
 ```writ
 func bossIntro() {
     yield fadeIn()
-    yield seconds(1.0)
+    yield waitForSeconds(1.0)
     yield roar()
-    yield seconds(0.5)
+    yield waitForSeconds(0.5)
     setPhase(1)
 }
 ```

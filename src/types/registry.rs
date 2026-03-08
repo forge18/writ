@@ -54,7 +54,7 @@ pub struct EnumInfo {
 }
 
 /// Stored metadata for a struct declaration.
-/// Value type — no inheritance, no traits.
+/// Value type -- no inheritance, no traits.
 #[derive(Debug, Clone)]
 pub struct StructInfo {
     pub name: String,

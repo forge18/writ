@@ -145,11 +145,11 @@ pub struct Compiler {
     current_upvalues: Vec<UpvalueDescriptor>,
     /// Per-register type tracking for typed instruction emission.
     reg_types: Vec<ExprType>,
-    /// Function name → index in `functions` for direct call dispatch.
+    /// Function name -> index in `functions` for direct call dispatch.
     function_index: std::collections::HashMap<String, u16>,
-    /// Function name → return type for typed instruction emission after CallDirect.
+    /// Function name -> return type for typed instruction emission after CallDirect.
     function_return_types: std::collections::HashMap<String, ExprType>,
-    /// Native function name → index in VM's `native_fn_vec` for `CallNative` dispatch.
+    /// Native function name -> index in VM's `native_fn_vec` for `CallNative` dispatch.
     native_index: HashMap<String, u32>,
     /// Next available register slot.
     next_reg: u8,
@@ -244,7 +244,7 @@ impl Compiler {
         self.chunk.write(instruction, line);
     }
 
-    // ── Register allocation ───────────────────────────────────────
+    // --- Register allocation ---
 
     /// Allocate a register for a local variable. Returns the register slot.
     fn alloc_local(&mut self, span: &Span) -> Result<u8, CompileError> {
@@ -303,7 +303,7 @@ impl Compiler {
             .unwrap_or(ExprType::Other)
     }
 
-    // ── Scope management ───────────────────────────────────────────
+    // --- Scope management ---
 
     fn begin_scope(&mut self) {
         self.scope_depth += 1;
@@ -321,7 +321,7 @@ impl Compiler {
             if captured {
                 self.emit(Instruction::CloseUpvalue(slot), line);
             }
-            // No Pop needed — register is just freed
+            // No Pop needed -- register is just freed
             self.next_reg = slot; // reclaim register
         }
     }
@@ -332,7 +332,7 @@ mod exprs;
 mod stmts;
 mod types;
 
-// Nested struct definition not allowed in impl block — define at module level
+// Nested struct definition not allowed in impl block -- define at module level
 pub(super) struct SavedState {
     pub(super) chunk: Chunk,
     pub(super) locals: Vec<Local>,

@@ -4,11 +4,11 @@ use writ::lexer::Lexer;
 use writ::parser::Parser;
 use writ::vm::VM;
 
-// ── Cross-language benchmark programs ────────────────────────────────
+// --- Cross-language benchmark programs ---
 // These are standard benchmarks used by Wren, Lua, and "Are We Fast Yet"
 // for comparing scripting language performance.
 
-/// Recursive fibonacci — standard function call overhead benchmark.
+/// Recursive fibonacci -- standard function call overhead benchmark.
 /// Used by: Wren, AWFY, CLBG, Rhai
 const FIBONACCI: &str = "\
 func fib(n: int) -> int {
@@ -17,7 +17,7 @@ func fib(n: int) -> int {
 }
 return fib(28)";
 
-/// Binary trees — object allocation and recursive traversal.
+/// Binary trees -- object allocation and recursive traversal.
 /// Used by: Wren, CLBG, AWFY
 /// Uses Writ classes (reference types) for tree nodes.
 const BINARY_TREES: &str = "\
@@ -45,7 +45,7 @@ while i <= 100 {
 }
 return sum";
 
-/// Permute — recursion and counting (Heap's algorithm structure).
+/// Permute -- recursion and counting (Heap's algorithm structure).
 /// Used by: AWFY
 const PERMUTE: &str = "\
 func permute(n: int) -> int {
@@ -60,7 +60,7 @@ func permute(n: int) -> int {
 }
 return permute(9)";
 
-/// Mandelbrot — floating point arithmetic and nested loops.
+/// Mandelbrot -- floating point arithmetic and nested loops.
 /// Used by: AWFY, CLBG
 const MANDELBROT: &str = "\
 func mandelbrot(size: int) -> int {
@@ -95,7 +95,7 @@ func mandelbrot(size: int) -> int {
 }
 return mandelbrot(100)";
 
-/// Sieve of Eratosthenes — array subscript and index assignment.
+/// Sieve of Eratosthenes -- array subscript and index assignment.
 /// Used by: Wren, AWFY, CLBG
 const SIEVE: &str = "\
 func sieve(size: int) -> int {
@@ -122,7 +122,7 @@ func sieve(size: int) -> int {
 }
 return sieve(5000)";
 
-/// N-Queens solver — exercises closures and nested function capture.
+/// N-Queens solver -- exercises closures and nested function capture.
 /// Used by: AWFY, Wren
 const QUEENS: &str = "\
 func queens(n: int) -> int {
@@ -164,7 +164,7 @@ func queens(n: int) -> int {
 }
 return queens(8)";
 
-/// Tight loop — instruction dispatch throughput baseline.
+/// Tight loop -- instruction dispatch throughput baseline.
 const LOOP_SUM: &str = "\
 var sum = 0
 var i = 0

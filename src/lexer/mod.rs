@@ -1,6 +1,7 @@
-//! Writ lexer — tokenizes `.writ` source files into a token stream.
+//! Writ lexer -- tokenizes `.writ` source files into a token stream.
 
 mod error;
+#[allow(clippy::module_inception)]
 mod lexer;
 mod token;
 

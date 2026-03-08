@@ -5,11 +5,11 @@ use super::types::Type;
 /// Mutability of a variable binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mutability {
-    /// `let` — immutable after initialization.
+    /// `let` -- immutable after initialization.
     Immutable,
-    /// `var` — can be reassigned.
+    /// `var` -- can be reassigned.
     Mutable,
-    /// `const` — compile-time constant, immutable.
+    /// `const` -- compile-time constant, immutable.
     Constant,
 }
 
@@ -80,7 +80,7 @@ impl TypeEnv {
 
     /// Returns all variable names visible in the current scope chain.
     ///
-    /// Inner scopes shadow outer scopes — each name appears only once with
+    /// Inner scopes shadow outer scopes -- each name appears only once with
     /// the innermost binding. Used by the LSP for completion suggestions.
     pub fn all_visible(&self) -> Vec<(&str, &VarInfo)> {
         let mut seen = std::collections::HashSet::new();

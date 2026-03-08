@@ -20,7 +20,7 @@ impl Compiler {
                             Ok(d)
                         }
                         None => {
-                            // Return the local's register directly — no instruction needed
+                            // Return the local's register directly -- no instruction needed
                             Ok(slot)
                         }
                     }
@@ -30,7 +30,7 @@ impl Compiler {
                     self.set_reg_type(d, ExprType::Other);
                     Ok(d)
                 } else {
-                    // Not a local or upvalue — try global / function name.
+                    // Not a local or upvalue -- try global / function name.
                     let d = self.dst_or_temp(dst, &expr.span)?;
                     let hash = string_hash(name);
                     self.chunk.add_string(name);
@@ -203,7 +203,7 @@ impl Compiler {
         }
     }
 
-    // ── Binary expression compilation ──────────────────────────────
+    // --- Binary expression compilation ---
 
     pub(super) fn compile_binary(
         &mut self,
@@ -220,7 +220,7 @@ impl Compiler {
                 let end_jump = self
                     .chunk
                     .emit_jump(Instruction::JumpIfFalsy(cond_reg, 0), line);
-                // lhs was truthy — evaluate rhs into the same register
+                // lhs was truthy -- evaluate rhs into the same register
                 let rhs_reg = self.compile_expr(rhs, Some(cond_reg))?;
                 let _ = rhs_reg;
                 self.chunk.patch_jump(end_jump);
@@ -233,7 +233,7 @@ impl Compiler {
                 let end_jump = self
                     .chunk
                     .emit_jump(Instruction::JumpIfTruthy(cond_reg, 0), line);
-                // lhs was falsy — evaluate rhs into the same register
+                // lhs was falsy -- evaluate rhs into the same register
                 let rhs_reg = self.compile_expr(rhs, Some(cond_reg))?;
                 let _ = rhs_reg;
                 self.chunk.patch_jump(end_jump);
@@ -250,7 +250,7 @@ impl Compiler {
                 let a_type = self.reg_type(a);
                 let b_type = self.reg_type(b);
 
-                // Mixed int/float → coerce int operand to float
+                // Mixed int/float -> coerce int operand to float
                 let (a, a_type, b, b_type, coerced_temp) = match (a_type, b_type) {
                     (ExprType::Int, ExprType::Float) => {
                         let coerced = self.alloc_temp(&lhs.span)?;
@@ -430,7 +430,7 @@ impl Compiler {
         }
     }
 
-    // ── Literal compilation ────────────────────────────────────────
+    // --- Literal compilation ---
 
     pub(super) fn compile_literal(
         &mut self,
@@ -477,7 +477,7 @@ impl Compiler {
         Ok(d)
     }
 
-    // ── Assignment compilation ─────────────────────────────────────
+    // --- Assignment compilation ---
 
     pub(super) fn compile_assignment(
         &mut self,
@@ -563,7 +563,7 @@ impl Compiler {
                 }
             }
             compound => {
-                // Fast path: local += int_literal → AddIntImm
+                // Fast path: local += int_literal -> AddIntImm
                 if let Some(slot) = local_slot
                     && let AssignOp::AddAssign = compound
                     && let ExprKind::Literal(Literal::Int(v)) = &value.kind
@@ -572,7 +572,7 @@ impl Compiler {
                     self.emit(Instruction::AddIntImm(slot, slot, imm), line);
                     return Ok(());
                 }
-                // Fast path: local -= int_literal → SubIntImm (or AddIntImm with neg)
+                // Fast path: local -= int_literal -> SubIntImm (or AddIntImm with neg)
                 if let Some(slot) = local_slot
                     && let AssignOp::SubAssign = compound
                     && let ExprKind::Literal(Literal::Int(v)) = &value.kind
@@ -631,7 +631,7 @@ impl Compiler {
         }
     }
 
-    // ── Control flow: if/else ──────────────────────────────────────
+    // --- Control flow: if/else ---
 
     pub(super) fn compile_call(
         &mut self,
@@ -642,7 +642,7 @@ impl Compiler {
     ) -> Result<u8, CompileError> {
         let line = span.line;
 
-        // Method call: receiver.method(args) → CallMethod
+        // Method call: receiver.method(args) -> CallMethod
         if let ExprKind::MemberAccess { object, member } = &callee.kind {
             // Allocate consecutive registers: [receiver, arg0, arg1, ...]
             let base = self.next_reg;
@@ -761,34 +761,35 @@ impl Compiler {
             }
         }
 
-        // Native call: known host function → CallNative(base, idx, arity)
+        // Native call: known host function -> CallNative(base, idx, arity)
         if let ExprKind::Identifier(name) = &callee.kind {
             let is_local = self.resolve_local(name).is_some();
             let is_upvalue = !is_local && self.resolve_upvalue(name).is_some();
-            if !is_local && !is_upvalue {
-                if let Some(&native_idx) = self.native_index.get(name.as_str()) {
-                    let base = self.next_reg;
-                    for arg in args {
-                        let arg_reg = self.alloc_temp(span)?;
-                        self.compile_call_arg(arg, Some(arg_reg))?;
-                    }
-                    let arity = u8::try_from(args.len()).map_err(|_| CompileError {
-                        annotation: None,
-                        message: "too many arguments (max 255)".to_string(),
-                        span: span.clone(),
-                    })?;
-                    self.emit(Instruction::CallNative(base, native_idx, arity), line);
-                    self.next_reg = base + 1;
-                    self.set_reg_type(base, ExprType::Other);
-                    if let Some(d) = dst {
-                        if d != base {
-                            self.emit(Instruction::Move(d, base), line);
-                            self.next_reg = base;
-                        }
-                        return Ok(d);
-                    }
-                    return Ok(base);
+            if !is_local
+                && !is_upvalue
+                && let Some(&native_idx) = self.native_index.get(name.as_str())
+            {
+                let base = self.next_reg;
+                for arg in args {
+                    let arg_reg = self.alloc_temp(span)?;
+                    self.compile_call_arg(arg, Some(arg_reg))?;
                 }
+                let arity = u8::try_from(args.len()).map_err(|_| CompileError {
+                    annotation: None,
+                    message: "too many arguments (max 255)".to_string(),
+                    span: span.clone(),
+                })?;
+                self.emit(Instruction::CallNative(base, native_idx, arity), line);
+                self.next_reg = base + 1;
+                self.set_reg_type(base, ExprType::Other);
+                if let Some(d) = dst {
+                    if d != base {
+                        self.emit(Instruction::Move(d, base), line);
+                        self.next_reg = base;
+                    }
+                    return Ok(d);
+                }
+                return Ok(base);
             }
         }
 
@@ -825,7 +826,7 @@ impl Compiler {
         Ok(base)
     }
 
-    // ── Collection compilation ─────────────────────────────────────
+    // --- Collection compilation ---
 
     pub(super) fn compile_array_literal(
         &mut self,
@@ -892,7 +893,7 @@ impl Compiler {
         Ok(d)
     }
 
-    // ── String interpolation compilation ───────────────────────────
+    // --- String interpolation compilation ---
 
     pub(super) fn compile_string_interpolation(
         &mut self,
@@ -942,7 +943,7 @@ impl Compiler {
         Ok(d)
     }
 
-    // ── Coroutine compilation ─────────────────────────────────────
+    // --- Coroutine compilation ---
 
     pub(super) fn compile_yield(
         &mut self,
@@ -1050,7 +1051,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Struct compilation ───────────────────────────────────────
+    // --- Struct compilation ---
 
     pub(super) fn compile_start(&mut self, expr: &Expr, span: &Span) -> Result<(), CompileError> {
         let line = span.line;
@@ -1102,5 +1103,5 @@ impl Compiler {
         Ok(reg)
     }
 
-    // ── State save/restore helpers ────────────────────────────────
+    // --- State save/restore helpers ---
 }

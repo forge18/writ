@@ -1,4 +1,4 @@
-//! Writ code generation — produces Rust source from Writ type declarations.
+//! Writ code generation -- produces Rust source from Writ type declarations.
 //!
 //! Generates struct definitions with `Deref`-based inheritance, trait
 //! definitions, constructors, and `WritObject` implementations from the

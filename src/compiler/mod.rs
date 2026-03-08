@@ -1,6 +1,7 @@
-//! Writ bytecode compiler — compiles AST to bytecode instructions.
+//! Writ bytecode compiler -- compiles AST to bytecode instructions.
 
 mod chunk;
+#[allow(clippy::module_inception)]
 mod compiler;
 mod error;
 mod instruction;

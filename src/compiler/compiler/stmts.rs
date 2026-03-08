@@ -46,7 +46,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Statement compilation ──────────────────────────────────────
+    // --- Statement compilation ---
 
     pub fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), CompileError> {
         let line = stmt.span.line;
@@ -118,7 +118,7 @@ impl Compiler {
                 if let Some(e) = expr {
                     let reg = self.compile_expr(e, None)?;
                     self.emit(Instruction::Return(reg), line);
-                    // Don't free temp — we're returning
+                    // Don't free temp -- we're returning
                 } else {
                     self.emit(Instruction::ReturnNull, line);
                 }
@@ -158,7 +158,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Expression compilation ─────────────────────────────────────
+    // --- Expression compilation ---
     // Returns the register containing the result.
     // If `dst` is Some, the result is placed there; otherwise a temp is allocated.
 
@@ -198,7 +198,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Control flow: while ────────────────────────────────────────
+    // --- Control flow: while ---
 
     pub(super) fn compile_while(
         &mut self,
@@ -238,7 +238,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Control flow: for ──────────────────────────────────────────
+    // --- Control flow: for ---
 
     pub(super) fn compile_for(
         &mut self,
@@ -445,7 +445,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Control flow: break/continue ───────────────────────────────
+    // --- Control flow: break/continue ---
 
     pub(super) fn compile_break(&mut self, span: &Span) -> Result<(), CompileError> {
         let line = span.line;
@@ -511,7 +511,7 @@ impl Compiler {
         Ok(())
     }
 
-    // ── When statement ─────────────────────────────────────────────
+    // --- When statement ---
 
     pub(super) fn compile_when(
         &mut self,
@@ -685,7 +685,7 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compiles a `when` expression — each arm's body leaves a value in a register.
+    /// Compiles a `when` expression -- each arm's body leaves a value in a register.
     pub(super) fn compile_when_expr(
         &mut self,
         subject: Option<&Expr>,
@@ -871,5 +871,5 @@ impl Compiler {
         Ok(())
     }
 
-    // ── Function compilation ───────────────────────────────────────
+    // --- Function compilation ---
 }

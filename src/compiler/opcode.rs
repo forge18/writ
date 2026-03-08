@@ -9,7 +9,7 @@
 /// Opcode constants. Numbering is contiguous for dense jump table generation.
 #[allow(non_upper_case_globals)]
 pub mod op {
-    // ── Load/Store (0-8) ──────────────────────────────────────────────
+    // --- Load/Store (0-8) ---
     pub const LoadInt: u8 = 0; // A+W: dst, i32
     pub const LoadConstInt: u8 = 1; // ABx: dst, u16
     pub const LoadFloat: u8 = 2; // A+W: dst, f32-as-u32
@@ -20,14 +20,14 @@ pub mod op {
     pub const Move: u8 = 7; // AB: dst, src
     pub const LoadGlobal: u8 = 8; // A+W: dst, u32
 
-    // ── Arithmetic generic (9-13) ─────────────────────────────────────
+    // --- Arithmetic generic (9-13) ---
     pub const Add: u8 = 9; // ABC
     pub const Sub: u8 = 10;
     pub const Mul: u8 = 11;
     pub const Div: u8 = 12;
     pub const Mod: u8 = 13;
 
-    // ── Arithmetic typed (14-21) ──────────────────────────────────────
+    // --- Arithmetic typed (14-21) ---
     pub const AddInt: u8 = 14;
     pub const AddFloat: u8 = 15;
     pub const SubInt: u8 = 16;
@@ -37,18 +37,18 @@ pub mod op {
     pub const DivInt: u8 = 20;
     pub const DivFloat: u8 = 21;
 
-    // ── Arithmetic immediate (22-23) ──────────────────────────────────
+    // --- Arithmetic immediate (22-23) ---
     pub const AddIntImm: u8 = 22; // AB+W: dst, src, i32
     pub const SubIntImm: u8 = 23; // AB+W: dst, src, i32
 
-    // ── Type coercion (24) ────────────────────────────────────────────
+    // --- Type coercion (24) ---
     pub const IntToFloat: u8 = 24; // AB: dst, src
 
-    // ── Unary (25-26) ─────────────────────────────────────────────────
+    // --- Unary (25-26) ---
     pub const Neg: u8 = 25; // AB
     pub const Not: u8 = 26; // AB
 
-    // ── Comparison generic (27-32) ────────────────────────────────────
+    // --- Comparison generic (27-32) ---
     pub const Eq: u8 = 27;
     pub const Ne: u8 = 28;
     pub const Lt: u8 = 29;
@@ -56,7 +56,7 @@ pub mod op {
     pub const Gt: u8 = 31;
     pub const Ge: u8 = 32;
 
-    // ── Comparison typed (33-44) ──────────────────────────────────────
+    // --- Comparison typed (33-44) ---
     pub const EqInt: u8 = 33;
     pub const EqFloat: u8 = 34;
     pub const NeInt: u8 = 35;
@@ -70,16 +70,16 @@ pub mod op {
     pub const GeInt: u8 = 43;
     pub const GeFloat: u8 = 44;
 
-    // ── Logical (45-46) ───────────────────────────────────────────────
+    // --- Logical (45-46) ---
     pub const And: u8 = 45;
     pub const Or: u8 = 46;
 
-    // ── Control flow (47-49) ──────────────────────────────────────────
+    // --- Control flow (47-49) ---
     pub const Jump: u8 = 47; // W: i32
     pub const JumpIfFalsy: u8 = 48; // A+W: src, i32
     pub const JumpIfTruthy: u8 = 49; // A+W: src, i32
 
-    // ── Fused test-and-jump int (50-55) ───────────────────────────────
+    // --- Fused test-and-jump int (50-55) ---
     pub const TestLtInt: u8 = 50; // AB+W: a, b, i32
     pub const TestLeInt: u8 = 51;
     pub const TestGtInt: u8 = 52;
@@ -87,58 +87,58 @@ pub mod op {
     pub const TestEqInt: u8 = 54;
     pub const TestNeInt: u8 = 55;
 
-    // ── Fused test-and-jump int immediate (56-59, DEAD) ───────────────
+    // --- Fused test-and-jump int immediate (56-59, DEAD) ---
     // Never emitted by compiler. Kept to preserve ≥117 match arms for LLVM.
     pub const TestLtIntImm: u8 = 56;
     pub const TestLeIntImm: u8 = 57;
     pub const TestGtIntImm: u8 = 58;
     pub const TestGeIntImm: u8 = 59;
 
-    // ── Fused test-and-jump float (60-63) ─────────────────────────────
+    // --- Fused test-and-jump float (60-63) ---
     pub const TestLtFloat: u8 = 60;
     pub const TestLeFloat: u8 = 61;
     pub const TestGtFloat: u8 = 62;
     pub const TestGeFloat: u8 = 63;
 
-    // ── Return (64-65) ────────────────────────────────────────────────
+    // --- Return (64-65) ---
     pub const Return: u8 = 64; // A: src
     pub const ReturnNull: u8 = 65; // Z: no operands
 
-    // ── Function calls (66-71) ────────────────────────────────────────
+    // --- Function calls (66-71) ---
     pub const Call: u8 = 66; // AB: base, arity
     pub const CallDirect: u8 = 67; // AB+W: base, arity, u32(func_idx)
     pub const CallNative: u8 = 68; // AB+W: base, arity, u32(id)
     pub const CallMethod: u8 = 69; // AB+W: base, arity, u32(hash)
     pub const TailCallDirect: u8 = 70; // AB+W: base, arity, u32(func_idx)
 
-    // ── Null handling (71) ────────────────────────────────────────────
+    // --- Null handling (71) ---
     pub const NullCoalesce: u8 = 71; // ABC
 
-    // ── String (72) ───────────────────────────────────────────────────
+    // --- String (72) ---
     pub const Concat: u8 = 72; // ABC
 
-    // ── Collections (73-77) ───────────────────────────────────────────
+    // --- Collections (73-77) ---
     pub const MakeArray: u8 = 73; // ABC: dst, start, count(u8)
     pub const MakeDict: u8 = 74; // ABC: dst, start, count(u8)
     pub const GetIndex: u8 = 75; // ABC
     pub const SetIndex: u8 = 76; // ABC
     pub const Spread: u8 = 77; // A: src
 
-    // ── Fields (78-79) ────────────────────────────────────────────────
+    // --- Fields (78-79) ---
     pub const GetField: u8 = 78; // AB+W: dst, obj, u32(hash)
     pub const SetField: u8 = 79; // AB+W: obj, val, u32(hash)
 
-    // ── Structs & Classes (80-81) ─────────────────────────────────────
+    // --- Structs & Classes (80-81) ---
     pub const MakeStruct: u8 = 80; // ABC+W: dst, start, count, u32(name_hash)
     pub const MakeClass: u8 = 81; // ABC+W: dst, start, count, u32(name_hash)
 
-    // ── Closures & Upvalues (82-85) ───────────────────────────────────
+    // --- Closures & Upvalues (82-85) ---
     pub const LoadUpvalue: u8 = 82; // AB: dst, idx
     pub const StoreUpvalue: u8 = 83; // AB: val, idx
     pub const MakeClosure: u8 = 84; // ABx: dst, u16(func_idx)
     pub const CloseUpvalue: u8 = 85; // A: reg
 
-    // ── Coroutines (86-91) ────────────────────────────────────────────
+    // --- Coroutines (86-91) ---
     pub const StartCoroutine: u8 = 86; // AB: base, arity
     pub const Yield: u8 = 87; // Z
     pub const YieldSeconds: u8 = 88; // A: src
@@ -146,7 +146,7 @@ pub mod op {
     pub const YieldUntil: u8 = 90; // A: src
     pub const YieldCoroutine: u8 = 91; // AB: dst, src
 
-    // ── Quickened (92-111) ────────────────────────────────────────────
+    // --- Quickened (92-111) ---
     pub const QAddInt: u8 = 92;
     pub const QAddFloat: u8 = 93;
     pub const QSubInt: u8 = 94;
@@ -168,7 +168,7 @@ pub mod op {
     pub const QNeInt: u8 = 110;
     pub const QNeFloat: u8 = 111;
 
-    // ── AoSoA (mobile only) (112) ─────────────────────────────────────
+    // --- AoSoA (mobile only) (112) ---
     #[cfg(feature = "mobile-aosoa")]
     pub const ConvertToAoSoA: u8 = 112;
 
@@ -217,7 +217,7 @@ pub static INSTR_WORDS: [u8; 256] = {
     t
 };
 
-// ── Encoding helpers ──────────────────────────────────────────────────
+// --- Encoding helpers ---
 
 /// Encode a 1-word ABC instruction: `[op:8][a:8][b:8][c:8]`
 #[inline(always)]
@@ -250,7 +250,7 @@ pub const fn z(op: u8) -> u32 {
     op as u32
 }
 
-// ── Decoding helpers ──────────────────────────────────────────────────
+// --- Decoding helpers ---
 
 #[inline(always)]
 pub const fn decode_op(w: u32) -> u8 {

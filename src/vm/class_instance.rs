@@ -6,7 +6,7 @@ use super::field_layout::FieldLayout;
 use super::object::WritObject;
 use super::value::Value;
 
-/// A runtime class instance — a reference-type object with named fields and
+/// A runtime class instance -- a reference-type object with named fields and
 /// inheritance support.
 ///
 /// Unlike [`WritStruct`](crate::writ_struct::WritStruct) (value type, copied

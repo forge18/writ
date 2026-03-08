@@ -1,7 +1,8 @@
-//! Writ parser — parses token streams into an AST of expressions and statements.
+//! Writ parser -- parses token streams into an AST of expressions and statements.
 
 mod ast;
 mod error;
+#[allow(clippy::module_inception)]
 mod parser;
 
 pub use ast::{

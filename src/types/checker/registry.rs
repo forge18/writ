@@ -86,7 +86,7 @@ impl TypeChecker {
         decl: &ClassDecl,
         span: &Span,
     ) -> Result<(), TypeError> {
-        // Generic templates are not registered as concrete types — stored for later instantiation.
+        // Generic templates are not registered as concrete types -- stored for later instantiation.
         if !decl.type_params.is_empty() {
             self.generic_classes.insert(decl.name.clone(), decl.clone());
             return Ok(());
@@ -153,7 +153,7 @@ impl TypeChecker {
         decl: &StructDecl,
         span: &Span,
     ) -> Result<(), TypeError> {
-        // Generic templates are not registered as concrete types — stored for later instantiation.
+        // Generic templates are not registered as concrete types -- stored for later instantiation.
         if !decl.type_params.is_empty() {
             self.generic_structs.insert(decl.name.clone(), decl.clone());
             return Ok(());

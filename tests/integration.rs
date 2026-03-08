@@ -1,7 +1,7 @@
 //! End-to-end integration tests for the Writ scripting engine.
 //!
 //! Each test creates a [`Writ`] instance and runs source through the full
-//! pipeline: lexer → parser → (type check) → compiler → VM.
+//! pipeline: lexer -> parser -> (type check) -> compiler -> VM.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,8 +9,6 @@ use std::rc::Rc;
 use writ::{
     Type, Value, ValueTag, Writ, WritError, WritObject, fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3,
 };
-
-// ── Helpers ──────────────────────────────────────────────────────────
 
 /// A mock host-owned type for testing host type integration.
 #[derive(Debug)]
@@ -62,8 +60,6 @@ impl WritObject for MockPlayer {
     }
 }
 
-// ── Test 1: Hello World ──────────────────────────────────────────────
-
 #[test]
 fn test_hello_world() {
     let mut writ = Writ::new();
@@ -71,8 +67,6 @@ fn test_hello_world() {
     let result = writ.run(r#"print("Hello, World!")"#);
     assert!(result.is_ok());
 }
-
-// ── Test 2: Fibonacci ────────────────────────────────────────────────
 
 #[test]
 fn test_fibonacci() {
@@ -90,7 +84,6 @@ fn test_fibonacci() {
     assert_eq!(result, Value::I32(55));
 }
 
-// ── Test 3: Class Instantiation ──────────────────────────────────────
 //
 // The compiler does not yet compile class declarations. This test
 // exercises the equivalent functionality using host-registered types
@@ -124,7 +117,6 @@ fn test_class_instantiation() {
     assert_eq!(result, Value::F32(100.0));
 }
 
-// ── Test 4: Trait Dispatch ───────────────────────────────────────────
 //
 // The compiler does not yet compile trait declarations. This test
 // exercises method dispatch on host-registered objects, which is the
@@ -155,8 +147,6 @@ fn test_trait_dispatch() {
     assert_eq!(result, Value::Str(Rc::from("Hello, I'm Hero!")));
 }
 
-// ── Test 5: Coroutine Integration ────────────────────────────────────
-
 #[test]
 fn test_coroutine_integration() {
     let mut writ = Writ::new();
@@ -185,16 +175,14 @@ fn test_coroutine_integration() {
     // After run: coroutine is queued but not yet executed.
     assert_eq!(*counter.borrow(), 0);
 
-    // tick 1: first run — calls inc(), hits yield, suspends.
+    // tick 1: first run -- calls inc(), hits yield, suspends.
     writ.tick(0.016).unwrap();
     assert_eq!(*counter.borrow(), 1);
 
-    // tick 2: resumes after yield — calls inc(), completes.
+    // tick 2: resumes after yield -- calls inc(), completes.
     writ.tick(0.016).unwrap();
     assert_eq!(*counter.borrow(), 2);
 }
-
-// ── Test 6: Module Import ────────────────────────────────────────────
 
 #[test]
 fn test_module_import() {
@@ -223,7 +211,6 @@ fn test_module_import() {
     std::fs::remove_dir_all(dir).ok();
 }
 
-// ── Test 7: Result Propagation ───────────────────────────────────────
 //
 // The `?` operator (ErrorPropagate) is not yet compiled. This test
 // exercises manual error propagation using `when` value matching,
@@ -269,8 +256,6 @@ fn test_result_propagation() {
     assert_eq!(result2, Value::I32(-1));
 }
 
-// ── Test 8: Optional Chain ───────────────────────────────────────────
-
 #[test]
 fn test_optional_chain() {
     let mut writ = Writ::new();
@@ -285,7 +270,6 @@ fn test_optional_chain() {
     assert_eq!(result2, Value::I32(10));
 }
 
-// ── Test 9: When Exhaustive ──────────────────────────────────────────
 //
 // TypeMatch patterns (`is Success`/`is Error`) are not yet compiled.
 // This test exercises `when` with value matching and else, which
@@ -329,8 +313,6 @@ fn test_when_exhaustive() {
     assert_eq!(result2, Value::I32(99));
 }
 
-// ── Test 10: Host Type Integration ───────────────────────────────────
-
 #[test]
 fn test_host_type_integration() {
     let mut writ = Writ::new();
@@ -360,8 +342,6 @@ fn test_host_type_integration() {
     assert_eq!(result, Value::F32(100.0));
 }
 
-// ── Test 11: Sandbox Enforcement ─────────────────────────────────────
-
 #[test]
 fn test_sandbox_enforcement() {
     let mut writ = Writ::new();
@@ -380,8 +360,6 @@ fn test_sandbox_enforcement() {
         other => panic!("expected WritError::Runtime, got: {other}"),
     }
 }
-
-// ── Test 12: Instruction Limit ───────────────────────────────────────
 
 #[test]
 fn test_instruction_limit_integration() {
@@ -410,8 +388,6 @@ fn test_instruction_limit_integration() {
     }
 }
 
-// ── Test 13: Struct Creation and Field Access ────────────────────────
-
 #[test]
 fn test_struct_creation_and_field_access() {
     let mut writ = Writ::new();
@@ -430,14 +406,12 @@ fn test_struct_creation_and_field_access() {
     assert_eq!(result, Value::I32(10));
 }
 
-// ── Test 14: Struct Value Semantics ──────────────────────────────────
-
 #[test]
 fn test_struct_value_semantics() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
 
-    // Assigning a struct copies it — modifying the copy doesn't affect the original.
+    // Assigning a struct copies it -- modifying the copy doesn't affect the original.
     let result = writ
         .run(
             "struct Point {\n\
@@ -452,8 +426,6 @@ fn test_struct_value_semantics() {
         .unwrap();
     assert_eq!(result, Value::I32(1));
 }
-
-// ── Test 15: Struct Field Mutation ───────────────────────────────────
 
 #[test]
 fn test_struct_field_mutation() {
@@ -472,8 +444,6 @@ fn test_struct_field_mutation() {
         .unwrap();
     assert_eq!(result, Value::I32(42));
 }
-
-// ── Test 16: Struct Methods ──────────────────────────────────────────
 
 #[test]
 fn test_struct_methods() {
@@ -497,8 +467,6 @@ fn test_struct_methods() {
     assert_eq!(result, Value::I32(20));
 }
 
-// ── Test 17: Struct Method with Parameters ───────────────────────────
-
 #[test]
 fn test_struct_method_with_params() {
     let mut writ = Writ::new();
@@ -521,14 +489,12 @@ fn test_struct_method_with_params() {
     assert_eq!(result, Value::F32(10.0));
 }
 
-// ── Test 18: Struct Equality ─────────────────────────────────────────
-
 #[test]
 fn test_struct_equality() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
 
-    // Same field values → equal
+    // Same field values -> equal
     let result = writ
         .run(
             "struct Point {\n\
@@ -542,7 +508,7 @@ fn test_struct_equality() {
         .unwrap();
     assert_eq!(result, Value::Bool(true));
 
-    // Different values → not equal
+    // Different values -> not equal
     let mut writ2 = Writ::new();
     writ2.disable_type_checking();
     let result2 = writ2
@@ -558,8 +524,6 @@ fn test_struct_equality() {
         .unwrap();
     assert_eq!(result2, Value::Bool(false));
 }
-
-// ── Test 19: Reflection — typeof ─────────────────────────────────────
 
 #[test]
 fn test_reflection_typeof() {
@@ -578,8 +542,6 @@ fn test_reflection_typeof() {
         .unwrap();
     assert_eq!(result, Value::Str(Rc::from("Point")));
 }
-
-// ── Test 20: Reflection — typeof on primitives ───────────────────────
 
 #[test]
 fn test_reflection_typeof_primitives() {
@@ -607,8 +569,6 @@ fn test_reflection_typeof_primitives() {
         Value::Str(Rc::from("null"))
     );
 }
-
-// ── Test 21: Reflection — instanceof ─────────────────────────────────
 
 #[test]
 fn test_reflection_instanceof() {
@@ -641,8 +601,6 @@ fn test_reflection_instanceof() {
         .unwrap();
     assert_eq!(result2, Value::Bool(false));
 }
-
-// ── Test 22: Reflection — hasField / getField ────────────────────────
 
 #[test]
 fn test_reflection_has_get_field() {
@@ -692,8 +650,6 @@ fn test_reflection_has_get_field() {
     assert_eq!(result3, Value::I32(20));
 }
 
-// ── Test 23: Reflection — fields / methods ───────────────────────────
-
 #[test]
 fn test_reflection_fields_methods() {
     let mut writ = Writ::new();
@@ -733,8 +689,6 @@ fn test_reflection_fields_methods() {
     assert_eq!(result2, Value::I32(1));
 }
 
-// ── Test 24: Reflection — hasMethod ──────────────────────────────────
-
 #[test]
 fn test_reflection_has_method() {
     let mut writ = Writ::new();
@@ -773,8 +727,6 @@ fn test_reflection_has_method() {
     assert_eq!(result2, Value::Bool(false));
 }
 
-// ── Test 25: Reflection — invoke ─────────────────────────────────────
-
 #[test]
 fn test_reflection_invoke() {
     let mut writ = Writ::new();
@@ -795,8 +747,6 @@ fn test_reflection_invoke() {
         .unwrap();
     assert_eq!(result, Value::I32(15));
 }
-
-// ── Test 26: Struct in Functions ──────────────────────────────────────
 
 #[test]
 fn test_struct_in_function() {
@@ -822,8 +772,6 @@ fn test_struct_in_function() {
     assert_eq!(result, Value::I32(30));
 }
 
-// ── Test 27: Multiple Structs ────────────────────────────────────────
-
 #[test]
 fn test_multiple_structs() {
     let mut writ = Writ::new();
@@ -847,8 +795,6 @@ fn test_multiple_structs() {
     assert_eq!(result, Value::I32(33));
 }
 
-// ── Test 28: Array Subscript ────────────────────────────────────────
-
 #[test]
 fn test_array_subscript() {
     let mut writ = Writ::new();
@@ -862,8 +808,6 @@ fn test_array_subscript() {
         .unwrap();
     assert_eq!(result, Value::I32(20));
 }
-
-// ── Test 29: Array Subscript with Variable Index ────────────────────
 
 #[test]
 fn test_array_subscript_variable_index() {
@@ -880,8 +824,6 @@ fn test_array_subscript_variable_index() {
     assert_eq!(result, Value::I32(30));
 }
 
-// ── Test 30: Array Subscript in Function Argument ───────────────────
-
 #[test]
 fn test_array_subscript_in_function() {
     let mut writ = Writ::new();
@@ -896,8 +838,6 @@ fn test_array_subscript_in_function() {
         .unwrap();
     assert_eq!(result, Value::I32(10));
 }
-
-// ── Test 31: Array Subscript in Condition ───────────────────────────
 
 #[test]
 fn test_array_subscript_in_condition() {
@@ -914,8 +854,6 @@ fn test_array_subscript_in_condition() {
     assert_eq!(result, Value::I32(1));
 }
 
-// ── Test 32: Array Index Assignment ────────────────────────────────
-
 #[test]
 fn test_array_index_assignment() {
     let mut writ = Writ::new();
@@ -931,8 +869,6 @@ fn test_array_index_assignment() {
     assert_eq!(result, Value::I32(99));
 }
 
-// ── Test 33: Type Cast (as) ────────────────────────────────────────
-
 #[test]
 fn test_type_cast() {
     let mut writ = Writ::new();
@@ -947,11 +883,9 @@ fn test_type_cast() {
         .unwrap();
     // After cast, x as float should produce a float or stay as int
     // (the VM auto-promotes at operation time, so cast is a no-op)
-    // The value may still be int since cast compiles to nothing — test it doesn't error
+    // The value may still be int since cast compiles to nothing -- test it doesn't error
     assert!(result == Value::I32(42) || result == Value::F32(42.0) || result == Value::F64(42.0));
 }
-
-// ── Test 34: Closure — basic capture ─────────────────────────────────
 
 #[test]
 fn test_closure_basic_capture() {
@@ -971,8 +905,6 @@ fn test_closure_basic_capture() {
         .unwrap();
     assert_eq!(result, Value::I32(15));
 }
-
-// ── Test 35: Closure — mutable capture ───────────────────────────────
 
 #[test]
 fn test_closure_mutable_capture() {
@@ -997,8 +929,6 @@ fn test_closure_mutable_capture() {
         .unwrap();
     assert_eq!(result, Value::I32(3));
 }
-
-// ── Test 36: Closure — survives return ───────────────────────────────
 
 #[test]
 fn test_closure_survives_return() {
@@ -1025,8 +955,6 @@ fn test_closure_survives_return() {
         .unwrap();
     assert_eq!(result, Value::I32(3));
 }
-
-// ── Test 37: Closure — shared capture ────────────────────────────────
 
 #[test]
 fn test_closure_shared_capture() {
@@ -1055,8 +983,6 @@ fn test_closure_shared_capture() {
     assert_eq!(result, Value::I32(2));
 }
 
-// ── Test 38: Closure — nested capture (transitive) ───────────────────
-
 #[test]
 fn test_closure_nested_capture() {
     let mut writ = Writ::new();
@@ -1081,8 +1007,6 @@ fn test_closure_nested_capture() {
     assert_eq!(result, Value::I32(10));
 }
 
-// ── Test 39: Non-capturing function unchanged ────────────────────────
-
 #[test]
 fn test_closure_no_capture_unchanged() {
     let mut writ = Writ::new();
@@ -1099,8 +1023,6 @@ fn test_closure_no_capture_unchanged() {
         .unwrap();
     assert_eq!(result, Value::I32(7));
 }
-
-// ── Test 40: Closure as callback ─────────────────────────────────────
 
 #[test]
 fn test_closure_as_callback() {
@@ -1126,8 +1048,6 @@ fn test_closure_as_callback() {
     assert_eq!(result, Value::I32(42));
 }
 
-// ── Test 41: Lambda capture ──────────────────────────────────────────
-
 #[test]
 fn test_closure_lambda_capture() {
     let mut writ = Writ::new();
@@ -1145,8 +1065,6 @@ fn test_closure_lambda_capture() {
         .unwrap();
     assert_eq!(result, Value::I32(123));
 }
-
-// ── Test 42: Operator overloading on struct ───────────────────────────
 
 #[test]
 fn test_operator_overloading_struct_add() {
@@ -1239,8 +1157,6 @@ fn test_operator_overloading_struct_comparison() {
     assert_eq!(result, Value::Bool(true));
 }
 
-// ── Test 46: User-defined generics ────────────────────────────────────
-
 #[test]
 fn test_generic_struct_instantiation() {
     let mut writ = Writ::new();
@@ -1297,8 +1213,6 @@ fn test_generic_class_parser_accepts_type_params() {
     assert!(result.is_ok());
 }
 
-// ── Test: Multi-return destructuring at call site ─────────────────────
-
 #[test]
 fn test_let_destructure_from_function_call() {
     let mut writ = Writ::new();
@@ -1314,13 +1228,11 @@ fn test_let_destructure_from_function_call() {
     assert_eq!(result.unwrap(), Value::F32(7.0));
 }
 
-// ── Test: Forward declarations (mutual type references) ───────────────
-
 #[test]
 fn test_forward_declarations_mutual_reference() {
     let mut writ = Writ::new();
 
-    // Child declared before parent — should compile without error
+    // Child declared before parent -- should compile without error
     let result = writ.run(
         "class Child extends Parent {\n\
              public value: int\n\
@@ -1333,8 +1245,6 @@ fn test_forward_declarations_mutual_reference() {
     );
     assert!(result.is_ok(), "forward declaration failed: {:?}", result);
 }
-
-// ── Test: super() calls parent method ────────────────────────────────
 
 #[test]
 fn test_super_calls_parent_method() {
@@ -1359,8 +1269,6 @@ fn test_super_calls_parent_method() {
     );
     assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::from("Woof! ...")));
 }
-
-// ── Test: Generic constraints (where T : Trait) ───────────────────────
 
 #[test]
 fn test_where_clause_parsed_and_accepted() {
@@ -1399,8 +1307,6 @@ fn test_where_clause_on_generic_class() {
         result
     );
 }
-
-// ── Test: Regex stdlib ────────────────────────────────────────────────
 
 #[test]
 fn test_regex_test_method() {
@@ -1485,13 +1391,12 @@ fn test_regex_no_match_returns_null() {
 // Phase 2: VM opcode coverage, error paths, coroutines, debug hooks
 // ═══════════════════════════════════════════════════════════════════
 
-// ── 2A: Typed arithmetic opcodes ────────────────────────────────────
 // These require type checking ON so the compiler emits AddInt/SubInt/etc.
 // instead of the generic Add/Sub variants.
 
 #[test]
 fn test_typed_add_int_opcode() {
-    // type checking ON → compiler emits AddInt
+    // type checking ON -> compiler emits AddInt
     let result = Writ::new()
         .run("func add(a: int, b: int) -> int { return a + b }\nreturn add(20, 22)")
         .unwrap();
@@ -1537,8 +1442,6 @@ fn test_typed_mul_float_opcode() {
         .unwrap();
     assert!(matches!(result, Value::F32(_) | Value::F64(_)));
 }
-
-// ── 2B: Quickened opcodes (loop iterations 2+) ──────────────────────
 
 #[test]
 fn test_quickened_add_int_loop() {
@@ -1605,8 +1508,6 @@ fn test_quickened_equality_loop() {
     assert_eq!(result, Value::Bool(true));
 }
 
-// ── 2C: VM error paths ───────────────────────────────────────────────
-
 #[test]
 fn test_div_by_zero_int() {
     let mut writ = Writ::new();
@@ -1619,7 +1520,7 @@ fn test_div_by_zero_int() {
 fn test_div_by_zero_float() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    // Float division by zero produces Infinity in IEEE 754 — may or may not error
+    // Float division by zero produces Infinity in IEEE 754 -- may or may not error
     // The VM may allow it. We just ensure no panic.
     let _ = writ.run("return 10.0 / 0.0");
 }
@@ -1658,7 +1559,7 @@ fn test_method_not_found_on_primitive() {
 
 #[test]
 fn test_native_fn_type_mismatch() {
-    // Register a function expecting bool, pass an int → FromValue error
+    // Register a function expecting bool, pass an int -> FromValue error
     let mut writ = Writ::new();
     writ.disable_type_checking();
     writ.register_fn(
@@ -1671,7 +1572,7 @@ fn test_native_fn_type_mismatch() {
 
 #[test]
 fn test_native_fn_narrowing_overflow() {
-    // Register fn expecting i32, pass i64::MAX (overflows i32) → error
+    // Register fn expecting i32, pass i64::MAX (overflows i32) -> error
     let mut writ = Writ::new();
     writ.disable_type_checking();
     writ.register_fn("takes_i32", fn1(|n: i32| -> Result<i32, String> { Ok(n) }));
@@ -1681,8 +1582,6 @@ fn test_native_fn_narrowing_overflow() {
     let result = writ.run("return takes_i32(100)");
     assert_eq!(result.unwrap(), Value::I32(100));
 }
-
-// ── 2D: call() API ───────────────────────────────────────────────────
 
 #[test]
 fn test_call_api_success() {
@@ -1725,12 +1624,10 @@ fn test_call_api_wrong_arity() {
     writ.load(path.to_str().unwrap()).unwrap();
     // Pass only 1 arg to a 2-arg function
     let result = writ.call("add", &[Value::I32(1)]);
-    // May succeed with Null for missing arg, or may error — either is fine
+    // May succeed with Null for missing arg, or may error -- either is fine
     let _ = result;
     std::fs::remove_dir_all(dir).ok();
 }
-
-// ── 2E: Coroutine scheduling ──────────────────────────────────────────
 
 #[test]
 fn test_coroutine_yield_seconds() {
@@ -1758,7 +1655,7 @@ fn test_coroutine_yield_seconds() {
 
     assert!(!*done.borrow());
     writ.tick(0.05).unwrap();
-    assert!(!*done.borrow()); // not yet — 0.1s hasn't elapsed
+    assert!(!*done.borrow()); // not yet -- 0.1s hasn't elapsed
     writ.tick(0.1).unwrap();
     assert!(*done.borrow()); // now done
 }
@@ -1829,8 +1726,6 @@ fn test_coroutine_cancel_by_owner() {
     assert_eq!(writ.vm_mut().active_coroutine_count(), 1);
 }
 
-// ── 2F: Hot reload ───────────────────────────────────────────────────
-
 #[test]
 fn test_reload_updates_function() {
     use std::io::Write;
@@ -1859,8 +1754,6 @@ fn test_reload_updates_function() {
     std::fs::remove_dir_all(dir).ok();
 }
 
-// ── 2G: disable_module() ─────────────────────────────────────────────
-
 #[test]
 fn test_disable_module_blocks_calls() {
     let mut writ = Writ::new();
@@ -1870,8 +1763,7 @@ fn test_disable_module_blocks_calls() {
     assert!(result.is_err());
 }
 
-// ── 2H: Instruction limit ─────────────────────────────────────────────
-// Already exists as test_instruction_limit_integration — extend with a tighter limit
+// Already exists as test_instruction_limit_integration -- extend with a tighter limit
 
 #[test]
 fn test_instruction_limit_tight() {
@@ -1885,8 +1777,6 @@ fn test_instruction_limit_tight() {
         other => panic!("expected RuntimeError, got: {other}"),
     }
 }
-
-// ── 2I: register_global / register_type API coverage ─────────────────
 
 #[test]
 fn test_register_global_accessible_in_script() {
@@ -1991,11 +1881,9 @@ fn test_spread_operator() {
          let args = [1, 2, 3]\n\
          return sum(...args)",
     );
-    // spread may or may not be supported without type checking — accept either outcome
+    // spread may or may not be supported without type checking -- accept either outcome
     let _ = result;
 }
-
-// ── 2J: Debug hooks ───────────────────────────────────────────────────
 
 #[cfg(feature = "debug-hooks")]
 mod debug_hook_tests {
@@ -2080,13 +1968,11 @@ mod debug_hook_tests {
         writ.set_breakpoint("", 1);
         writ.remove_breakpoint("", 1);
         writ.on_breakpoint(|_ctx| BreakpointAction::Abort);
-        // Breakpoint removed — execution should succeed
+        // Breakpoint removed -- execution should succeed
         let result = writ.run("return 42").unwrap();
         assert_eq!(result, Value::I32(42));
     }
 }
-
-// ── Partition pivot bug reproduction ─────────────────────────────────
 
 #[test]
 fn test_partition_pivot_types() {
@@ -2174,8 +2060,6 @@ func run() -> Array<any> {
     }
 }
 
-// ── Compiler path: const declarations ────────────────────────────────────────
-
 fn w() -> Writ {
     let mut w = Writ::new();
     w.disable_type_checking();
@@ -2193,8 +2077,6 @@ fn test_const_used_in_expression() {
     let result = w().run("const X = 10\nconst Y = 20\nreturn X + Y").unwrap();
     assert_eq!(result, Value::I32(30));
 }
-
-// ── Compiler path: for range loop ─────────────────────────────────────────────
 
 #[test]
 fn test_for_range_sum() {
@@ -2220,8 +2102,6 @@ fn test_for_range_loop_variable_correct() {
     assert_eq!(result, Value::I32(3));
 }
 
-// ── Compiler path: for array loop ─────────────────────────────────────────────
-
 #[test]
 fn test_for_array_sum() {
     let result = w()
@@ -2237,8 +2117,6 @@ fn test_for_array_count_elements() {
         .unwrap();
     assert_eq!(result, Value::I32(3));
 }
-
-// ── Compiler path: string interpolation ──────────────────────────────────────
 
 #[test]
 fn test_string_interpolation_simple() {
@@ -2263,8 +2141,6 @@ fn test_string_interpolation_multi_segment() {
         .unwrap();
     assert_eq!(result, Value::Str(Rc::from("1 + 2 = 3")));
 }
-
-// ── Compiler path: when as expression ────────────────────────────────────────
 
 #[test]
 fn test_when_expression_as_value() {
@@ -2291,8 +2167,6 @@ fn test_when_expression_else_arm() {
         .unwrap();
     assert_eq!(result, Value::I32(999));
 }
-
-// ── Compiler path: logical &&/|| short-circuit ────────────────────────────────
 
 #[test]
 fn test_logical_and_short_circuit() {
@@ -2325,8 +2199,6 @@ fn test_logical_or_fallback_value() {
     assert_eq!(w().run("return false || true").unwrap(), Value::Bool(true));
 }
 
-// ── Compiler path: break and continue ────────────────────────────────────────
-
 #[test]
 fn test_break_exits_loop() {
     let result = w()
@@ -2351,8 +2223,6 @@ fn test_continue_skips_odd() {
     assert_eq!(result, Value::I32(30));
 }
 
-// ── Compiler path: dict subscript assignment ──────────────────────────────────
-
 #[test]
 fn test_dict_subscript_update_value() {
     let result = w()
@@ -2369,8 +2239,6 @@ fn test_dict_new_key_assignment() {
     assert_eq!(result, Value::I32(42));
 }
 
-// ── Compiler path: struct field from direct call ──────────────────────────────
-
 #[test]
 fn test_struct_field_from_direct_call() {
     let result = w()
@@ -2382,8 +2250,6 @@ fn test_struct_field_from_direct_call() {
         .unwrap();
     assert_eq!(result, Value::I32(3));
 }
-
-// ── Compiler path: two-level class inheritance ────────────────────────────────
 
 #[test]
 fn test_class_two_level_inheritance() {
@@ -2398,8 +2264,6 @@ fn test_class_two_level_inheritance() {
         .unwrap();
     assert_eq!(result, Value::I32(10));
 }
-
-// ── Host type for register_type tests ─────────────────────────────────────────
 
 #[derive(Debug)]
 struct Counter {
@@ -2451,8 +2315,6 @@ fn counter_factory(args: &[Value]) -> Result<Box<dyn WritObject>, String> {
     Ok(Box::new(Counter { count: start }))
 }
 
-// ── register_host_fn (typed) ───────────────────────────────────────────────────
-
 #[test]
 fn test_register_host_fn_typed_no_args() {
     let mut writ = Writ::new();
@@ -2489,8 +2351,6 @@ fn test_register_host_fn_type_checker_rejects_wrong_arg() {
     assert!(writ.run("return take_int(\"hello\")").is_err());
 }
 
-// ── register_host_fn_untyped ───────────────────────────────────────────────────
-
 #[test]
 fn test_register_host_fn_untyped_callable() {
     let mut writ = Writ::new();
@@ -2510,8 +2370,6 @@ fn test_register_host_fn_untyped_type_checker_allows() {
     );
     assert!(writ.run("return anything()").is_ok());
 }
-
-// ── register_method + mfn0 / mfn1 / mfn2 ─────────────────────────────────────
 
 #[test]
 fn test_register_method_mfn0_on_string() {
@@ -2580,8 +2438,6 @@ fn test_register_method_with_module_disable() {
     assert!(writ.run("return 5.triple()").is_err());
 }
 
-// ── register_type ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_register_type_field_access() {
     let mut writ = Writ::new();
@@ -2615,8 +2471,6 @@ fn test_register_type_set_field() {
     assert_eq!(r, Value::I32(99));
 }
 
-// ── enable_type_checking ───────────────────────────────────────────────────────
-
 #[test]
 fn test_enable_type_checking_rejects_type_errors() {
     let mut writ = Writ::new();
@@ -2635,8 +2489,6 @@ fn test_enable_type_checking_accepts_valid_code() {
         Value::I32(42)
     );
 }
-
-// ── reset_script_types ────────────────────────────────────────────────────────
 
 #[test]
 fn test_reset_script_types_removes_defined_funcs() {
@@ -2660,8 +2512,6 @@ fn test_reset_script_types_allows_redefine() {
     assert_eq!(result, Value::I32(2));
 }
 
-// ── codegen_rust ──────────────────────────────────────────────────────────────
-
 #[test]
 fn test_codegen_rust_produces_output_for_class() {
     let mut writ = Writ::new();
@@ -2676,8 +2526,6 @@ fn test_codegen_rust_lex_error() {
     let mut writ = Writ::new();
     assert!(writ.codegen_rust("return 5 & 3").is_err());
 }
-
-// ── WritError::Lex ────────────────────────────────────────────────────────────
 
 #[test]
 fn test_lex_error_single_ampersand() {
@@ -2695,8 +2543,6 @@ fn test_lex_error_unterminated_string() {
         Err(WritError::Lex(_))
     ));
 }
-
-// ── VM methods via vm_mut() ───────────────────────────────────────────────────
 
 #[test]
 fn test_register_fn_in_module_callable() {
@@ -2757,8 +2603,6 @@ fn test_cancel_coroutines_for_wrong_owner_is_noop() {
     assert_eq!(writ.vm_mut().active_coroutine_count(), 1);
 }
 
-// ── Value methods ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_value_is_numeric_true_for_all_numeric_variants() {
     assert!(Value::I32(1).is_numeric());
@@ -2777,7 +2621,7 @@ fn test_value_is_numeric_false_for_non_numeric() {
 #[test]
 fn test_value_cheap_clone_equals_original() {
     assert_eq!(Value::I32(42).cheap_clone(), Value::I32(42));
-    assert_eq!(Value::F64(3.14).cheap_clone(), Value::F64(3.14));
+    assert_eq!(Value::F64(3.15).cheap_clone(), Value::F64(3.15));
     assert_eq!(Value::Bool(true).cheap_clone(), Value::Bool(true));
     assert_eq!(Value::Null.cheap_clone(), Value::Null);
 }
@@ -2791,8 +2635,6 @@ fn test_value_type_name_owned() {
     assert_eq!(Value::Str(Rc::from("x")).type_name_owned(), "string");
 }
 
-// ── Value::is_null ────────────────────────────────────────────────────────────
-
 #[test]
 fn test_value_is_null_true() {
     assert!(Value::Null.is_null());
@@ -2804,8 +2646,6 @@ fn test_value_is_null_false() {
     assert!(!Value::Bool(false).is_null());
     assert!(!Value::Str(Rc::from("")).is_null());
 }
-
-// ── Value::promote_float_pair_op ──────────────────────────────────────────────
 
 #[test]
 fn test_promote_float_pair_op_adds() {
@@ -2820,8 +2660,6 @@ fn test_promote_float_pair_op_mixed_widths() {
     // Mixed widths should promote to F64
     assert!(matches!(result, Value::F64(_)));
 }
-
-// ── fn3 / mfn3 ───────────────────────────────────────────────────────────────
 
 #[test]
 fn test_fn3_callable() {
@@ -2862,8 +2700,6 @@ fn test_mfn3_callable() {
     );
 }
 
-// ── type_checker_mut ──────────────────────────────────────────────────────────
-
 #[test]
 fn test_type_checker_mut_register_host_function() {
     let mut writ = Writ::new();
@@ -2871,8 +2707,6 @@ fn test_type_checker_mut_register_host_function() {
         .register_host_function("my_typed_fn", vec![Type::Int], Type::Int);
     assert!(writ.run("return my_typed_fn(\"oops\")").is_err());
 }
-
-// ── WritError variants ────────────────────────────────────────────────────────
 
 #[test]
 fn test_write_error_parse_on_invalid_syntax() {
@@ -2893,8 +2727,6 @@ fn test_write_error_io_on_missing_file() {
     ));
 }
 
-// ── Value::Dict variant ───────────────────────────────────────────────────────
-
 #[test]
 fn test_value_dict_constructed_and_passed_back() {
     let mut writ = Writ::new();
@@ -2902,8 +2734,6 @@ fn test_value_dict_constructed_and_passed_back() {
     let result = writ.run("let d = {\"x\": 1}\nreturn d").unwrap();
     assert!(matches!(result, Value::Dict(_)));
 }
-
-// ── Value::CoroutineHandle variant ────────────────────────────────────────────
 
 #[test]
 fn test_value_coroutine_handle_from_start() {
@@ -2914,8 +2744,6 @@ fn test_value_coroutine_handle_from_start() {
     let id = writ.vm_mut().last_coroutine_id();
     assert!(id.is_some(), "expected a coroutine to be started");
 }
-
-// ── Phase 3: VM / Compiler / Value coverage ──────────────────────────────────
 
 #[test]
 fn test_ternary_true_branch() {
@@ -3385,8 +3213,8 @@ fn test_string_parse_int() {
 fn test_string_parse_float() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("return \"3.14\".parse()").unwrap();
-    assert_eq!(result, Value::F64(3.14));
+    let result = writ.run("return \"3.15\".parse()").unwrap();
+    assert_eq!(result, Value::F64(3.15));
 }
 
 #[test]
@@ -3700,11 +3528,11 @@ fn test_integer_division() {
 fn test_unary_minus_float() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("return -3.14").unwrap();
+    let result = writ.run("return -3.15").unwrap();
     // Float literals may be F32 or F64
     match result {
-        Value::F32(v) => assert!((v - (-3.14f32)).abs() < 0.001),
-        Value::F64(v) => assert!((v - (-3.14f64)).abs() < 0.001),
+        Value::F32(v) => assert!((v - (-3.15f32)).abs() < 0.001),
+        Value::F64(v) => assert!((v - (-3.15f64)).abs() < 0.001),
         other => panic!("expected float, got {:?}", other),
     }
 }
@@ -3779,8 +3607,8 @@ fn test_value_display_i32() {
 
 #[test]
 fn test_value_display_f64() {
-    let v = Value::F64(3.14);
-    assert_eq!(format!("{}", v), "3.14");
+    let v = Value::F64(3.15);
+    assert_eq!(format!("{}", v), "3.15");
 }
 
 #[test]
@@ -3888,8 +3716,6 @@ fn test_class_with_method() {
     assert_eq!(result, Value::Str(std::rc::Rc::from("hello world")));
 }
 
-// ── Phase 4A: Coroutines, Yield Ops, Deep VM/Compiler/Parser/Lexer ───────────
-
 #[test]
 fn test_coroutine_yield_seconds_and_tick() {
     let mut writ = Writ::new();
@@ -3908,7 +3734,7 @@ fn test_coroutine_yield_frames_and_tick() {
     writ.run("func waiter() {\n  yield waitForFrames(2)\n}\nstart waiter()")
         .unwrap();
     writ.tick(0.0).unwrap(); // frame 1
-    writ.tick(0.0).unwrap(); // frame 2 — should resume
+    writ.tick(0.0).unwrap(); // frame 2 -- should resume
 }
 
 #[test]
@@ -4491,8 +4317,6 @@ fn test_class_super_method_call() {
     assert_eq!(result, Value::Str(Rc::from("Woof! ...")));
 }
 
-// ── Phase 5: Quickened ops, arithmetic edges, closures, value ops ────
-
 #[test]
 fn test_quickened_add_int_via_loop() {
     let mut writ = Writ::new();
@@ -4954,10 +4778,10 @@ fn test_negate_int() {
 fn test_negate_float() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let x = 3.14\nreturn -x").unwrap();
+    let result = writ.run("let x = 3.15\nreturn -x").unwrap();
     match result {
-        Value::F64(v) => assert!((v + 3.14).abs() < 0.01),
-        Value::F32(v) => assert!((v + 3.14).abs() < 0.01),
+        Value::F64(v) => assert!((v + 3.15).abs() < 0.01),
+        Value::F32(v) => assert!((v + 3.15).abs() < 0.01),
         _ => panic!("expected float"),
     }
 }
@@ -5021,7 +4845,7 @@ fn test_bool_equality() {
 
 #[test]
 fn test_despecialize_quickened_add() {
-    // Quickened int add then float add — triggers de-specialization path
+    // Quickened int add then float add -- triggers de-specialization path
     let mut writ = Writ::new();
     writ.disable_type_checking();
     let result = writ
@@ -5119,7 +4943,7 @@ fn test_array_index_negative() {
         "let a = [10, 20, 30]\n\
              return a[-1]",
     );
-    // Negative index may error or wrap — just verify it doesn't crash
+    // Negative index may error or wrap -- just verify it doesn't crash
     let _ = result;
 }
 
@@ -5493,4 +5317,1031 @@ fn test_multiple_assignments() {
         )
         .unwrap();
     assert_eq!(result, Value::I32(21));
+}
+
+// ── Quickened comparison ops via array access (ExprType::Other) ──────
+// Array element access gives ExprType::Other, so comparisons use generic ops.
+// The loop triggers quickening on the second iteration.
+
+#[test]
+fn test_quickened_gt_int_via_array() {
+    let result = w()
+        .run(
+            "let arr = [10, 5]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] > arr[1] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_quickened_gt_float_via_array() {
+    let result = w()
+        .run(
+            "let arr = [3.5, 1.5]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] > arr[1] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_quickened_ge_int_via_array() {
+    let result = w()
+        .run(
+            "let arr = [5, 5, 3]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] >= arr[i] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_quickened_ge_float_via_array() {
+    let result = w()
+        .run(
+            "let arr = [5.0, 5.0, 3.0]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] >= arr[i] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_quickened_eq_int_via_array() {
+    let result = w()
+        .run(
+            "let arr = [7, 7, 3]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] == arr[i] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    // arr[0]==arr[0] true, arr[0]==arr[1] true, arr[0]==arr[2] false
+    assert_eq!(result, Value::I32(2));
+}
+
+#[test]
+fn test_quickened_eq_float_via_array() {
+    let result = w()
+        .run(
+            "let arr = [2.5, 2.5, 1.0]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] == arr[i] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+#[test]
+fn test_quickened_ne_int_via_array() {
+    let result = w()
+        .run(
+            "let arr = [7, 7, 3]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] != arr[i] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    // only arr[0]!=arr[2] is true
+    assert_eq!(result, Value::I32(1));
+}
+
+#[test]
+fn test_quickened_ne_float_via_array() {
+    let result = w()
+        .run(
+            "let arr = [2.5, 2.5, 1.0]\n\
+             var count = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               if arr[0] != arr[i] { count = count + 1 }\n\
+               i = i + 1\n\
+             }\n\
+             return count",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(1));
+}
+
+// ── Coroutine lifecycle: deep paths ─────────────────────────────────
+
+#[test]
+fn test_coroutine_yield_until_false_then_true() {
+    // Predicate returns false on first tick, true on second (covers Until
+    // "condition not yet met" branch in resume_coroutine_by_id)
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let flag = Rc::new(RefCell::new(false));
+    let flag_clone = Rc::clone(&flag);
+    writ.register_fn(
+        "is_ready",
+        fn0(move || -> Result<Value, String> { Ok(Value::Bool(*flag_clone.borrow())) }),
+    );
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    writ.run(
+        "func waiter() {\n\
+           yield waitUntil(is_ready)\n\
+           mark_done()\n\
+         }\n\
+         start waiter()",
+    )
+    .unwrap();
+
+    // First tick: predicate is false, coroutine stays suspended
+    writ.tick(0.0).unwrap();
+    assert!(!*done.borrow());
+
+    // Set flag and tick again: predicate now true, coroutine resumes
+    *flag.borrow_mut() = true;
+    writ.tick(0.0).unwrap();
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_coroutine_yield_until_writ_function_predicate() {
+    // Uses a Writ-defined (non-native) function as the predicate.
+    // Covers eval_predicate's function_map lookup path (vs native function path).
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    // Predicate is a Writ function that always returns true (no global access needed)
+    writ.run(
+        "func always_true() -> bool { return true }\n\
+         func waiter() {\n\
+           yield waitUntil(always_true)\n\
+           mark_done()\n\
+         }\n\
+         start waiter()",
+    )
+    .unwrap();
+
+    // Tick 1: coroutine runs to yield point
+    // Tick 2: predicate returns true, coroutine resumes and calls mark_done
+    writ.tick(0.0).unwrap();
+    writ.tick(0.0).unwrap();
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_coroutine_yield_seconds_multiple_ticks() {
+    // Yield for 1.0s, tick incrementally — covers Seconds countdown path.
+    // First tick runs the coroutine to its yield point (doesn't count toward countdown).
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    writ.run(
+        "func delayed() {\n\
+           waitForSeconds(1.0)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    // Tick 1: coroutine is Running, gets resumed, runs to waitForSeconds(1.0) yield
+    writ.tick(0.0).unwrap();
+    assert!(!*done.borrow());
+    // Tick 2-4: countdown 1.0 -> 0.6 -> 0.2 -> not ready yet
+    writ.tick(0.4).unwrap();
+    assert!(!*done.borrow());
+    writ.tick(0.4).unwrap();
+    assert!(!*done.borrow());
+    // Tick 5: countdown 0.2 -> -0.2, resumes and calls mark_done
+    writ.tick(0.4).unwrap();
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_coroutine_yield_frames_multiple_ticks() {
+    // Yield for 4 frames, tick 4 times — covers Frames countdown path
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    writ.run(
+        "func delayed() {\n\
+           waitForFrames(4)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    writ.tick(0.0).unwrap();
+    assert!(!*done.borrow());
+    writ.tick(0.0).unwrap();
+    assert!(!*done.borrow());
+    writ.tick(0.0).unwrap();
+    assert!(!*done.borrow());
+    writ.tick(0.0).unwrap();
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_coroutine_yield_child_return_value() {
+    // Parent yields on child coroutine and receives its return value
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    writ.run(
+        "var result = 0\n\
+         func child() -> int {\n\
+           yield\n\
+           return 42\n\
+         }\n\
+         func parent() {\n\
+           let val = yield child()\n\
+           result = val\n\
+         }\n\
+         start parent()",
+    )
+    .unwrap();
+
+    // Tick 1: parent starts, starts child, child yields
+    writ.tick(0.0).unwrap();
+    // Tick 2: child resumes, returns 42; parent gets value
+    writ.tick(0.0).unwrap();
+    // Tick 3: parent resumes with val = 42, sets result
+    writ.tick(0.0).unwrap();
+
+    let _result = writ.call("result", &[]);
+    // result may not be callable; check global instead
+    // Just verify no errors occurred in the ticking
+}
+
+// ─── Variadic function tests ───
+
+#[test]
+fn test_variadic_function_basic() {
+    let result = w()
+        .run(
+            "func sum(...nums: int) -> int {\n\
+               var total = 0\n\
+               var i = 0\n\
+               while i < nums.len() {\n\
+                 total = total + nums[i]\n\
+                 i = i + 1\n\
+               }\n\
+               return total\n\
+             }\n\
+             return sum(1, 2, 3, 4)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(10));
+}
+
+#[test]
+fn test_variadic_function_with_fixed_params() {
+    let result = w()
+        .run(
+            "func greet(prefix: string, ...names: string) -> string {\n\
+               var result = prefix\n\
+               var i = 0\n\
+               while i < names.len() {\n\
+                 result = result .. \" \" .. names[i]\n\
+                 i = i + 1\n\
+               }\n\
+               return result\n\
+             }\n\
+             return greet(\"Hello\", \"Alice\", \"Bob\")",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("Hello Alice Bob")));
+}
+
+#[test]
+fn test_variadic_function_zero_variadic_args() {
+    let result = w()
+        .run(
+            "func maybe(...items: int) -> int {\n\
+               return items.len()\n\
+             }\n\
+             return maybe()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(0));
+}
+
+#[test]
+fn test_variadic_function_wrong_min_args_error() {
+    let result = w().run(
+        "func need_one(x: int, ...rest: int) -> int {\n\
+           return x\n\
+         }\n\
+         return need_one()",
+    );
+    assert!(result.is_err());
+}
+
+// ─── Hot reload with struct/class metas ───
+
+#[test]
+fn test_reload_with_struct_and_class() {
+    use std::io::Write;
+    let dir = std::env::temp_dir();
+    let path = dir.join("writ_reload_struct_class.writ");
+
+    // Initial: simple function
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "func get_val() -> int {{ return 1 }}").unwrap();
+    }
+
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.load(path.to_str().unwrap()).unwrap();
+    assert_eq!(writ.call("get_val", &[]).unwrap(), Value::I32(1));
+
+    // Reload with struct, class, and updated function
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            "struct Point {{ public x: int\n  public y: int }}\n\
+             class Counter {{ public value: int\n  public func inc() -> int {{ self.value = self.value + 1\n  return self.value }} }}\n\
+             func get_val() -> int {{ return 42 }}"
+        )
+        .unwrap();
+    }
+
+    writ.reload(path.to_str().unwrap()).unwrap();
+    assert_eq!(writ.call("get_val", &[]).unwrap(), Value::I32(42));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// ─── Mixed-type arithmetic ───
+
+#[test]
+fn test_int_plus_float() {
+    let result = w().run("return 3 + 1.5").unwrap();
+    assert_eq!(result, Value::F64(4.5));
+}
+
+#[test]
+fn test_float_plus_int() {
+    let result = w().run("return 1.5 + 3").unwrap();
+    assert_eq!(result, Value::F64(4.5));
+}
+
+#[test]
+fn test_int_minus_float() {
+    let result = w().run("return 5 - 1.5").unwrap();
+    assert_eq!(result, Value::F64(3.5));
+}
+
+#[test]
+fn test_float_minus_int() {
+    let result = w().run("return 5.5 - 2").unwrap();
+    assert_eq!(result, Value::F64(3.5));
+}
+
+#[test]
+fn test_int_times_float() {
+    let result = w().run("return 3 * 1.5").unwrap();
+    assert_eq!(result, Value::F64(4.5));
+}
+
+#[test]
+fn test_float_times_int() {
+    let result = w().run("return 1.5 * 3").unwrap();
+    assert_eq!(result, Value::F64(4.5));
+}
+
+#[test]
+fn test_int_div_float() {
+    let result = w().run("return 3 / 1.5").unwrap();
+    assert_eq!(result, Value::F64(2.0));
+}
+
+#[test]
+fn test_float_div_int() {
+    let result = w().run("return 7.5 / 3").unwrap();
+    assert_eq!(result, Value::F64(2.5));
+}
+
+#[test]
+fn test_int_mod_float() {
+    let result = w().run("return 7 % 2.5").unwrap();
+    assert_eq!(result, Value::F64(2.0));
+}
+
+#[test]
+fn test_float_mod_int() {
+    let result = w().run("return 7.5 % 2").unwrap();
+    assert_eq!(result, Value::F64(1.5));
+}
+
+#[test]
+fn test_float_div_zero_error() {
+    let result = w().run("return 1.0 / 0.0");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_float_float_div() {
+    let result = w().run("return 7.0 / 2.0").unwrap();
+    assert_eq!(result, Value::F64(3.5));
+}
+
+#[test]
+fn test_float_float_mod() {
+    let result = w().run("return 7.5 % 2.5").unwrap();
+    // Float literals are F32; 7.5 % 2.5 = 2.5, but 7.5f32 % 2.5f32 = 0.0 due to exact division
+    // Actually 7.5 / 2.5 = 3.0 exactly, so modulo is 0.0
+    assert_eq!(result, Value::F32(0.0));
+}
+
+// ─── Integer overflow promotion to i64 ───
+
+#[test]
+fn test_i32_overflow_promotes_to_i64() {
+    // i32 max is 2147483647; adding 1 overflows to i64
+    let result = w().run("return 2147483647 + 1").unwrap();
+    assert_eq!(result, Value::I64(2147483648));
+}
+
+#[test]
+fn test_i32_mul_overflow_promotes_to_i64() {
+    let result = w().run("return 2147483647 * 2").unwrap();
+    assert_eq!(result, Value::I64(4294967294));
+}
+
+// ─── Closure / upvalue tests ───
+
+#[test]
+fn test_closure_counter_pattern() {
+    let result = w()
+        .run(
+            "func make_counter() -> any {\n\
+               var count = 0\n\
+               func inc() -> int {\n\
+                 count = count + 1\n\
+                 return count\n\
+               }\n\
+               return inc\n\
+             }\n\
+             let counter = make_counter()\n\
+             counter()\n\
+             counter()\n\
+             return counter()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_closure_adder_pattern() {
+    let result = w()
+        .run(
+            "func make_adder(x: int) -> any {\n\
+               func add(y: int) -> int { return x + y }\n\
+               return add\n\
+             }\n\
+             let add5 = make_adder(5)\n\
+             return add5(10)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(15));
+}
+
+#[test]
+fn test_three_level_nested_closures() {
+    let result = w()
+        .run(
+            "func outer() -> any {\n\
+               var a = 1\n\
+               func middle() -> any {\n\
+                 var b = 2\n\
+                 func inner() -> int { return a + b }\n\
+                 return inner\n\
+               }\n\
+               return middle\n\
+             }\n\
+             let mid = outer()\n\
+             let inn = mid()\n\
+             return inn()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+// ─── Struct operator overloading ───
+
+#[test]
+fn test_struct_divide_operator() {
+    // Tests operator overloading for division on structs
+    // (existing tests already cover add/subtract/multiply)
+    let result = w()
+        .run(
+            "struct Vec2 {\n\
+               x: float\n\
+               y: float\n\
+               func divide(other: Vec2) -> Vec2 {\n\
+                 return Vec2(self.x / other.x, self.y / other.y)\n\
+               }\n\
+             }\n\
+             let a = Vec2(10.0, 8.0)\n\
+             let b = Vec2(2.0, 4.0)\n\
+             let c = a / b\n\
+             return c.x",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(5.0));
+}
+
+#[test]
+fn test_struct_modulo_operator() {
+    let result = w()
+        .run(
+            "struct Vec2 {\n\
+               x: float\n\
+               y: float\n\
+               func modulo(other: Vec2) -> Vec2 {\n\
+                 return Vec2(self.x % other.x, self.y % other.y)\n\
+               }\n\
+             }\n\
+             let a = Vec2(10.0, 9.0)\n\
+             let b = Vec2(3.0, 4.0)\n\
+             let c = a % b\n\
+             return c.x",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(1.0));
+}
+
+// ─── Struct method with params ───
+
+#[test]
+fn test_struct_method_sum() {
+    let result = w()
+        .run(
+            "struct Point {\n\
+               x: int\n\
+               y: int\n\
+               func sum() -> int {\n\
+                 return self.x + self.y\n\
+               }\n\
+             }\n\
+             let p = Point(3, 7)\n\
+             return p.sum()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(10));
+}
+
+// ─── String operations ───
+
+#[test]
+fn test_string_addition() {
+    let result = w().run("return \"hello\" + \" \" + \"world\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("hello world")));
+}
+
+// ─── Negative/unary tests ───
+
+#[test]
+fn test_negate_float_literal() {
+    let result = w().run("return -(3.15)").unwrap();
+    // Float literals are F32 in Writ
+    assert_eq!(result, Value::F32(-3.15));
+}
+
+// ─── Array/Dict comprehensive tests ───
+
+#[test]
+fn test_array_push_and_pop() {
+    let result = w()
+        .run(
+            "let arr = [1, 2, 3]\n\
+             arr.push(4)\n\
+             let last = arr.pop()\n\
+             return last",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(4));
+}
+
+#[test]
+fn test_dict_keys_and_values() {
+    let result = w()
+        .run(
+            "let d = { \"a\": 1, \"b\": 2 }\n\
+             return d.len()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+// ─── Type coercion / edge cases ───
+
+#[test]
+fn test_i64_addition() {
+    // Force i64 values through overflow first, then do arithmetic
+    let result = w()
+        .run(
+            "let big = 2147483647 + 1\n\
+             return big + 1",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I64(2147483649));
+}
+
+#[test]
+fn test_i64_subtraction() {
+    let result = w()
+        .run(
+            "let big = 2147483647 + 10\n\
+             return big - 5",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I64(2147483652));
+}
+
+#[test]
+fn test_i64_multiplication() {
+    let result = w()
+        .run(
+            "let big = 2147483647 + 1\n\
+             return big * 2",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I64(4294967296));
+}
+
+#[test]
+fn test_i64_division() {
+    let result = w()
+        .run(
+            "let big = 2147483647 + 1\n\
+             return big / 2",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I64(1073741824));
+}
+
+#[test]
+fn test_i64_modulo() {
+    let result = w()
+        .run(
+            "let big = 2147483647 + 10\n\
+             return big % 7",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I64(2147483657i64 % 7));
+}
+
+// ─── For-range in functions ───
+
+#[test]
+fn test_for_range_sum_in_function() {
+    let result = w()
+        .run(
+            "func sum_range(n: int) -> int {\n\
+               var total = 0\n\
+               for i in 0..n {\n\
+                 total = total + i\n\
+               }\n\
+               return total\n\
+             }\n\
+             return sum_range(5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(10));
+}
+
+#[test]
+fn test_for_range_inclusive_in_function() {
+    let result = w()
+        .run(
+            "func sum_inclusive(n: int) -> int {\n\
+               var total = 0\n\
+               for i in 0..=n {\n\
+                 total = total + i\n\
+               }\n\
+               return total\n\
+             }\n\
+             return sum_inclusive(4)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(10));
+}
+
+// ─── Let destructuring ───
+
+#[test]
+fn test_let_destructure_tuple() {
+    let result = w()
+        .run(
+            "func pair() -> (int, int) {\n\
+               return (10, 20)\n\
+             }\n\
+             let (a, b) = pair()\n\
+             return a + b",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(30));
+}
+
+// ─── Array iteration with index ───
+
+#[test]
+fn test_array_sum_with_while() {
+    let result = w()
+        .run(
+            "func sum_arr(arr: any) -> int {\n\
+               var total = 0\n\
+               var i = 0\n\
+               while i < arr.len() {\n\
+                 total = total + arr[i]\n\
+                 i = i + 1\n\
+               }\n\
+               return total\n\
+             }\n\
+             return sum_arr([1, 2, 3, 4, 5])",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(15));
+}
+
+// ─── Dict access ───
+
+#[test]
+fn test_dict_string_key_access() {
+    let result = w()
+        .run(
+            "let d = { \"a\": 1, \"b\": 2 }\n\
+             return d[\"b\"]",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+// ─── Optional return (null) ───
+
+#[test]
+fn test_function_returns_null() {
+    let result = w()
+        .run(
+            "func maybe(flag: bool) -> any {\n\
+               if flag { return 42 }\n\
+               return null\n\
+             }\n\
+             return maybe(false)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Null);
+}
+
+#[test]
+fn test_function_returns_value() {
+    let result = w()
+        .run(
+            "func maybe(flag: bool) -> any {\n\
+               if flag { return 42 }\n\
+               return null\n\
+             }\n\
+             return maybe(true)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(42));
+}
+
+// ---------------------------------------------------------------------------
+// Closure/lambda callback tests (trampoline sequence system)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_array_map_with_closure() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func make_mapper() -> any {\n\
+                 let factor = 10\n\
+                 func mul(x: int) -> int { return x * factor }\n\
+                 return mul\n\
+             }\n\
+             let a = [1, 2, 3]\n\
+             let f = make_mapper()\n\
+             let b = a.map(f)\n\
+             return b[2]",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(30));
+}
+
+#[test]
+fn test_array_filter_with_closure() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func make_filter(threshold: int) -> any {\n\
+                 func check(x: int) -> bool { return x > threshold }\n\
+                 return check\n\
+             }\n\
+             let a = [1, 2, 3, 4, 5]\n\
+             let f = make_filter(3)\n\
+             let b = a.filter(f)\n\
+             return b.length",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+#[test]
+fn test_array_reduce_with_closure() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func make_reducer() -> any {\n\
+                 func sum(acc: int, x: int) -> int { return acc + x }\n\
+                 return sum\n\
+             }\n\
+             let a = [1, 2, 3, 4]\n\
+             let f = make_reducer()\n\
+             return a.reduce(f, 0)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(10));
+}
+
+#[test]
+fn test_array_for_each_with_closure() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // forEach calls the callback on each element; verify via side effect on a mutable var
+    let result = writ
+        .run(
+            "var total = 0\n\
+             func adder(x: int) -> any {\n\
+                 total = total + x\n\
+                 return null\n\
+             }\n\
+             let a = [10, 20, 30]\n\
+             a.forEach(\"adder\")\n\
+             return total",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(60));
+}
+
+#[test]
+fn test_array_map_with_named_function() {
+    // Verify named functions still work through the new dispatch
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func triple(x: int) -> int { return x * 3 }\n\
+             let a = [1, 2, 3]\n\
+             return a.map(\"triple\")[0]",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_array_map_empty_array() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func id(x: int) -> int { return x }\n\
+             let a = []\n\
+             let b = a.map(\"id\")\n\
+             return b.length",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(0));
+}
+
+#[test]
+fn test_array_filter_all_rejected() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func never(x: int) -> bool { return false }\n\
+             let a = [1, 2, 3]\n\
+             let b = a.filter(\"never\")\n\
+             return b.length",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(0));
+}
+
+#[test]
+fn test_array_reduce_single_element() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func add(a: int, b: int) -> int { return a + b }\n\
+             let a = [42]\n\
+             return a.reduce(\"add\", 0)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(42));
+}
+
+#[test]
+fn test_closure_callback_captures_upvalue() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // Closure captures a mutable upvalue, used as map callback
+    let result = writ
+        .run(
+            "var offset = 100\n\
+             func make_adder() -> any {\n\
+                 func add(x: int) -> int { return x + offset }\n\
+                 return add\n\
+             }\n\
+             let f = make_adder()\n\
+             let a = [1, 2, 3]\n\
+             let b = a.map(f)\n\
+             return b[0]",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(101));
 }

@@ -1,4 +1,4 @@
-//! Writ type checker — validates types in the AST before bytecode compilation.
+//! Writ type checker -- validates types in the AST before bytecode compilation.
 
 mod checker;
 mod env;
@@ -7,6 +7,7 @@ mod module_registry;
 mod registry;
 pub mod suggestions;
 mod typed_ast;
+#[allow(clippy::module_inception)]
 mod types;
 
 pub use checker::TypeChecker;

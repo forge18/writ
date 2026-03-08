@@ -20,9 +20,9 @@ pub(crate) enum ChunkId {
 pub(crate) struct CallFrame {
     /// Which chunk this frame is executing.
     pub chunk_id: ChunkId,
-    /// Program counter — index of the next instruction to execute.
+    /// Program counter -- index of the next instruction to execute.
     pub pc: usize,
-    /// Base stack pointer — index into the operand stack where this
+    /// Base stack pointer -- index into the operand stack where this
     /// frame's register window begins.
     pub base: usize,
     /// Absolute stack position where the return value should be written.

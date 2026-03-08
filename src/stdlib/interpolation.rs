@@ -6,7 +6,7 @@ use crate::vm::{VM, Value};
 use super::vector::extract_f64;
 
 pub fn register(vm: &mut VM) {
-    // ── Core interpolation ──────────────────────────────────────────
+    // --- Core interpolation ---
 
     vm.register_fn_in_module(
         "lerp",
@@ -57,7 +57,7 @@ pub fn register(vm: &mut VM) {
         }),
     );
 
-    // ── Easing functions ────────────────────────────────────────────
+    // --- Easing functions ---
 
     vm.register_fn_in_module(
         "easeInSine",

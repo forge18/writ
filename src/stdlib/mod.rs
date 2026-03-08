@@ -1,4 +1,4 @@
-//! Writ standard library — registers native functions and methods into the VM.
+//! Writ standard library -- registers native functions and methods into the VM.
 
 mod array;
 mod basic;
