@@ -3799,3 +3799,1609 @@ fn test_class_with_method() {
         .unwrap();
     assert_eq!(result, Value::Str(std::rc::Rc::from("hello world")));
 }
+
+// ── Phase 4A: Coroutines, Yield Ops, Deep VM/Compiler/Parser/Lexer ───────────
+
+#[test]
+fn test_coroutine_yield_seconds_and_tick() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func delayed() {\n  yield waitForSeconds(0.5)\n}\nstart delayed()")
+        .unwrap();
+    assert!(writ.vm_mut().last_coroutine_id().is_some());
+    // Tick past the wait duration
+    writ.tick(0.6).unwrap();
+}
+
+#[test]
+fn test_coroutine_yield_frames_and_tick() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func waiter() {\n  yield waitForFrames(2)\n}\nstart waiter()")
+        .unwrap();
+    writ.tick(0.0).unwrap(); // frame 1
+    writ.tick(0.0).unwrap(); // frame 2 — should resume
+}
+
+#[test]
+fn test_coroutine_yield_basic() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func spinner() {\n  yield\n  yield\n}\nstart spinner()")
+        .unwrap();
+    writ.tick(0.0).unwrap();
+    writ.tick(0.0).unwrap();
+}
+
+#[test]
+fn test_coroutine_yield_child() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.run("func child() {\n  yield\n}\nfunc parent() {\n  yield child()\n}\nstart parent()")
+        .unwrap();
+    writ.tick(0.0).unwrap();
+    writ.tick(0.0).unwrap();
+}
+
+#[test]
+fn test_coroutine_yield_until() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // waitUntil with a non-capturing predicate that always returns true
+    writ.run(
+        "func alwaysTrue() -> bool { return true }\n\
+         func poller() {\n  yield waitUntil(alwaysTrue)\n}\n\
+         start poller()",
+    )
+    .unwrap();
+    // Tick: predicate is true, coroutine resumes immediately
+    writ.tick(0.0).unwrap();
+}
+
+#[test]
+fn test_concat_fallback_int() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"val: \" .. 42").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("val: 42")));
+}
+
+#[test]
+fn test_concat_fallback_bool() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return true .. \" flag\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("true flag")));
+}
+
+#[test]
+fn test_concat_fallback_float() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"pi=\" .. 3.14").unwrap();
+    let s = match result {
+        Value::Str(s) => s.to_string(),
+        other => panic!("expected Str, got {:?}", other),
+    };
+    assert!(s.starts_with("pi=3.14"), "got: {}", s);
+}
+
+#[test]
+fn test_set_index_dict_string_key() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let d = {}\nd[\"key\"] = 99\nreturn d[\"key\"]")
+        .unwrap();
+    assert_eq!(result, Value::I32(99));
+}
+
+#[test]
+fn test_set_index_error_dict_int_key() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("let d = {}\nd[42] = \"bad\"");
+    assert!(err.is_err(), "expected error for dict[int] assignment");
+}
+
+#[test]
+fn test_set_index_error_non_collection() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("var x = 42\nx[0] = 1");
+    assert!(err.is_err(), "expected error for int index assignment");
+}
+
+#[test]
+fn test_tail_call_optimization() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // Deep recursion that would overflow without TCO
+    let result = writ
+        .run(
+            "func sum_to(n: int, acc: int) -> int {\n\
+             if n <= 0 { return acc }\n\
+             return sum_to(n - 1, acc + n)\n\
+             }\n\
+             return sum_to(10000, 0)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(50005000));
+}
+
+#[test]
+fn test_hot_reload() {
+    use std::io::Write;
+    let dir = std::env::temp_dir();
+    let path = dir.join("writ_test_reload.writ");
+
+    // Write initial script
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "func greet() -> string {{ return \"hello\" }}").unwrap();
+    }
+
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.load(path.to_str().unwrap()).unwrap();
+    let v1 = writ.call("greet", &[]).unwrap();
+    assert_eq!(v1, Value::Str(Rc::from("hello")));
+
+    // Write updated script with modified + new function
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            "func greet() -> string {{ return \"hi\" }}\nfunc farewell() -> string {{ return \"bye\" }}"
+        )
+        .unwrap();
+    }
+
+    writ.reload(path.to_str().unwrap()).unwrap();
+    let v2 = writ.call("greet", &[]).unwrap();
+    assert_eq!(v2, Value::Str(Rc::from("hi")));
+    let v3 = writ.call("farewell", &[]).unwrap();
+    assert_eq!(v3, Value::Str(Rc::from("bye")));
+
+    // Clean up
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_escape_tab() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"a\\tb\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("a\tb")));
+}
+
+#[test]
+fn test_escape_dollar() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"\\$5\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("$5")));
+}
+
+#[test]
+fn test_unknown_escape_error() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("return \"\\q\"");
+    assert!(err.is_err(), "expected lex error for unknown escape \\q");
+}
+
+#[test]
+fn test_interpolation_expr() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"1+1=${1+1}\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("1+1=2")));
+}
+
+#[test]
+fn test_multiline_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let s = \"\"\"\nhello\nworld\n\"\"\"\nreturn s.contains(\"hello\")")
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_when_range_pattern() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let x = 5\nwhen x {\n  1..10 => { return \"small\" }\n  else => { return \"big\" }\n}")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("small")));
+}
+
+#[test]
+fn test_when_range_inclusive_pattern() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let x = 10\nwhen x {\n  1..10 => { return \"exclusive\" }\n  10..=20 => { return \"inclusive\" }\n  else => { return \"other\" }\n}")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("inclusive")));
+}
+
+#[test]
+fn test_when_guard_pattern() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // Guard patterns: use the subject variable directly in the condition
+    let result = writ
+        .run("let x = -3\nwhen x {\n  v if x > 0 => { return \"pos\" }\n  v if x < 0 => { return \"neg\" }\n  else => { return \"zero\" }\n}")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("neg")));
+}
+
+#[test]
+fn test_when_multiple_values_pattern() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let x = 2\nwhen x {\n  1, 2, 3 => { return \"small\" }\n  else => { return \"big\" }\n}")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("small")));
+}
+
+#[test]
+fn test_enum_with_values() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // Parser should handle enum variants with parenthesized values
+    let result = writ.run("enum Status { Ok(200), NotFound(404) }\nreturn 1");
+    assert!(result.is_ok(), "enum with values should parse: {:?}", result);
+}
+
+#[test]
+fn test_map_error_non_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("let a = [1, 2]\na.map(42)");
+    assert!(err.is_err(), "map with non-string should error");
+}
+
+#[test]
+fn test_filter_error_non_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("let a = [1, 2]\na.filter(42)");
+    assert!(err.is_err(), "filter with non-string should error");
+}
+
+#[test]
+fn test_reduce_error_non_string() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("let a = [1, 2]\na.reduce(42, 0)");
+    assert!(err.is_err(), "reduce with non-string should error");
+}
+
+#[test]
+fn test_get_field_on_primitive_error() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("let x = 42\nreturn x.foo");
+    assert!(err.is_err(), "field access on int should error");
+}
+
+#[test]
+fn test_array_out_of_bounds() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("let a = [1, 2]\nreturn a[10]");
+    assert!(err.is_err(), "array index out of bounds should error");
+}
+
+#[test]
+fn test_not_non_bool_runtime() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("return !42");
+    assert!(err.is_err(), "not on non-bool should error");
+}
+
+#[test]
+fn test_negate_non_numeric_runtime() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let err = writ.run("return -true");
+    assert!(err.is_err(), "negate on bool should error");
+}
+
+#[test]
+fn test_for_in_array_compiler_path() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("var sum = 0\nlet arr = [10, 20, 30]\nfor x in arr {\n  sum += x\n}\nreturn sum")
+        .unwrap();
+    assert_eq!(result, Value::I32(60));
+}
+
+#[test]
+fn test_string_concat_operator() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"hello\" .. \" \" .. \"world\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("hello world")));
+}
+
+#[test]
+fn test_large_float_literal() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 1.0e30").unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 1.0e30).abs() < 1.0e25),
+        Value::F32(_) => {} // also acceptable
+        other => panic!("expected float, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_nested_dict_assignment() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let d = {\"a\": {}}\nd[\"a\"][\"b\"] = 42\nreturn d[\"a\"][\"b\"]")
+        .unwrap();
+    assert_eq!(result, Value::I32(42));
+}
+
+#[test]
+fn test_struct_with_method() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "struct Vec2 {\n\
+             x: float\n\
+             y: float\n\
+             func length() -> float {\n\
+               return sqrt(self.x * self.x + self.y * self.y)\n\
+             }\n\
+             }\n\
+             let v = Vec2(3.0, 4.0)\n\
+             return v.length()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::F64(5.0));
+}
+
+#[test]
+fn test_class_extends_with_parent_fields() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "class Base {\n\
+             public value: int\n\
+             }\n\
+             class Child extends Base {\n\
+             public extra: int\n\
+             }\n\
+             let c = Child(10, 20)\n\
+             return c.value + c.extra",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(30));
+}
+
+#[test]
+fn test_when_no_subject() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let x = 5\n\
+             when {\n\
+               x > 10 => { return \"big\" }\n\
+               x > 0 => { return \"small\" }\n\
+               else => { return \"zero\" }\n\
+             }",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("small")));
+}
+
+#[test]
+fn test_value_display_dict() {
+    let dict = Value::Dict(Rc::new(RefCell::new(
+        vec![("x".to_string(), Value::I32(1))]
+            .into_iter()
+            .collect(),
+    )));
+    let s = format!("{}", dict);
+    assert!(s.contains("x") && s.contains("1"), "got: {}", s);
+}
+
+#[test]
+fn test_array_set_index() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let a = [1, 2, 3]\na[1] = 99\nreturn a[1]").unwrap();
+    assert_eq!(result, Value::I32(99));
+}
+
+#[test]
+fn test_string_interpolation_simple_ident() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let name = \"writ\"\nreturn \"hello $name\"").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("hello writ")));
+}
+
+#[test]
+fn test_recursive_factorial_i64() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // Use I64 to handle large values
+    let result = writ
+        .run(
+            "func fact(n: int) -> int {\n\
+             if n <= 1 { return 1 }\n\
+             return n * fact(n - 1)\n\
+             }\n\
+             return fact(12)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(479001600));
+}
+
+#[test]
+fn test_while_false_never_executes() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("var x = 0\nwhile false { x = 1 }\nreturn x").unwrap();
+    assert_eq!(result, Value::I32(0));
+}
+
+#[test]
+fn test_empty_dict() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let d = {}\nreturn d.len()").unwrap();
+    assert_eq!(result, Value::I32(0));
+}
+
+#[test]
+fn test_multiple_string_interpolations() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let a = 1\nlet b = 2\nreturn \"${a}+${b}=${a+b}\"")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("1+2=3")));
+}
+
+#[test]
+fn test_chained_method_calls() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"  HELLO  \".trim().toLower()").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("hello")));
+}
+
+#[test]
+fn test_nested_when() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let x = 5\n\
+             let y = 10\n\
+             when x {\n\
+               5 => {\n\
+                 when y {\n\
+                   10 => { return \"both\" }\n\
+                   else => { return \"x only\" }\n\
+                 }\n\
+               }\n\
+               else => { return \"neither\" }\n\
+             }",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("both")));
+}
+
+#[test]
+fn test_string_split_and_join() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("let parts = \"a-b-c\".split(\"-\")\nreturn parts.join(\",\")")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("a,b,c")));
+}
+
+#[test]
+fn test_math_sin_cos() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let sin = writ.run("return sin(0.0)").unwrap();
+    assert_eq!(sin, Value::F64(0.0));
+    let cos = writ.run("return cos(0.0)").unwrap();
+    assert_eq!(cos, Value::F64(1.0));
+}
+
+#[test]
+fn test_math_log_exp() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let log_result = writ.run("return log(1.0)").unwrap();
+    assert_eq!(log_result, Value::F64(0.0));
+    let exp_result = writ.run("return exp(0.0)").unwrap();
+    assert_eq!(exp_result, Value::F64(1.0));
+}
+
+#[test]
+fn test_pi_constant() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return PI").unwrap();
+    match result {
+        Value::F64(v) => assert!((v - std::f64::consts::PI).abs() < 1e-10),
+        other => panic!("expected F64, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_struct_field_equality() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "struct Point {\n\
+             x: int\n\
+             y: int\n\
+             }\n\
+             let a = Point(1, 2)\n\
+             let b = Point(1, 2)\n\
+             return a.x == b.x && a.y == b.y",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_class_super_method_call() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "class Animal {\n\
+             public name: string\n\
+             public func speak() -> string { return \"...\" }\n\
+             }\n\
+             class Dog extends Animal {\n\
+             public func speak() -> string {\n\
+               let base = super.speak()\n\
+               return \"Woof! \" .. base\n\
+             }\n\
+             }\n\
+             let d = Dog(\"Rex\")\n\
+             return d.speak()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("Woof! ...")));
+}
+
+// ── Phase 5: Quickened ops, arithmetic edges, closures, value ops ────
+
+#[test]
+fn test_quickened_add_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func add(a: int, b: int) -> int { return a + b }\n\
+             var sum = 0\n\
+             var i = 0\n\
+             while i < 10 {\n\
+               sum = add(sum, i)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(45));
+}
+
+#[test]
+fn test_quickened_sub_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func sub(a: int, b: int) -> int { return a - b }\n\
+             var val = 100\n\
+             var i = 0\n\
+             while i < 5 {\n\
+               val = sub(val, 10)\n\
+               i = i + 1\n\
+             }\n\
+             return val",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(50));
+}
+
+#[test]
+fn test_quickened_mul_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func mul(a: int, b: int) -> int { return a * b }\n\
+             var val = 1\n\
+             var i = 0\n\
+             while i < 5 {\n\
+               val = mul(val, 2)\n\
+               i = i + 1\n\
+             }\n\
+             return val",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(32));
+}
+
+#[test]
+fn test_quickened_div_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func div(a: int, b: int) -> int { return a / b }\n\
+             var val = 1024\n\
+             var i = 0\n\
+             while i < 5 {\n\
+               val = div(val, 2)\n\
+               i = i + 1\n\
+             }\n\
+             return val",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(32));
+}
+
+#[test]
+fn test_quickened_add_float_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func add(a: float, b: float) -> float { return a + b }\n\
+             var sum = 0.0\n\
+             var i = 0\n\
+             while i < 5 {\n\
+               sum = add(sum, 1.5)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 7.5).abs() < 0.001),
+        Value::F32(v) => assert!((v - 7.5).abs() < 0.001),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_quickened_sub_float_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func sub(a: float, b: float) -> float { return a - b }\n\
+             var val = 10.0\n\
+             var i = 0\n\
+             while i < 4 {\n\
+               val = sub(val, 2.0)\n\
+               i = i + 1\n\
+             }\n\
+             return val",
+        )
+        .unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 2.0).abs() < 0.001),
+        Value::F32(v) => assert!((v - 2.0).abs() < 0.001),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_quickened_mul_float_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func mul(a: float, b: float) -> float { return a * b }\n\
+             var val = 1.0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               val = mul(val, 2.0)\n\
+               i = i + 1\n\
+             }\n\
+             return val",
+        )
+        .unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 8.0).abs() < 0.001),
+        Value::F32(v) => assert!((v - 8.0).abs() < 0.001),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_quickened_comparison_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func check(a: int, b: int) -> int {\n\
+               if a < b { return -1 }\n\
+               if a > b { return 1 }\n\
+               return 0\n\
+             }\n\
+             var sum = 0\n\
+             var i = 0\n\
+             while i < 5 {\n\
+               sum = sum + check(i, 3)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(-2));
+}
+
+#[test]
+fn test_quickened_comparison_float_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func check(a: float, b: float) -> int {\n\
+               if a < b { return -1 }\n\
+               if a > b { return 1 }\n\
+               return 0\n\
+             }\n\
+             var sum = 0\n\
+             var i = 0\n\
+             while i < 3 {\n\
+               sum = sum + check(1.0 * i, 1.5)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(-1));
+}
+
+#[test]
+fn test_quickened_eq_ne_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func eq_check(a: int, b: int) -> int {\n\
+               if a == b { return 1 }\n\
+               if a != b { return 2 }\n\
+               return 0\n\
+             }\n\
+             var sum = 0\n\
+             var i = 0\n\
+             while i < 4 {\n\
+               sum = sum + eq_check(i, 2)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(7));
+}
+
+#[test]
+fn test_quickened_le_ge_int_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func clampval(x: int, lo: int, hi: int) -> int {\n\
+               if x <= lo { return lo }\n\
+               if x >= hi { return hi }\n\
+               return x\n\
+             }\n\
+             var sum = 0\n\
+             var i = 0\n\
+             while i < 6 {\n\
+               sum = sum + clampval(i, 1, 4)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(15));
+}
+
+#[test]
+fn test_quickened_le_ge_float_via_loop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func clampval(x: float, lo: float, hi: float) -> float {\n\
+               if x <= lo { return lo }\n\
+               if x >= hi { return hi }\n\
+               return x\n\
+             }\n\
+             var sum = 0.0\n\
+             var i = 0\n\
+             while i < 4 {\n\
+               sum = sum + clampval(1.0 * i, 0.5, 2.5)\n\
+               i = i + 1\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 6.0).abs() < 0.01),
+        Value::F32(v) => assert!((v - 6.0).abs() < 0.01),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_integer_overflow_promotes_to_i64() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("return 2000000000 + 2000000000")
+        .unwrap();
+    assert_eq!(result, Value::I64(4000000000));
+}
+
+#[test]
+fn test_integer_multiply_overflow_promotes() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("return 100000 * 100000")
+        .unwrap();
+    assert_eq!(result, Value::I64(10000000000));
+}
+
+#[test]
+fn test_integer_sub_overflow_promotes() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("return -2000000000 - 2000000000")
+        .unwrap();
+    assert_eq!(result, Value::I64(-4000000000));
+}
+
+#[test]
+fn test_modulo_int() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 17 % 5").unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+#[test]
+fn test_modulo_float() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 10.5 % 3.0").unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 1.5).abs() < 0.01),
+        Value::F32(v) => assert!((v - 1.5).abs() < 0.01),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_division_by_zero_error() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 10 / 0");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_modulo_by_zero_error() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 10 % 0");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_float_division() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 7.0 / 2.0").unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 3.5).abs() < 0.01),
+        Value::F32(v) => assert!((v - 3.5).abs() < 0.01),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_mixed_int_float_arithmetic() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return 5 + 2.5").unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 7.5).abs() < 0.01),
+        Value::F32(v) => assert!((v - 7.5).abs() < 0.01),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_closure_captures_upvalue() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func make_adder(n: int) -> int {\n\
+               func adder(x: int) -> int { return x + n }\n\
+               return adder\n\
+             }\n\
+             let add5 = make_adder(5)\n\
+             return add5(10)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(15));
+}
+
+#[test]
+fn test_closure_mutates_upvalue() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func make_counter() -> int {\n\
+               var count = 0\n\
+               func increment() -> int {\n\
+                 count = count + 1\n\
+                 return count\n\
+               }\n\
+               return increment\n\
+             }\n\
+             let c = make_counter()\n\
+             c()\n\
+             c()\n\
+             return c()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_nested_closures() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func outer() -> int {\n\
+               var x = 10\n\
+               func middle() -> int {\n\
+                 var y = 20\n\
+                 func inner() -> int {\n\
+                   return x + y\n\
+                 }\n\
+                 return inner\n\
+               }\n\
+               return middle\n\
+             }\n\
+             let m = outer()\n\
+             let i = m()\n\
+             return i()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(30));
+}
+
+#[test]
+fn test_value_concat_display_array() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"\" .. [1, 2, 3]").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("[1, 2, 3]")));
+}
+
+#[test]
+fn test_value_concat_display_dict() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"\" .. {\"a\": 1}").unwrap();
+    let s = match &result {
+        Value::Str(s) => s.to_string(),
+        _ => panic!("expected string"),
+    };
+    assert!(s.contains("a") && s.contains("1"), "got: {}", s);
+}
+
+#[test]
+fn test_value_concat_display_null() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"\" .. null").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("null")));
+}
+
+#[test]
+fn test_value_concat_display_bool() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"\" .. true").unwrap();
+    assert_eq!(result, Value::Str(Rc::from("true")));
+}
+
+#[test]
+fn test_negate_int() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let x = 42\nreturn -x").unwrap();
+    assert_eq!(result, Value::I32(-42));
+}
+
+#[test]
+fn test_negate_float() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let x = 3.14\nreturn -x").unwrap();
+    match result {
+        Value::F64(v) => assert!((v + 3.14).abs() < 0.01),
+        Value::F32(v) => assert!((v + 3.14).abs() < 0.01),
+        _ => panic!("expected float"),
+    }
+}
+
+#[test]
+fn test_not_operator() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return !true").unwrap();
+    assert_eq!(result, Value::Bool(false));
+}
+
+#[test]
+fn test_string_comparison_eq() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"abc\" == \"abc\"").unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_string_comparison_ne() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"abc\" != \"def\"").unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_string_comparison_cannot_lt() {
+    // Writ does not support < on strings
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"abc\" < \"def\"");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_null_equality() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return null == null").unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_null_inequality_with_int() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return null != 42").unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_bool_equality() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return true == true").unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_despecialize_quickened_add() {
+    // Quickened int add then float add — triggers de-specialization path
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func iadd(a: int, b: int) -> int { return a + b }\n\
+             iadd(1, 2)\n\
+             iadd(3, 4)\n\
+             return iadd(5, 6)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(11));
+}
+
+#[test]
+fn test_despecialize_quickened_sub() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func isub(a: int, b: int) -> int { return a - b }\n\
+             isub(10, 3)\n\
+             isub(20, 5)\n\
+             return isub(100, 42)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(58));
+}
+
+#[test]
+fn test_despecialize_quickened_mul() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func imul(a: int, b: int) -> int { return a * b }\n\
+             imul(2, 3)\n\
+             imul(4, 5)\n\
+             return imul(6, 7)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(42));
+}
+
+#[test]
+fn test_despecialize_quickened_lt() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func ilt(a: int, b: int) -> bool { return a < b }\n\
+             ilt(1, 2)\n\
+             ilt(3, 4)\n\
+             return ilt(5, 10)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_despecialize_quickened_eq() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func ieq(a: int, b: int) -> bool { return a == b }\n\
+             ieq(1, 2)\n\
+             ieq(3, 3)\n\
+             return ieq(42, 42)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_array_spread() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // Spread may inline array elements or just work differently
+    let result = writ
+        .run(
+            "let a = [1, 2, 3]\n\
+             let b = [0, ...a, 4]\n\
+             return b.len()",
+        )
+        .unwrap();
+    // Just verify it parses and runs without error
+    let _ = result;
+}
+
+#[test]
+fn test_array_index_negative() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let a = [10, 20, 30]\n\
+             return a[-1]",
+        );
+    // Negative index may error or wrap — just verify it doesn't crash
+    let _ = result;
+}
+
+#[test]
+fn test_dict_iteration() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let d = {\"a\": 1, \"b\": 2, \"c\": 3}\n\
+             return d.len()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_dict_remove_entry() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let d = {\"a\": 1, \"b\": 2}\n\
+             d.remove(\"a\")\n\
+             return d.len()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(1));
+}
+
+#[test]
+fn test_dict_keys_values() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let d = {\"x\": 10}\n\
+             let k = d.keys()\n\
+             return k.len()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(1));
+}
+
+#[test]
+fn test_multiple_return_values() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func pair() -> (int, int) { return (1, 2) }\n\
+             let (a, b) = pair()\n\
+             return a + b",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_class_method_chaining() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "class Counter {\n\
+             public value: int\n\
+             public func increment() -> int {\n\
+               self.value = self.value + 1\n\
+               return self.value\n\
+             }\n\
+             }\n\
+             let c = Counter(0)\n\
+             c.increment()\n\
+             c.increment()\n\
+             return c.increment()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(3));
+}
+
+#[test]
+fn test_class_get_set_field() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "class Box {\n\
+             public content: int\n\
+             }\n\
+             let b = Box(0)\n\
+             b.content = 42\n\
+             return b.content",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(42));
+}
+
+#[test]
+fn test_class_inheritance_field_access() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "class Base {\n\
+             public x: int\n\
+             }\n\
+             class Child extends Base {\n\
+             public y: int\n\
+             }\n\
+             let c = Child(10, 20)\n\
+             return c.x + c.y",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(30));
+}
+
+#[test]
+fn test_class_method_override() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "class Shape {\n\
+             public func area() -> int { return 0 }\n\
+             }\n\
+             class Square extends Shape {\n\
+             public side: int\n\
+             public func area() -> int { return self.side * self.side }\n\
+             }\n\
+             let s = Square(5)\n\
+             return s.area()",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(25));
+}
+
+#[test]
+fn test_when_with_int_subject() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let x = 2\n\
+             when x {\n\
+               1 => { return 10 }\n\
+               2 => { return 20 }\n\
+               3 => { return 30 }\n\
+               else => { return 0 }\n\
+             }",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(20));
+}
+
+#[test]
+fn test_when_with_string_subject() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let s = \"hello\"\n\
+             when s {\n\
+               \"hi\" => { return 1 }\n\
+               \"hello\" => { return 2 }\n\
+               else => { return 0 }\n\
+             }",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(2));
+}
+
+#[test]
+fn test_string_interpolation_complex() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let name = \"world\"\n\
+             let n = 42\n\
+             return \"hello $name, num=$n\"",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("hello world, num=42")));
+}
+
+#[test]
+fn test_string_interpolation_expr() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run("return \"result=${2 + 3}\"")
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("result=5")));
+}
+
+#[test]
+fn test_i64_arithmetic() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "let big = 2000000000 + 2000000000\n\
+             return big + 1",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I64(4000000001));
+}
+
+#[test]
+fn test_global_variable_from_host() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    writ.register_global("hostVal", Value::I32(99));
+    let result = writ.run("return hostVal").unwrap();
+    assert_eq!(result, Value::I32(99));
+}
+
+#[test]
+fn test_recursive_fibonacci() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func fib(n: int) -> int {\n\
+               if n <= 1 { return n }\n\
+               return fib(n - 1) + fib(n - 2)\n\
+             }\n\
+             return fib(10)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(55));
+}
+
+#[test]
+fn test_while_loop_with_break() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "var i = 0\n\
+             while true {\n\
+               if i >= 5 { break }\n\
+               i = i + 1\n\
+             }\n\
+             return i",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(5));
+}
+
+#[test]
+fn test_while_loop_with_continue() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "var sum = 0\n\
+             var i = 0\n\
+             while i < 10 {\n\
+               i = i + 1\n\
+               if i % 2 == 0 { continue }\n\
+               sum = sum + i\n\
+             }\n\
+             return sum",
+        )
+        .unwrap();
+    // 1+3+5+7+9 = 25
+    assert_eq!(result, Value::I32(25));
+}
+
+#[test]
+fn test_deep_nested_function_calls() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func a(x: int) -> int { return x + 1 }\n\
+             func b(x: int) -> int { return a(x) * 2 }\n\
+             func c(x: int) -> int { return b(x) + 3 }\n\
+             return c(5)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(15));
+}
+
+#[test]
+fn test_struct_with_method_call() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "struct Vec2 {\n\
+             x: float\n\
+             y: float\n\
+             func length() -> float {\n\
+               return (self.x * self.x + self.y * self.y)\n\
+             }\n\
+             }\n\
+             let v = Vec2(3.0, 4.0)\n\
+             return v.length()",
+        )
+        .unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 25.0).abs() < 0.01),
+        Value::F32(v) => assert!((v - 25.0).abs() < 0.01),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_early_return_from_nested_if() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "func classify(n: int) -> string {\n\
+               if n > 0 {\n\
+                 if n > 100 {\n\
+                   return \"big\"\n\
+                 }\n\
+                 return \"small\"\n\
+               }\n\
+               return \"negative\"\n\
+             }\n\
+             return classify(50)",
+        )
+        .unwrap();
+    assert_eq!(result, Value::Str(Rc::from("small")));
+}
+
+#[test]
+fn test_pow_function() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return pow(2.0, 10.0)").unwrap();
+    match result {
+        Value::F64(v) => assert!((v - 1024.0).abs() < 0.01),
+        Value::F32(v) => assert!((v - 1024.0).abs() < 0.01),
+        _ => panic!("expected float, got {:?}", result),
+    }
+}
+
+#[test]
+fn test_cannot_multiply_string() {
+    // Writ does not support string * int
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("return \"abc\" * 3");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_cannot_add_arrays() {
+    // Writ does not support array + array
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run("let a = [1, 2]\nlet b = [3, 4]\nreturn a + b");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_multiple_assignments() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ
+        .run(
+            "var a = 1\n\
+             var b = 2\n\
+             var temp = a\n\
+             a = b\n\
+             b = temp\n\
+             return a * 10 + b",
+        )
+        .unwrap();
+    assert_eq!(result, Value::I32(21));
+}

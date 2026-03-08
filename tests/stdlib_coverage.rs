@@ -2339,3 +2339,470 @@ fn test_reflect_has_method_on_non_struct() {
     let r = w().run("return hasMethod(42, \"foo\")").unwrap();
     assert_eq!(r, Value::Bool(false));
 }
+
+// ── Timer: start → update → finish lifecycle ──────────────────────────
+// Note: `start` is a keyword in Writ (for coroutines), so `t.start()` can't
+// be called from script. We use a host function that invokes call_method("start")
+// on the timer object.
+
+#[test]
+fn test_timer_start_then_update_finish() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(1.0)\ntimerStart(t)\nt.update(1.5)\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(true));
+}
+
+#[test]
+fn test_timer_start_update_not_yet_finished() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(1.0)\ntimerStart(t)\nt.update(0.3)\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_timer_start_update_elapsed_advances() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(2.0)\ntimerStart(t)\nt.update(0.7)\nreturn t.elapsed()")
+        .unwrap();
+    assert!((r.as_f64() - 0.7).abs() < 0.001);
+}
+
+#[test]
+fn test_timer_start_is_running() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(1.0)\ntimerStart(t)\nreturn t.isRunning()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(true));
+}
+
+#[test]
+fn test_timer_start_stop_is_not_running() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(1.0)\ntimerStart(t)\nt.stop()\nreturn t.isRunning()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_timer_finished_stops_running() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(0.5)\ntimerStart(t)\nt.update(1.0)\nreturn t.isRunning()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_timer_repeating_wraps_around() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(1.0)\nt.setRepeating(true)\ntimerStart(t)\nt.update(1.5)\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_timer_repeating_elapsed_wraps() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(1.0)\nt.setRepeating(true)\ntimerStart(t)\nt.update(1.3)\nreturn t.elapsed()")
+        .unwrap();
+    assert!((r.as_f64() - 0.3).abs() < 0.01);
+}
+
+#[test]
+fn test_timer_remaining_after_update() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(2.0)\ntimerStart(t)\nt.update(0.5)\nreturn t.remaining()")
+        .unwrap();
+    assert!((r.as_f64() - 1.5).abs() < 0.01);
+}
+
+#[test]
+fn test_timer_update_after_finished_is_noop() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(0.5)\ntimerStart(t)\nt.update(1.0)\nt.update(1.0)\nreturn t.elapsed()")
+        .unwrap();
+    assert!(r.as_f64() >= 0.5);
+}
+
+#[test]
+fn test_timer_reset_after_finish() {
+    use writ::fn1;
+    let mut writ = w();
+    writ.register_fn(
+        "timerStart",
+        fn1(|v: Value| -> Result<Value, String> {
+            if let Value::Object(o) = &v {
+                o.borrow_mut().call_method("start", &[])?;
+            }
+            Ok(Value::Null)
+        }),
+    );
+    let r = writ
+        .run("let t = Timer(0.5)\ntimerStart(t)\nt.update(1.0)\nt.reset()\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_timer_unknown_method() {
+    let r = w().run("let t = Timer(1.0)\nt.foobar()");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_timer_get_field_error() {
+    let r = w().run("let t = Timer(1.0)\nreturn t.x");
+    assert!(r.is_err());
+}
+
+// ── Reflect: additional dict / struct paths ───────────────────────────
+
+#[test]
+fn test_reflect_set_field_dict_roundtrip() {
+    let r = w()
+        .run("let d = {}\nsetField(d, \"key\", 99)\nreturn getField(d, \"key\")")
+        .unwrap();
+    assert_eq!(r, Value::I32(99));
+}
+
+#[test]
+fn test_reflect_get_field_dict_missing_returns_null() {
+    let r = w()
+        .run("let d = {}\nreturn getField(d, \"nope\")")
+        .unwrap();
+    assert_eq!(r, Value::Null);
+}
+
+#[test]
+fn test_reflect_fields_empty_non_struct() {
+    let r = w().run("let f = fields(42)\nreturn f.len()").unwrap();
+    assert_eq!(r, Value::I32(0));
+}
+
+#[test]
+fn test_reflect_fields_dict_keys() {
+    let r = w()
+        .run("let d = {\"a\": 1, \"b\": 2}\nlet f = fields(d)\nreturn f.len()")
+        .unwrap();
+    assert_eq!(r, Value::I32(2));
+}
+
+#[test]
+fn test_reflect_has_field_false_on_int() {
+    let r = w().run("return hasField(42, \"x\")").unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_reflect_instanceof_true() {
+    let r = w().run("return instanceof(42, \"int\")").unwrap();
+    assert_eq!(r, Value::Bool(true));
+}
+
+#[test]
+fn test_reflect_instanceof_false() {
+    let r = w().run("return instanceof(42, \"string\")").unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_reflect_typeof_null() {
+    let r = w().run("return typeof(null)").unwrap();
+    assert_eq!(r, Value::Str(std::rc::Rc::from("null")));
+}
+
+#[test]
+fn test_reflect_typeof_bool() {
+    let r = w().run("return typeof(true)").unwrap();
+    assert_eq!(r, Value::Str(std::rc::Rc::from("bool")));
+}
+
+// ── Tween: additional coverage ────────────────────────────────────────
+
+#[test]
+fn test_tween_zero_duration_clamps() {
+    // Zero duration should clamp to t=1.0 immediately
+    let r = w()
+        .run("let t = Tween(0.0, 100.0, 0.0)\nreturn t.value()")
+        .unwrap();
+    assert!((r.as_f64() - 100.0).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_finished_returns_final_value() {
+    let r = w()
+        .run("let t = Tween(0.0, 10.0, 1.0)\nt.update(2.0)\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(true));
+}
+
+#[test]
+fn test_tween_update_after_finished_noop() {
+    let r = w()
+        .run("let t = Tween(0.0, 10.0, 1.0)\nt.update(2.0)\nt.update(1.0)\nreturn t.value()")
+        .unwrap();
+    assert!((r.as_f64() - 10.0).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_reset() {
+    let r = w()
+        .run("let t = Tween(0.0, 10.0, 1.0)\nt.update(2.0)\nt.reset()\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_tween_loop_mode_not_finished() {
+    let r = w()
+        .run("let t = Tween(0.0, 10.0, 1.0)\nt.setLoop(\"loop\")\nt.update(1.5)\nreturn t.isFinished()")
+        .unwrap();
+    // Loop mode never finishes
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_tween_pingpong_mode_not_finished() {
+    let r = w()
+        .run("let t = Tween(0.0, 10.0, 1.0)\nt.setLoop(\"pingpong\")\nt.update(1.5)\nreturn t.isFinished()")
+        .unwrap();
+    assert_eq!(r, Value::Bool(false));
+}
+
+#[test]
+fn test_tween_delay_holds_value() {
+    // With a delay, the tween shouldn't start until delay elapses
+    let r = w()
+        .run("let t = Tween(0.0, 10.0, 1.0)\nt.setDelay(0.5)\nt.update(0.3)\nreturn t.value()")
+        .unwrap();
+    // elapsed=0.3, delay=0.5, active_elapsed=-0.2, clamped to 0, so value=0
+    assert!((r.as_f64()).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_easing_ease_in_cubic() {
+    let r = w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeInCubic\")\nt.update(0.5)\nreturn t.value()")
+        .unwrap();
+    // easeInCubic(0.5) = 0.125
+    assert!((r.as_f64() - 0.125).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_easing_ease_out_cubic() {
+    let r = w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeOutCubic\")\nt.update(0.5)\nreturn t.value()")
+        .unwrap();
+    // easeOutCubic(0.5) = 1 - (0.5)^3 = 0.875
+    assert!((r.as_f64() - 0.875).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_easing_ease_in_out_cubic() {
+    let r = w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeInOutCubic\")\nt.update(0.25)\nreturn t.value()")
+        .unwrap();
+    // easeInOutCubic(0.25) = 4*0.25^3 = 0.0625
+    assert!((r.as_f64() - 0.0625).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_easing_ease_in_out_quad_second_half() {
+    let r = w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeInOutQuad\")\nt.update(0.75)\nreturn t.value()")
+        .unwrap();
+    // easeInOutQuad(0.75) = 1 - (-2*0.75 + 2)^2 / 2 = 1 - 0.5^2/2 = 1 - 0.125 = 0.875
+    assert!((r.as_f64() - 0.875).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_easing_smoothstep_midpoint() {
+    let r = w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"smoothstep\")\nt.update(0.5)\nreturn t.value()")
+        .unwrap();
+    // smoothstep(0.5) = 0.5*0.5*(3 - 2*0.5) = 0.25*2 = 0.5
+    assert!((r.as_f64() - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_easing_ease_in_quad() {
+    let r = w()
+        .run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"easeInQuad\")\nt.update(0.5)\nreturn t.value()")
+        .unwrap();
+    // easeInQuad(0.5) = 0.25
+    assert!((r.as_f64() - 0.25).abs() < 0.01);
+}
+
+#[test]
+fn test_tween_unknown_easing_error() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(\"bounce\")");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_tween_unknown_loop_mode_error() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nt.setLoop(\"yoyo\")");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_tween_set_easing_non_string_error() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nt.setEasing(42)");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_tween_set_loop_non_string_error() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nt.setLoop(42)");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_tween_unknown_method() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nt.foobar()");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_tween_get_field_error() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nreturn t.x");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_tween_set_field_error() {
+    let r = w().run("let t = Tween(0.0, 1.0, 1.0)\nt.x = 5");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_timer_set_field_error() {
+    let r = w().run("let t = Timer(1.0)\nt.x = 5");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_timer_setrepeating_non_bool_error() {
+    let r = w().run("let t = Timer(1.0)\nt.setRepeating(42)");
+    assert!(r.is_err());
+}
+
+#[test]
+fn test_reflect_set_field_struct_error() {
+    // setField on struct should produce error about immutability
+    let r = w().run(
+        "struct Point {\nx: int\ny: int\n}\nlet p = Point(1, 2)\nsetField(p, \"x\", 99)",
+    );
+    assert!(r.is_err());
+}
