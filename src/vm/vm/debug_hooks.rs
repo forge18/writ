@@ -44,34 +44,35 @@ impl VM {
                 line: current_line,
             });
 
-        if (should_break || at_breakpoint) && self.breakpoint_handler.is_some() {
+        if should_break || at_breakpoint {
+            // Collect data that requires &mut self before borrowing the handler
             self.step_state = StepState::None;
-
-            // Collect locals before borrowing the handler
             let trace = self.build_stack_trace();
             let fn_name = display_function_name(self.current_frame().func_index(), &self.functions);
 
-            let ctx = BreakpointContext {
-                file: &current_file,
-                line: current_line,
-                function: &fn_name,
-                stack_trace: &trace,
-            };
+            if let Some(ref handler) = self.breakpoint_handler {
+                let ctx = BreakpointContext {
+                    file: &current_file,
+                    line: current_line,
+                    function: &fn_name,
+                    stack_trace: &trace,
+                };
 
-            let action = (self.breakpoint_handler.as_ref().unwrap())(&ctx);
+                let action = handler(&ctx);
 
-            match action {
-                BreakpointAction::Continue => {}
-                BreakpointAction::StepOver => {
-                    self.step_state = StepState::StepOver {
-                        target_depth: self.frames.len(),
-                    };
-                }
-                BreakpointAction::StepInto => {
-                    self.step_state = StepState::StepInto;
-                }
-                BreakpointAction::Abort => {
-                    return Err(self.make_error("execution aborted by debugger".to_string()));
+                match action {
+                    BreakpointAction::Continue => {}
+                    BreakpointAction::StepOver => {
+                        self.step_state = StepState::StepOver {
+                            target_depth: self.frames.len(),
+                        };
+                    }
+                    BreakpointAction::StepInto => {
+                        self.step_state = StepState::StepInto;
+                    }
+                    BreakpointAction::Abort => {
+                        return Err(self.make_error("execution aborted by debugger".to_string()));
+                    }
                 }
             }
         }
