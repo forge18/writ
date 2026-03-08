@@ -141,7 +141,10 @@ impl Compiler {
             StmtKind::Class(decl) => {
                 self.compile_class_decl(decl, &stmt.span)?;
             }
-            StmtKind::Trait(_) | StmtKind::Enum(_) | StmtKind::Import(_) | StmtKind::WildcardImport(_) => {
+            StmtKind::Trait(_)
+            | StmtKind::Enum(_)
+            | StmtKind::Import(_)
+            | StmtKind::WildcardImport(_) => {
                 // Type-checker-only constructs; no bytecode emitted.
             }
             other => {
@@ -664,7 +667,11 @@ impl Compiler {
         Ok(())
     }
 
-    pub(super) fn compile_when_body(&mut self, body: &WhenBody, line: u32) -> Result<(), CompileError> {
+    pub(super) fn compile_when_body(
+        &mut self,
+        body: &WhenBody,
+        line: u32,
+    ) -> Result<(), CompileError> {
         match body {
             WhenBody::Expr(expr) => {
                 // Compile expression, discard result
@@ -865,5 +872,4 @@ impl Compiler {
     }
 
     // ── Function compilation ───────────────────────────────────────
-
 }

@@ -1,7 +1,11 @@
 use super::*;
 
 impl Compiler {
-    pub(super) fn compile_func_decl(&mut self, func: &FuncDecl, span: &Span) -> Result<(), CompileError> {
+    pub(super) fn compile_func_decl(
+        &mut self,
+        func: &FuncDecl,
+        span: &Span,
+    ) -> Result<(), CompileError> {
         let line = span.line;
 
         // Determine if this is a nested (closure) function or top-level.
@@ -358,7 +362,12 @@ impl Compiler {
         idx
     }
 
-    pub(super) fn add_upvalue_to_scope(&mut self, scope_idx: usize, is_local: bool, index: u8) -> u8 {
+    pub(super) fn add_upvalue_to_scope(
+        &mut self,
+        scope_idx: usize,
+        is_local: bool,
+        index: u8,
+    ) -> u8 {
         let scope = &mut self.enclosing_scopes[scope_idx];
         for (i, uv) in scope.upvalues.iter().enumerate() {
             if uv.is_local == is_local && uv.index == index {

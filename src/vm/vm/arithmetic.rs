@@ -166,7 +166,13 @@ impl VM {
     }
 
     /// Register-based Add: handles int, float, mixed, string concat, and operator overloading.
-    pub(super) fn exec_add_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
+    pub(super) fn exec_add_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        a: u8,
+        b: u8,
+    ) -> Result<(), RuntimeError> {
         let a_ref = &self.stack[base + a as usize];
         let b_ref = &self.stack[base + b as usize];
         let result = match (a_ref, b_ref) {
@@ -250,7 +256,13 @@ impl VM {
     }
 
     /// Register-based Div with zero-check.
-    pub(super) fn exec_div_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
+    pub(super) fn exec_div_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        a: u8,
+        b: u8,
+    ) -> Result<(), RuntimeError> {
         let a_ref = &self.stack[base + a as usize];
         let b_ref = &self.stack[base + b as usize];
         let result = match (a_ref, b_ref) {
@@ -294,7 +306,13 @@ impl VM {
     }
 
     /// Register-based Mod with zero-check.
-    pub(super) fn exec_mod_reg(&mut self, base: usize, dst: u8, a: u8, b: u8) -> Result<(), RuntimeError> {
+    pub(super) fn exec_mod_reg(
+        &mut self,
+        base: usize,
+        dst: u8,
+        a: u8,
+        b: u8,
+    ) -> Result<(), RuntimeError> {
         let a_ref = &self.stack[base + a as usize];
         let b_ref = &self.stack[base + b as usize];
         let result = match (a_ref, b_ref) {

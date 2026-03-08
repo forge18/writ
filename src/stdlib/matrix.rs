@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use glam::{Mat3, Mat4, Vec3};
 use crate::vm::{VM, Value, WritObject};
+use glam::{Mat3, Mat4, Vec3};
 
 use super::vector::{extract_f32, vec2_value, vec3_value};
 

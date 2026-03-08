@@ -331,7 +331,11 @@ impl TypeChecker {
 
     // ── Module resolution ─────────────────────────────────────────────
 
-    pub(super) fn check_import(&mut self, import: &ImportDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_import(
+        &mut self,
+        import: &ImportDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         let module = self
             .module_registry
             .get_module(&import.from)
@@ -647,5 +651,4 @@ impl TypeChecker {
         };
         Ok(result)
     }
-
 }

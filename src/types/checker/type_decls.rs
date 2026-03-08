@@ -1,7 +1,11 @@
 use super::*;
 
 impl TypeChecker {
-    pub(super) fn check_trait_decl(&mut self, decl: &TraitDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_trait_decl(
+        &mut self,
+        decl: &TraitDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // Trait was already registered in pass 1. Now type-check default bodies.
         for method in &decl.methods {
             if let Some(body) = &method.default_body {
@@ -51,7 +55,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn check_class_decl(&mut self, decl: &ClassDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_class_decl(
+        &mut self,
+        decl: &ClassDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // Generic templates are checked only when instantiated.
         if !decl.type_params.is_empty() {
             return Ok(());
@@ -284,7 +292,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn check_struct_decl(&mut self, decl: &StructDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_struct_decl(
+        &mut self,
+        decl: &StructDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // Generic templates are checked only when instantiated.
         if !decl.type_params.is_empty() {
             return Ok(());
@@ -414,7 +426,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn check_enum_decl(&mut self, decl: &EnumDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_enum_decl(
+        &mut self,
+        decl: &EnumDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // Validate variant values if present.
         for variant in &decl.variants {
             if let Some(value_expr) = &variant.value {
@@ -503,5 +519,4 @@ impl TypeChecker {
 
         Ok(())
     }
-
 }

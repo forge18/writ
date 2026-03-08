@@ -1,7 +1,11 @@
 use super::*;
 
 impl TypeChecker {
-    pub(super) fn resolve_type_expr(&mut self, type_expr: &TypeExpr, span: &Span) -> Result<Type, TypeError> {
+    pub(super) fn resolve_type_expr(
+        &mut self,
+        type_expr: &TypeExpr,
+        span: &Span,
+    ) -> Result<Type, TypeError> {
         match type_expr {
             TypeExpr::Simple(name) => match name.as_str() {
                 "int" => Ok(Type::Int),
@@ -97,7 +101,10 @@ impl TypeChecker {
 
     /// Substitutes type-parameter references in a `TypeExpr` given a binding map.
     /// e.g. if bindings = {"T": "int"}, `Simple("T")` becomes `Simple("int")`.
-    pub(super) fn substitute_type_expr(type_expr: &TypeExpr, bindings: &HashMap<String, String>) -> TypeExpr {
+    pub(super) fn substitute_type_expr(
+        type_expr: &TypeExpr,
+        bindings: &HashMap<String, String>,
+    ) -> TypeExpr {
         match type_expr {
             TypeExpr::Simple(name) => {
                 if let Some(bound) = bindings.get(name) {
@@ -361,5 +368,4 @@ impl TypeChecker {
             _ => false,
         }
     }
-
 }

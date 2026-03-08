@@ -9,7 +9,9 @@ use crate::vm::{VM, Value};
 pub fn register(vm: &mut VM) {
     vm.register_fn(
         "typeof",
-        fn1(|v: Value| -> Result<Value, String> { Ok(Value::Str(Rc::from(v.type_name_owned().as_str()))) }),
+        fn1(|v: Value| -> Result<Value, String> {
+            Ok(Value::Str(Rc::from(v.type_name_owned().as_str())))
+        }),
     );
 
     vm.register_fn(
@@ -127,8 +129,8 @@ pub fn make_test_struct(
     public: Vec<&str>,
     methods: Vec<&str>,
 ) -> WritStruct {
-    use std::collections::HashSet;
     use crate::vm::FieldLayout;
+    use std::collections::HashSet;
 
     let field_names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
     let field_values: Vec<Value> = fields.into_iter().map(|(_, v)| v).collect();

@@ -61,18 +61,14 @@ pub fn register(vm: &mut VM) {
         ValueTag::Str,
         "startsWith",
         Some("string"),
-        mfn1(|s: RcStr, prefix: RcStr| -> Result<bool, String> {
-            Ok(s.starts_with(&*prefix))
-        }),
+        mfn1(|s: RcStr, prefix: RcStr| -> Result<bool, String> { Ok(s.starts_with(&*prefix)) }),
     );
 
     vm.register_method(
         ValueTag::Str,
         "endsWith",
         Some("string"),
-        mfn1(|s: RcStr, suffix: RcStr| -> Result<bool, String> {
-            Ok(s.ends_with(&*suffix))
-        }),
+        mfn1(|s: RcStr, suffix: RcStr| -> Result<bool, String> { Ok(s.ends_with(&*suffix)) }),
     );
 
     vm.register_method(

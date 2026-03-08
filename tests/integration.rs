@@ -6,7 +6,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use writ::{Value, ValueTag, Writ, WritError, WritObject, Type, fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
+use writ::{
+    Type, Value, ValueTag, Writ, WritError, WritObject, fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3,
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -48,7 +50,9 @@ impl WritObject for MockPlayer {
 
     fn call_method(&mut self, name: &str, _args: &[Value]) -> Result<Value, String> {
         match name {
-            "greet" => Ok(Value::Str(Rc::from(format!("Hello, I'm {}!", self.name).as_str()))),
+            "greet" => Ok(Value::Str(Rc::from(
+                format!("Hello, I'm {}!", self.name).as_str(),
+            ))),
             _ => Err(format!("Player has no method '{name}'")),
         }
     }
@@ -1389,7 +1393,11 @@ fn test_where_clause_on_generic_class() {
          }\n\
          return 1",
     );
-    assert!(result.is_ok(), "where clause on class parse failed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "where clause on class parse failed: {:?}",
+        result
+    );
 }
 
 // ── Test: Regex stdlib ────────────────────────────────────────────────
@@ -1440,7 +1448,10 @@ fn test_regex_replace_method() {
         "let r = Regex(\"\\\\d+\")\n\
          return r.replace(\"abc123def456\", \"NUM\")",
     );
-    assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::from("abcNUMdef456")));
+    assert_eq!(
+        result.unwrap(),
+        Value::Str(std::rc::Rc::from("abcNUMdef456"))
+    );
 }
 
 #[test]
@@ -1452,7 +1463,10 @@ fn test_regex_replace_all_method() {
         "let r = Regex(\"\\\\d+\")\n\
          return r.replaceAll(\"abc123def456\", \"NUM\")",
     );
-    assert_eq!(result.unwrap(), Value::Str(std::rc::Rc::from("abcNUMdefNUM")));
+    assert_eq!(
+        result.unwrap(),
+        Value::Str(std::rc::Rc::from("abcNUMdefNUM"))
+    );
 }
 
 #[test]
@@ -1647,7 +1661,10 @@ fn test_native_fn_type_mismatch() {
     // Register a function expecting bool, pass an int → FromValue error
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    writ.register_fn("takes_bool", fn1(|b: bool| -> Result<bool, String> { Ok(b) }));
+    writ.register_fn(
+        "takes_bool",
+        fn1(|b: bool| -> Result<bool, String> { Ok(b) }),
+    );
     let result = writ.run("return takes_bool(42)");
     assert!(result.is_err());
 }
@@ -1925,7 +1942,9 @@ fn test_string_concat_opcode() {
 fn test_dict_literal_and_access() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"a\": 1, \"b\": 2}\nreturn d[\"a\"]").unwrap();
+    let result = writ
+        .run("let d = {\"a\": 1, \"b\": 2}\nreturn d[\"a\"]")
+        .unwrap();
     assert_eq!(result, Value::I32(1));
 }
 
@@ -1933,7 +1952,9 @@ fn test_dict_literal_and_access() {
 fn test_make_array_opcode() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let arr = [1, 2, 3, 4, 5]\nreturn arr.len()").unwrap();
+    let result = writ
+        .run("let arr = [1, 2, 3, 4, 5]\nreturn arr.len()")
+        .unwrap();
     assert_eq!(result, Value::I32(5));
 }
 
@@ -2008,10 +2029,8 @@ mod debug_hook_tests {
             calls_clone.borrow_mut().push(name.to_string());
         });
 
-        writ.run(
-            "func greet() -> int { return 1 }\nreturn greet()",
-        )
-        .unwrap();
+        writ.run("func greet() -> int { return 1 }\nreturn greet()")
+            .unwrap();
         assert!(
             calls.borrow().contains(&"greet".to_string()),
             "on_call hook did not fire for 'greet'"
@@ -2029,10 +2048,8 @@ mod debug_hook_tests {
             returns_clone.borrow_mut().push(name.to_string());
         });
 
-        writ.run(
-            "func greet() -> int { return 1 }\nreturn greet()",
-        )
-        .unwrap();
+        writ.run("func greet() -> int { return 1 }\nreturn greet()")
+            .unwrap();
         assert!(!returns.borrow().is_empty(), "on_return hook never fired");
     }
 
@@ -2426,7 +2443,11 @@ impl WritObject for Counter {
 }
 
 fn counter_factory(args: &[Value]) -> Result<Box<dyn WritObject>, String> {
-    let start = if let Some(Value::I32(v)) = args.first() { *v } else { 0 };
+    let start = if let Some(Value::I32(v)) = args.first() {
+        *v
+    } else {
+        0
+    };
     Ok(Box::new(Counter { count: start }))
 }
 
@@ -2529,9 +2550,14 @@ fn test_register_method_mfn2_on_string() {
         ValueTag::Str,
         "repeat_sep",
         None,
-        mfn2(|s: Rc<str>, n: i32, sep: Rc<str>| -> Result<String, String> {
-            Ok((0..n).map(|_| s.as_ref()).collect::<Vec<_>>().join(sep.as_ref()))
-        }),
+        mfn2(
+            |s: Rc<str>, n: i32, sep: Rc<str>| -> Result<String, String> {
+                Ok((0..n)
+                    .map(|_| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(sep.as_ref()))
+            },
+        ),
     );
     assert_eq!(
         writ.run(r#"return "a".repeat_sep(3, "-")"#).unwrap(),
@@ -2604,7 +2630,10 @@ fn test_enable_type_checking_accepts_valid_code() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
     writ.enable_type_checking();
-    assert_eq!(writ.run("let x: int = 42\nreturn x").unwrap(), Value::I32(42));
+    assert_eq!(
+        writ.run("let x: int = 42\nreturn x").unwrap(),
+        Value::I32(42)
+    );
 }
 
 // ── reset_script_types ────────────────────────────────────────────────────────
@@ -2625,7 +2654,9 @@ fn test_reset_script_types_allows_redefine() {
     writ.run("func foo() -> int { return 1 }").unwrap();
     writ.reset_script_types();
     // After reset the type checker no longer knows about 'foo', so redefining works without error
-    let result = writ.run("func foo() -> int { return 2 }\nreturn foo()").unwrap();
+    let result = writ
+        .run("func foo() -> int { return 2 }\nreturn foo()")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -2659,7 +2690,10 @@ fn test_lex_error_single_ampersand() {
 fn test_lex_error_unterminated_string() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    assert!(matches!(writ.run("return \"unterminated"), Err(WritError::Lex(_))));
+    assert!(matches!(
+        writ.run("return \"unterminated"),
+        Err(WritError::Lex(_))
+    ));
 }
 
 // ── VM methods via vm_mut() ───────────────────────────────────────────────────
@@ -2690,7 +2724,8 @@ fn test_register_fn_in_module_disable_blocks_it() {
 fn test_last_coroutine_id_some_after_start() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    writ.run("func spin() { while true { yield } }\nstart spin()").unwrap();
+    writ.run("func spin() { while true { yield } }\nstart spin()")
+        .unwrap();
     writ.tick(0.016).unwrap();
     assert!(writ.vm_mut().last_coroutine_id().is_some());
 }
@@ -2699,7 +2734,8 @@ fn test_last_coroutine_id_some_after_start() {
 fn test_set_coroutine_owner_and_cancel_for() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    writ.run("func spin() { while true { yield } }\nstart spin()").unwrap();
+    writ.run("func spin() { while true { yield } }\nstart spin()")
+        .unwrap();
     writ.tick(0.016).unwrap();
     let id = writ.vm_mut().last_coroutine_id().unwrap();
     writ.vm_mut().set_coroutine_owner(id, 42);
@@ -2712,7 +2748,8 @@ fn test_set_coroutine_owner_and_cancel_for() {
 fn test_cancel_coroutines_for_wrong_owner_is_noop() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    writ.run("func spin() { while true { yield } }\nstart spin()").unwrap();
+    writ.run("func spin() { while true { yield } }\nstart spin()")
+        .unwrap();
     writ.tick(0.016).unwrap();
     let id = writ.vm_mut().last_coroutine_id().unwrap();
     writ.vm_mut().set_coroutine_owner(id, 42);
@@ -2809,13 +2846,15 @@ fn test_mfn3_callable() {
         ValueTag::Str,
         "replace3",
         None,
-        mfn3(|s: Rc<str>, from: Rc<str>, to: Rc<str>, n: i32| -> Result<String, String> {
-            let mut result = s.to_string();
-            for _ in 0..n {
-                result = result.replacen(from.as_ref(), to.as_ref(), 1);
-            }
-            Ok(result)
-        }),
+        mfn3(
+            |s: Rc<str>, from: Rc<str>, to: Rc<str>, n: i32| -> Result<String, String> {
+                let mut result = s.to_string();
+                for _ in 0..n {
+                    result = result.replacen(from.as_ref(), to.as_ref(), 1);
+                }
+                Ok(result)
+            },
+        ),
     );
     assert_eq!(
         writ.run(r#"return "aaa".replace3("a", "b", 2)"#).unwrap(),
@@ -2839,7 +2878,10 @@ fn test_type_checker_mut_register_host_function() {
 fn test_write_error_parse_on_invalid_syntax() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    assert!(matches!(writ.run("return return"), Err(WritError::Parse(_))));
+    assert!(matches!(
+        writ.run("return return"),
+        Err(WritError::Parse(_))
+    ));
 }
 
 #[test]
@@ -2945,8 +2987,11 @@ fn test_negate_non_numeric_error() {
     writ.disable_type_checking();
     let err = writ.run("return -true").unwrap_err();
     let msg = format!("{}", err);
-    assert!(msg.contains("negate") || msg.contains("Neg") || msg.contains("type"),
-        "unexpected error: {}", msg);
+    assert!(
+        msg.contains("negate") || msg.contains("Neg") || msg.contains("type"),
+        "unexpected error: {}",
+        msg
+    );
 }
 
 #[test]
@@ -2955,15 +3000,20 @@ fn test_not_non_bool_error() {
     writ.disable_type_checking();
     let err = writ.run("return !42").unwrap_err();
     let msg = format!("{}", err);
-    assert!(msg.contains("not") || msg.contains("Not") || msg.contains("bool") || msg.contains("type"),
-        "unexpected error: {}", msg);
+    assert!(
+        msg.contains("not") || msg.contains("Not") || msg.contains("bool") || msg.contains("type"),
+        "unexpected error: {}",
+        msg
+    );
 }
 
 #[test]
 fn test_string_interpolation() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let name = \"world\"\nreturn \"hello ${name}\"").unwrap();
+    let result = writ
+        .run("let name = \"world\"\nreturn \"hello ${name}\"")
+        .unwrap();
     assert_eq!(result, Value::Str(std::rc::Rc::from("hello world")));
 }
 
@@ -2979,7 +3029,9 @@ fn test_string_concat() {
 fn test_string_contains() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("return \"hello world\".contains(\"world\")").unwrap();
+    let result = writ
+        .run("return \"hello world\".contains(\"world\")")
+        .unwrap();
     assert_eq!(result, Value::Bool(true));
 }
 
@@ -2987,7 +3039,9 @@ fn test_string_contains() {
 fn test_string_split() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let parts = \"a,b,c\".split(\",\")\nreturn parts.length").unwrap();
+    let result = writ
+        .run("let parts = \"a,b,c\".split(\",\")\nreturn parts.length")
+        .unwrap();
     assert_eq!(result, Value::I32(3));
 }
 
@@ -3068,7 +3122,9 @@ fn test_string_char_at() {
 fn test_array_push_pop() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [1, 2]\na.push(3)\nreturn a.pop()").unwrap();
+    let result = writ
+        .run("let a = [1, 2]\na.push(3)\nreturn a.pop()")
+        .unwrap();
     assert_eq!(result, Value::I32(3));
 }
 
@@ -3106,7 +3162,9 @@ fn test_array_reduce() {
 fn test_array_sort() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [3, 1, 2]\na.sort()\nreturn a[0]").unwrap();
+    let result = writ
+        .run("let a = [3, 1, 2]\na.sort()\nreturn a[0]")
+        .unwrap();
     assert_eq!(result, Value::I32(1));
 }
 
@@ -3114,7 +3172,9 @@ fn test_array_sort() {
 fn test_array_reverse() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [1, 2, 3]\na.reverse()\nreturn a[0]").unwrap();
+    let result = writ
+        .run("let a = [1, 2, 3]\na.reverse()\nreturn a[0]")
+        .unwrap();
     assert_eq!(result, Value::I32(3));
 }
 
@@ -3138,7 +3198,9 @@ fn test_array_index_of() {
 fn test_array_slice() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [1, 2, 3, 4, 5]\nlet s = a.slice(1, 3)\nreturn s.length").unwrap();
+    let result = writ
+        .run("let a = [1, 2, 3, 4, 5]\nlet s = a.slice(1, 3)\nreturn s.length")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -3146,7 +3208,9 @@ fn test_array_slice() {
 fn test_array_join() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("return [\"a\", \"b\", \"c\"].join(\"-\")").unwrap();
+    let result = writ
+        .run("return [\"a\", \"b\", \"c\"].join(\"-\")")
+        .unwrap();
     assert_eq!(result, Value::Str(std::rc::Rc::from("a-b-c")));
 }
 
@@ -3162,7 +3226,9 @@ fn test_dict_bracket_access() {
 fn test_dict_bracket_assign() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"x\": 1}\nd[\"y\"] = 2\nreturn d[\"y\"]").unwrap();
+    let result = writ
+        .run("let d = {\"x\": 1}\nd[\"y\"] = 2\nreturn d[\"y\"]")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -3170,7 +3236,9 @@ fn test_dict_bracket_assign() {
 fn test_dict_keys() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"a\": 1, \"b\": 2}\nreturn d.keys().length").unwrap();
+    let result = writ
+        .run("let d = {\"a\": 1, \"b\": 2}\nreturn d.keys().length")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -3178,7 +3246,9 @@ fn test_dict_keys() {
 fn test_dict_values() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"a\": 1, \"b\": 2}\nreturn d.values().length").unwrap();
+    let result = writ
+        .run("let d = {\"a\": 1, \"b\": 2}\nreturn d.values().length")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -3194,7 +3264,9 @@ fn test_dict_has_key() {
 fn test_dict_remove() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"x\": 1, \"y\": 2}\nd.remove(\"x\")\nreturn d.has(\"x\")").unwrap();
+    let result = writ
+        .run("let d = {\"x\": 1, \"y\": 2}\nd.remove(\"x\")\nreturn d.has(\"x\")")
+        .unwrap();
     assert_eq!(result, Value::Bool(false));
 }
 
@@ -3259,7 +3331,9 @@ fn test_spread_in_function_args() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
     // Test spread by building array manually
-    let result = writ.run("let a = [1, 2]\na.push(3)\nreturn a.length").unwrap();
+    let result = writ
+        .run("let a = [1, 2]\na.push(3)\nreturn a.length")
+        .unwrap();
     assert_eq!(result, Value::I32(3));
 }
 
@@ -3267,7 +3341,9 @@ fn test_spread_in_function_args() {
 fn test_named_function_as_value() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("func add(a: int, b: int) -> int { return a + b }\nreturn add(3, 4)").unwrap();
+    let result = writ
+        .run("func add(a: int, b: int) -> int { return a + b }\nreturn add(3, 4)")
+        .unwrap();
     assert_eq!(result, Value::I32(7));
 }
 
@@ -3275,7 +3351,9 @@ fn test_named_function_as_value() {
 fn test_string_with_newline() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let s = \"line1\"\nreturn s.contains(\"line1\")").unwrap();
+    let result = writ
+        .run("let s = \"line1\"\nreturn s.contains(\"line1\")")
+        .unwrap();
     assert_eq!(result, Value::Bool(true));
 }
 
@@ -3568,7 +3646,9 @@ fn test_string_interpolation_with_int() {
 fn test_array_remove_by_index() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [10, 20, 30]\na.remove(1)\nreturn a[1]").unwrap();
+    let result = writ
+        .run("let a = [10, 20, 30]\na.remove(1)\nreturn a[1]")
+        .unwrap();
     assert_eq!(result, Value::I32(30));
 }
 
@@ -3576,7 +3656,9 @@ fn test_array_remove_by_index() {
 fn test_array_insert() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [1, 3]\na.insert(1, 2)\nreturn a[1]").unwrap();
+    let result = writ
+        .run("let a = [1, 3]\na.insert(1, 2)\nreturn a[1]")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -3592,7 +3674,9 @@ fn test_array_len_method() {
 fn test_dict_len() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"a\": 1, \"b\": 2, \"c\": 3}\nreturn d.len()").unwrap();
+    let result = writ
+        .run("let d = {\"a\": 1, \"b\": 2, \"c\": 3}\nreturn d.len()")
+        .unwrap();
     assert_eq!(result, Value::I32(3));
 }
 
@@ -3637,7 +3721,9 @@ fn test_boolean_not() {
 fn test_nested_array() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [[1, 2], [3, 4]]\nreturn a[1][0]").unwrap();
+    let result = writ
+        .run("let a = [[1, 2], [3, 4]]\nreturn a[1][0]")
+        .unwrap();
     assert_eq!(result, Value::I32(3));
 }
 
@@ -3645,7 +3731,9 @@ fn test_nested_array() {
 fn test_dict_nested() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let d = {\"inner\": {\"x\": 99}}\nreturn d[\"inner\"][\"x\"]").unwrap();
+    let result = writ
+        .run("let d = {\"inner\": {\"x\": 99}}\nreturn d[\"inner\"][\"x\"]")
+        .unwrap();
     assert_eq!(result, Value::I32(99));
 }
 
@@ -3677,9 +3765,7 @@ fn test_fn3_clamp_host_function() {
     writ.disable_type_checking();
     writ.register_fn(
         "clamp3",
-        fn3(|val: f64, lo: f64, hi: f64| -> Result<f64, String> {
-            Ok(val.max(lo).min(hi))
-        }),
+        fn3(|val: f64, lo: f64, hi: f64| -> Result<f64, String> { Ok(val.max(lo).min(hi)) }),
     );
     let result = writ.run("return clamp3(15.0, 0.0, 10.0)").unwrap();
     assert_eq!(result, Value::F64(10.0));
@@ -3762,7 +3848,9 @@ fn test_string_starts_ends_with_false() {
 fn test_dict_merge() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = {\"x\": 1}\nlet b = {\"y\": 2}\na.merge(b)\nreturn a.len()").unwrap();
+    let result = writ
+        .run("let a = {\"x\": 1}\nlet b = {\"y\": 2}\na.merge(b)\nreturn a.len()")
+        .unwrap();
     assert_eq!(result, Value::I32(2));
 }
 
@@ -4014,7 +4102,9 @@ fn test_when_range_pattern() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
     let result = writ
-        .run("let x = 5\nwhen x {\n  1..10 => { return \"small\" }\n  else => { return \"big\" }\n}")
+        .run(
+            "let x = 5\nwhen x {\n  1..10 => { return \"small\" }\n  else => { return \"big\" }\n}",
+        )
         .unwrap();
     assert_eq!(result, Value::Str(Rc::from("small")));
 }
@@ -4056,7 +4146,11 @@ fn test_enum_with_values() {
     writ.disable_type_checking();
     // Parser should handle enum variants with parenthesized values
     let result = writ.run("enum Status { Ok(200), NotFound(404) }\nreturn 1");
-    assert!(result.is_ok(), "enum with values should parse: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "enum with values should parse: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -4214,9 +4308,7 @@ fn test_when_no_subject() {
 #[test]
 fn test_value_display_dict() {
     let dict = Value::Dict(Rc::new(RefCell::new(
-        vec![("x".to_string(), Value::I32(1))]
-            .into_iter()
-            .collect(),
+        vec![("x".to_string(), Value::I32(1))].into_iter().collect(),
     )));
     let s = format!("{}", dict);
     assert!(s.contains("x") && s.contains("1"), "got: {}", s);
@@ -4226,7 +4318,9 @@ fn test_value_display_dict() {
 fn test_array_set_index() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let a = [1, 2, 3]\na[1] = 99\nreturn a[1]").unwrap();
+    let result = writ
+        .run("let a = [1, 2, 3]\na[1] = 99\nreturn a[1]")
+        .unwrap();
     assert_eq!(result, Value::I32(99));
 }
 
@@ -4234,7 +4328,9 @@ fn test_array_set_index() {
 fn test_string_interpolation_simple_ident() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("let name = \"writ\"\nreturn \"hello $name\"").unwrap();
+    let result = writ
+        .run("let name = \"writ\"\nreturn \"hello $name\"")
+        .unwrap();
     assert_eq!(result, Value::Str(Rc::from("hello writ")));
 }
 
@@ -4259,7 +4355,9 @@ fn test_recursive_factorial_i64() {
 fn test_while_false_never_executes() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ.run("var x = 0\nwhile false { x = 1 }\nreturn x").unwrap();
+    let result = writ
+        .run("var x = 0\nwhile false { x = 1 }\nreturn x")
+        .unwrap();
     assert_eq!(result, Value::I32(0));
 }
 
@@ -4663,9 +4761,7 @@ fn test_quickened_le_ge_float_via_loop() {
 fn test_integer_overflow_promotes_to_i64() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ
-        .run("return 2000000000 + 2000000000")
-        .unwrap();
+    let result = writ.run("return 2000000000 + 2000000000").unwrap();
     assert_eq!(result, Value::I64(4000000000));
 }
 
@@ -4673,9 +4769,7 @@ fn test_integer_overflow_promotes_to_i64() {
 fn test_integer_multiply_overflow_promotes() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ
-        .run("return 100000 * 100000")
-        .unwrap();
+    let result = writ.run("return 100000 * 100000").unwrap();
     assert_eq!(result, Value::I64(10000000000));
 }
 
@@ -4683,9 +4777,7 @@ fn test_integer_multiply_overflow_promotes() {
 fn test_integer_sub_overflow_promotes() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ
-        .run("return -2000000000 - 2000000000")
-        .unwrap();
+    let result = writ.run("return -2000000000 - 2000000000").unwrap();
     assert_eq!(result, Value::I64(-4000000000));
 }
 
@@ -5023,11 +5115,10 @@ fn test_array_spread() {
 fn test_array_index_negative() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ
-        .run(
-            "let a = [10, 20, 30]\n\
+    let result = writ.run(
+        "let a = [10, 20, 30]\n\
              return a[-1]",
-        );
+    );
     // Negative index may error or wrap — just verify it doesn't crash
     let _ = result;
 }
@@ -5218,9 +5309,7 @@ fn test_string_interpolation_complex() {
 fn test_string_interpolation_expr() {
     let mut writ = Writ::new();
     writ.disable_type_checking();
-    let result = writ
-        .run("return \"result=${2 + 3}\"")
-        .unwrap();
+    let result = writ.run("return \"result=${2 + 3}\"").unwrap();
     assert_eq!(result, Value::Str(Rc::from("result=5")));
 }
 

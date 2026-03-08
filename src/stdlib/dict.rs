@@ -46,10 +46,7 @@ pub fn register(vm: &mut VM) {
         "remove",
         Some("dictionary"),
         mfn1(|dict: Dict, key: Rc<str>| -> Result<Value, String> {
-            Ok(dict
-                .borrow_mut()
-                .remove(&*key)
-                .unwrap_or(Value::Null))
+            Ok(dict.borrow_mut().remove(&*key).unwrap_or(Value::Null))
         }),
     );
 

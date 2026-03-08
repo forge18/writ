@@ -139,10 +139,7 @@ pub enum ExprKind {
 
     /// Super method call: `super.methodName(args)`.
     /// Only valid inside a class method that has a parent class.
-    Super {
-        method: String,
-        args: Vec<CallArg>,
-    },
+    Super { method: String, args: Vec<CallArg> },
 
     /// `when` used as an expression — each arm yields a value.
     When {

@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
 use crate::vm::{VM, Value, WritObject};
+use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
 
 use super::matrix::{mat3_value, mat4_value};
 use super::quaternion::{extract_quat, quat_value};

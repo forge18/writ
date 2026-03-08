@@ -436,7 +436,10 @@ impl TypeChecker {
     ) -> Result<Type, TypeError> {
         // Resolve the enclosing class and its parent.
         let class_name = self.current_class.clone().ok_or_else(|| {
-            TypeError::simple("'super' used outside of a class method".to_string(), span.clone())
+            TypeError::simple(
+                "'super' used outside of a class method".to_string(),
+                span.clone(),
+            )
         })?;
         let parent_name = self
             .registry
@@ -493,7 +496,11 @@ impl TypeChecker {
         Ok(method_info.return_type.clone())
     }
 
-    pub(super) fn infer_error_propagate(&mut self, inner: &Expr, span: &Span) -> Result<Type, TypeError> {
+    pub(super) fn infer_error_propagate(
+        &mut self,
+        inner: &Expr,
+        span: &Span,
+    ) -> Result<Type, TypeError> {
         let inner_type = self.infer_expr(inner)?;
         let unwrapped = match &inner_type {
             Type::Result(t) => t.as_ref().clone(),
@@ -595,5 +602,4 @@ impl TypeChecker {
             return_type: Box::new(return_type),
         })
     }
-
 }

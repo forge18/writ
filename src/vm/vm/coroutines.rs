@@ -1,7 +1,7 @@
-use std::collections::HashSet;
-use std::rc::Rc;
 #[cfg(feature = "mobile-aosoa")]
 use std::cell::RefCell;
+use std::collections::HashSet;
+use std::rc::Rc;
 
 use super::super::coroutine::{Coroutine, CoroutineId, CoroutineState, WaitCondition};
 use super::super::error::RuntimeError;
@@ -94,7 +94,11 @@ impl VM {
 
     /// Register-based ConvertToAoSoA.
     #[cfg(feature = "mobile-aosoa")]
-    pub(super) fn exec_convert_to_aosoa_reg(&mut self, base: usize, src: u8) -> Result<(), RuntimeError> {
+    pub(super) fn exec_convert_to_aosoa_reg(
+        &mut self,
+        base: usize,
+        src: u8,
+    ) -> Result<(), RuntimeError> {
         use super::super::aosoa::AoSoAContainer;
 
         let abs = base + src as usize;

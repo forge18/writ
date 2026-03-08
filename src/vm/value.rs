@@ -421,10 +421,7 @@ mod tests {
         assert_eq!(Value::I32(42), Value::I64(42));
         assert_ne!(Value::I32(1), Value::F32(1.0));
         assert_eq!(Value::Null, Value::Null);
-        assert_eq!(
-            Value::Str(Rc::from("hello")),
-            Value::Str(Rc::from("hello"))
-        );
+        assert_eq!(Value::Str(Rc::from("hello")), Value::Str(Rc::from("hello")));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 
-use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use crate::vm::binding::{fn1, fn2, fn3};
 use crate::vm::{VM, Value};
+use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 
 thread_local! {
     static NOISE: RefCell<FastNoiseLite> = RefCell::new(FastNoiseLite::new());

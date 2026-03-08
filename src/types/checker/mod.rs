@@ -258,13 +258,13 @@ impl TypeChecker {
     }
 }
 
-mod stmts;
-mod exprs;
-mod types;
-mod decls;
-mod type_decls;
 mod collections;
+mod decls;
+mod exprs;
 mod registry;
+mod stmts;
+mod type_decls;
+mod types;
 
 pub(super) fn infer_literal(lit: &Literal) -> Type {
     match lit {

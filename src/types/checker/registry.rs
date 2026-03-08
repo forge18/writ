@@ -22,7 +22,11 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn register_func_signature(&mut self, func: &FuncDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn register_func_signature(
+        &mut self,
+        func: &FuncDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         let return_type = match &func.return_type {
             Some(type_expr) => self.resolve_type_expr(type_expr, span)?,
             None => Type::Void,
@@ -46,7 +50,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn register_trait(&mut self, decl: &TraitDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn register_trait(
+        &mut self,
+        decl: &TraitDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         let mut methods = Vec::new();
         for method in &decl.methods {
             let return_type = match &method.return_type {
@@ -73,7 +81,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn register_class(&mut self, decl: &ClassDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn register_class(
+        &mut self,
+        decl: &ClassDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // Generic templates are not registered as concrete types — stored for later instantiation.
         if !decl.type_params.is_empty() {
             self.generic_classes.insert(decl.name.clone(), decl.clone());
@@ -136,7 +148,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn register_struct(&mut self, decl: &StructDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn register_struct(
+        &mut self,
+        decl: &StructDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // Generic templates are not registered as concrete types — stored for later instantiation.
         if !decl.type_params.is_empty() {
             self.generic_structs.insert(decl.name.clone(), decl.clone());
@@ -251,5 +267,3 @@ impl TypeChecker {
         Ok(())
     }
 }
-
-

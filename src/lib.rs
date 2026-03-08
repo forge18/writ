@@ -16,13 +16,13 @@
 
 use std::fs;
 
+pub mod codegen;
+pub mod compiler;
 pub mod lexer;
 pub mod parser;
-pub mod types;
-pub mod compiler;
-pub mod vm;
 pub mod stdlib;
-pub mod codegen;
+pub mod types;
+pub mod vm;
 
 use compiler::Compiler;
 use lexer::Lexer;
@@ -36,11 +36,11 @@ pub use lexer::{LexError, SourceLine, format_error_context};
 pub use parser::ParseError;
 pub use types::{Type, TypeError};
 // FloatValue and IntValue have been flattened into Value directly (I32/I64/F32/F64 variants).
+#[cfg(feature = "debug-hooks")]
+pub use vm::{BreakpointAction, BreakpointContext};
 pub use vm::{Fn0, Fn1, Fn2, Fn3, MFn0, MFn1, MFn2, MFn3};
 pub use vm::{RuntimeError, StackFrame, StackTrace, Value, ValueTag, WritObject};
 pub use vm::{fn0, fn1, fn2, fn3, mfn0, mfn1, mfn2, mfn3};
-#[cfg(feature = "debug-hooks")]
-pub use vm::{BreakpointAction, BreakpointContext};
 
 // Re-export codegen for embedders that want Rust source output.
 pub use codegen::RustCodegen;
@@ -259,7 +259,8 @@ impl Writ {
     where
         H: vm::binding::IntoNativeHandler,
     {
-        self.type_checker.register_host_function(name, params, return_type);
+        self.type_checker
+            .register_host_function(name, params, return_type);
         self.vm.register_fn(name, handler);
         self
     }

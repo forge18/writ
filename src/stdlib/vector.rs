@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use glam::{Vec2, Vec3, Vec4};
 use crate::vm::WritObject;
 use crate::vm::{VM, Value};
+use glam::{Vec2, Vec3, Vec4};
 
 // ── Vector2 ─────────────────────────────────────────────────────────
 

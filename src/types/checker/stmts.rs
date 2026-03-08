@@ -277,5 +277,4 @@ impl TypeChecker {
         self.env.pop_scope();
         Ok(())
     }
-
 }

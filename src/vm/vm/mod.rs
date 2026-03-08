@@ -146,12 +146,11 @@ pub struct VM {
     concat_buf: String,
 }
 
-
 mod arithmetic;
 mod calls;
-mod objects;
 mod coroutines;
 mod debug_hooks;
+mod objects;
 
 impl VM {
     /// Creates a new VM with empty state.
@@ -528,13 +527,11 @@ impl VM {
         }
 
         for s in chunk.rc_strings() {
-            self.field_names
-                .insert(string_hash(s), s.to_string());
+            self.field_names.insert(string_hash(s), s.to_string());
         }
         for func in functions {
             for s in func.chunk.rc_strings() {
-                self.field_names
-                    .insert(string_hash(s), s.to_string());
+                self.field_names.insert(string_hash(s), s.to_string());
             }
         }
 
@@ -758,13 +755,11 @@ impl VM {
 
     fn build_field_names(&mut self) {
         for s in self.main_chunk.rc_strings() {
-            self.field_names
-                .insert(string_hash(s), s.to_string());
+            self.field_names.insert(string_hash(s), s.to_string());
         }
         for func in &self.functions {
             for s in func.chunk.rc_strings() {
-                self.field_names
-                    .insert(string_hash(s), s.to_string());
+                self.field_names.insert(string_hash(s), s.to_string());
             }
         }
     }
@@ -1859,7 +1854,9 @@ impl VM {
                     };
                     // The current tick counts as the first frame, so subtract 1.
                     // remaining=0 means resume next tick; remaining=1 means skip one tick.
-                    return Ok(RunResult::Yield(WaitCondition::Frames { remaining: n.saturating_sub(1) }));
+                    return Ok(RunResult::Yield(WaitCondition::Frames {
+                        remaining: n.saturating_sub(1),
+                    }));
                 }
                 op::YieldUntil => {
                     self.frames.last_mut().unwrap().pc = save_pc!();
@@ -2764,7 +2761,10 @@ impl Default for VM {
 
 /// Returns a display-friendly function name from an optional function index.
 /// Translates internal names: `None` → `<script>`, `__lambda_N` → `<lambda>`.
-pub(super) fn display_function_name(func_index: Option<usize>, functions: &[CompiledFunction]) -> String {
+pub(super) fn display_function_name(
+    func_index: Option<usize>,
+    functions: &[CompiledFunction],
+) -> String {
     match func_index {
         None => "<script>".to_string(),
         Some(idx) => {

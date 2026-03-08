@@ -602,8 +602,7 @@ mod tests {
 
     #[test]
     fn from_value_dict_wrong_type_err() {
-        let err =
-            Rc::<RefCell<HashMap<String, Value>>>::from_value(&Value::Null, 0).unwrap_err();
+        let err = Rc::<RefCell<HashMap<String, Value>>>::from_value(&Value::Null, 0).unwrap_err();
         assert!(err.contains("expected dictionary"), "got: {err}");
     }
 

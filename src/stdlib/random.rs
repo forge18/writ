@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use rand::Rng;
 use crate::vm::binding::{fn0, fn1, fn2};
 use crate::vm::{VM, Value};
+use rand::Rng;
 
 pub fn register(vm: &mut VM) {
     vm.register_fn_in_module(

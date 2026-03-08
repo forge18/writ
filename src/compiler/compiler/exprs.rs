@@ -1081,19 +1081,26 @@ impl Compiler {
         Ok(())
     }
 
-    pub(super) fn compile_call_arg(&mut self, arg: &CallArg, dst: Option<u8>) -> Result<u8, CompileError> {
+    pub(super) fn compile_call_arg(
+        &mut self,
+        arg: &CallArg,
+        dst: Option<u8>,
+    ) -> Result<u8, CompileError> {
         match arg {
             CallArg::Positional(expr) => self.compile_expr(expr, dst),
             CallArg::Named { value, .. } => self.compile_expr(value, dst),
         }
     }
 
-    pub(super) fn compile_call_arg_to_reg(&mut self, arg: &CallArg, span: &Span) -> Result<u8, CompileError> {
+    pub(super) fn compile_call_arg_to_reg(
+        &mut self,
+        arg: &CallArg,
+        span: &Span,
+    ) -> Result<u8, CompileError> {
         let reg = self.alloc_temp(span)?;
         self.compile_call_arg(arg, Some(reg))?;
         Ok(reg)
     }
 
     // ── State save/restore helpers ────────────────────────────────
-
 }

@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::compiler::string_hash;
 use super::super::error::RuntimeError;
 use super::super::frame::{CallFrame, ChunkId};
 use super::super::value::Value;
 use super::VM;
+use crate::compiler::string_hash;
 
 impl VM {
-
     /// Register-based Call instruction.
     ///
     /// In the register model: `Call(base_reg, arg_count)` means the callee
@@ -83,12 +82,11 @@ impl VM {
             let func_has_rc = self.functions[func_idx].has_rc_values;
 
             // Only look up closure_map for functions that actually have upvalue descriptors.
-            let call_upvalues: Option<Vec<u32>> =
-                if !self.functions[func_idx].upvalues.is_empty() {
-                    self.closure_map.get(func_idx).and_then(|e| e.clone())
-                } else {
-                    None
-                };
+            let call_upvalues: Option<Vec<u32>> = if !self.functions[func_idx].upvalues.is_empty() {
+                self.closure_map.get(func_idx).and_then(|e| e.clone())
+            } else {
+                None
+            };
 
             if is_variadic {
                 let min_args = expected_arity.saturating_sub(1);

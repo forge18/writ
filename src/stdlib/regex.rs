@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::vm::{VM, Value, WritObject};
 use regex::Regex;
-use crate::vm::{Value, WritObject, VM};
 
 #[derive(Debug)]
 struct WritRegex {
@@ -13,7 +13,10 @@ struct WritRegex {
 impl WritRegex {
     fn new(pattern: &str) -> Result<Self, String> {
         Regex::new(pattern)
-            .map(|r| Self { pattern: r, source: pattern.to_string() })
+            .map(|r| Self {
+                pattern: r,
+                source: pattern.to_string(),
+            })
             .map_err(|e| format!("invalid regex: {e}"))
     }
 }
@@ -64,7 +67,9 @@ impl WritObject for WritRegex {
                 let input = extract_str(args.first(), "replace: input")?;
                 let replacement = extract_str(args.get(1), "replace: replacement")?;
                 Ok(Value::Str(Rc::from(
-                    self.pattern.replacen(&input, 1, replacement.as_str()).as_ref()
+                    self.pattern
+                        .replacen(&input, 1, replacement.as_str())
+                        .as_ref(),
                 )))
             }
 
@@ -74,7 +79,9 @@ impl WritObject for WritRegex {
                 let input = extract_str(args.first(), "replaceAll: input")?;
                 let replacement = extract_str(args.get(1), "replaceAll: replacement")?;
                 Ok(Value::Str(Rc::from(
-                    self.pattern.replace_all(&input, replacement.as_str()).as_ref()
+                    self.pattern
+                        .replace_all(&input, replacement.as_str())
+                        .as_ref(),
                 )))
             }
 
@@ -97,7 +104,10 @@ impl WritObject for WritRegex {
 fn extract_str(val: Option<&Value>, context: &str) -> Result<String, String> {
     match val {
         Some(Value::Str(s)) => Ok(s.to_string()),
-        Some(other) => Err(format!("{context}: expected string, got {}", other.type_name())),
+        Some(other) => Err(format!(
+            "{context}: expected string, got {}",
+            other.type_name()
+        )),
         None => Err(format!("{context}: missing string argument")),
     }
 }
@@ -110,7 +120,7 @@ pub fn register(vm: &mut VM) {
                 return Err(format!(
                     "Regex: expected string pattern, got {}",
                     other.type_name()
-                ))
+                ));
             }
             None => return Err("Regex: missing pattern argument".to_string()),
         };

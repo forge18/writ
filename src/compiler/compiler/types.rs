@@ -1,7 +1,11 @@
 use super::*;
 
 impl Compiler {
-    pub(super) fn compile_struct_decl(&mut self, decl: &StructDecl, span: &Span) -> Result<(), CompileError> {
+    pub(super) fn compile_struct_decl(
+        &mut self,
+        decl: &StructDecl,
+        span: &Span,
+    ) -> Result<(), CompileError> {
         // Generic templates are not compiled — only their monomorphic instantiations are.
         if !decl.type_params.is_empty() {
             return Ok(());
@@ -89,7 +93,11 @@ impl Compiler {
 
     // ── Class compilation ──────────────────────────────────────
 
-    pub(super) fn compile_class_decl(&mut self, decl: &ClassDecl, span: &Span) -> Result<(), CompileError> {
+    pub(super) fn compile_class_decl(
+        &mut self,
+        decl: &ClassDecl,
+        span: &Span,
+    ) -> Result<(), CompileError> {
         // Generic templates are not compiled — only their monomorphic instantiations are.
         if !decl.type_params.is_empty() {
             return Ok(());
@@ -328,7 +336,8 @@ impl Compiler {
         })?;
 
         let method_idx = self.functions.len() as u16;
-        self.function_index.insert(qualified_name.to_string(), method_idx);
+        self.function_index
+            .insert(qualified_name.to_string(), method_idx);
         self.functions.push(CompiledFunction {
             name: qualified_name.to_string(),
             arity,
@@ -368,11 +377,15 @@ impl Compiler {
 
         // Build the qualified method name and look it up in the function index.
         let qualified = format!("{parent_name}::{method}");
-        let func_idx = self.function_index.get(&qualified).copied().ok_or_else(|| CompileError {
-            annotation: None,
-            message: format!("parent class '{parent_name}' has no compiled method '{method}'"),
-            span: span.clone(),
-        })?;
+        let func_idx = self
+            .function_index
+            .get(&qualified)
+            .copied()
+            .ok_or_else(|| CompileError {
+                annotation: None,
+                message: format!("parent class '{parent_name}' has no compiled method '{method}'"),
+                span: span.clone(),
+            })?;
 
         // Emit: [self, arg0, arg1, ...] in consecutive registers, then CallDirect.
         // `self` is always register 0 in a method body.
@@ -407,5 +420,4 @@ impl Compiler {
         }
         Ok(base)
     }
-
 }

@@ -1,5 +1,5 @@
-pub(super) use std::collections::{HashMap, HashSet};
 pub(super) use crate::lexer::Span;
+pub(super) use std::collections::{HashMap, HashSet};
 
 pub(super) use crate::parser::{
     ArrayElement, AssignOp, BinaryOp, CallArg, ClassDecl, DictElement, ElseBranch, Expr, ExprKind,
@@ -327,11 +327,10 @@ impl Compiler {
     }
 }
 
-mod stmts;
-mod exprs;
 mod closures;
+mod exprs;
+mod stmts;
 mod types;
-
 
 // Nested struct definition not allowed in impl block — define at module level
 pub(super) struct SavedState {

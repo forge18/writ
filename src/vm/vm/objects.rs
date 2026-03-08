@@ -1,16 +1,15 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::compiler::string_hash;
 use super::super::class_instance::WritClassInstance;
 use super::super::error::RuntimeError;
 use super::super::frame::ChunkId;
 use super::super::value::{ClosureData, Value};
 use super::super::writ_struct::WritStruct;
 use super::VM;
+use crate::compiler::string_hash;
 
 impl VM {
-
     /// Register-based GetField.
     pub(super) fn exec_get_field_reg(
         &mut self,
@@ -371,5 +370,4 @@ impl VM {
         }
         Ok(())
     }
-
 }

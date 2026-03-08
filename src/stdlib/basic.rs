@@ -32,6 +32,8 @@ pub fn register(vm: &mut VM) {
 
     vm.register_fn(
         "type",
-        fn1(|v: Value| -> Result<Value, String> { Ok(Value::Str(Rc::from(v.type_name_owned().as_str()))) }),
+        fn1(|v: Value| -> Result<Value, String> {
+            Ok(Value::Str(Rc::from(v.type_name_owned().as_str())))
+        }),
     );
 }

@@ -1333,7 +1333,10 @@ impl Parser {
             let (type_param, _) = self.expect_identifier()?;
             self.expect(&TokenKind::Colon)?;
             let (trait_name, _) = self.expect_identifier()?;
-            clauses.push(WhereClause { type_param, trait_name });
+            clauses.push(WhereClause {
+                type_param,
+                trait_name,
+            });
             if self.peek() == &TokenKind::Comma {
                 self.advance(); // consume `,`
                 self.skip_newlines();

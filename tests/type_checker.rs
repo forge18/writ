@@ -233,9 +233,7 @@ fn test_error_type_mismatch_assignment() {
 
 #[test]
 fn test_error_return_type_mismatch() {
-    let result = w().run(
-        "func f() -> int { return \"hello\" }",
-    );
+    let result = w().run("func f() -> int { return \"hello\" }");
     assert_type_error(&result, "");
 }
 
@@ -1234,28 +1232,19 @@ fn test_logical_left_non_bool() {
 
 #[test]
 fn test_logical_right_non_bool() {
-    assert_type_error(
-        &w().run("return true && 1"),
-        "right operand of logical",
-    );
+    assert_type_error(&w().run("return true && 1"), "right operand of logical");
 }
 
 // ── 2B: Assignment errors ──────────────────────────────────────────────
 
 #[test]
 fn test_assign_to_let() {
-    assert_type_error(
-        &w().run("let x: int = 1\nx = 2\nreturn x"),
-        "immutable",
-    );
+    assert_type_error(&w().run("let x: int = 1\nx = 2\nreturn x"), "immutable");
 }
 
 #[test]
 fn test_assign_to_const() {
-    assert_type_error(
-        &w().run("const X = 1\nX = 2\nreturn X"),
-        "constant",
-    );
+    assert_type_error(&w().run("const X = 1\nX = 2\nreturn X"), "constant");
 }
 
 #[test]
@@ -1422,20 +1411,14 @@ fn test_null_coalesce_on_non_optional() {
 
 #[test]
 fn test_destructure_non_tuple() {
-    assert_type_error(
-        &w().run("let (a, b) = 42"),
-        "cannot destructure non-tuple",
-    );
+    assert_type_error(&w().run("let (a, b) = 42"), "cannot destructure non-tuple");
 }
 
 // ── 2L: Array literal errors ─────────────────────────────────────────
 
 #[test]
 fn test_array_mismatched_element_types() {
-    assert_type_error(
-        &w().run(r#"let a: Array<int> = [1, "two"]"#),
-        "mismatch",
-    );
+    assert_type_error(&w().run(r#"let a: Array<int> = [1, "two"]"#), "mismatch");
 }
 
 // ── Additional typed happy paths ─────────────────────────────────────
@@ -1448,33 +1431,71 @@ fn test_ternary_with_typed_vars() {
 
 #[test]
 fn test_modulo_op_typed() {
-    assert_eq!(w().run("let a: int = 10\nlet b: int = 3\nreturn a % b").unwrap(), Value::I32(1));
+    assert_eq!(
+        w().run("let a: int = 10\nlet b: int = 3\nreturn a % b")
+            .unwrap(),
+        Value::I32(1)
+    );
 }
 
 #[test]
 fn test_subtract_op_typed() {
-    assert_eq!(w().run("let a: int = 10\nlet b: int = 3\nreturn a - b").unwrap(), Value::I32(7));
+    assert_eq!(
+        w().run("let a: int = 10\nlet b: int = 3\nreturn a - b")
+            .unwrap(),
+        Value::I32(7)
+    );
 }
 
 #[test]
 fn test_multiply_op_typed() {
-    assert_eq!(w().run("let a: int = 4\nlet b: int = 3\nreturn a * b").unwrap(), Value::I32(12));
+    assert_eq!(
+        w().run("let a: int = 4\nlet b: int = 3\nreturn a * b")
+            .unwrap(),
+        Value::I32(12)
+    );
 }
 
 #[test]
 fn test_divide_op_typed() {
-    let r = w().run("let a: float = 10.0\nlet b: float = 4.0\nreturn a / b").unwrap();
+    let r = w()
+        .run("let a: float = 10.0\nlet b: float = 4.0\nreturn a / b")
+        .unwrap();
     assert!((r.as_f64() - 2.5).abs() < 0.001);
 }
 
 #[test]
 fn test_comparison_ops_typed() {
-    assert_eq!(w().run("let a: int = 1\nlet b: int = 2\nreturn a < b").unwrap(), Value::Bool(true));
-    assert_eq!(w().run("let a: int = 2\nlet b: int = 1\nreturn a > b").unwrap(), Value::Bool(true));
-    assert_eq!(w().run("let a: int = 2\nlet b: int = 2\nreturn a <= b").unwrap(), Value::Bool(true));
-    assert_eq!(w().run("let a: int = 2\nlet b: int = 2\nreturn a >= b").unwrap(), Value::Bool(true));
-    assert_eq!(w().run("let a: int = 1\nlet b: int = 1\nreturn a == b").unwrap(), Value::Bool(true));
-    assert_eq!(w().run("let a: int = 1\nlet b: int = 2\nreturn a != b").unwrap(), Value::Bool(true));
+    assert_eq!(
+        w().run("let a: int = 1\nlet b: int = 2\nreturn a < b")
+            .unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        w().run("let a: int = 2\nlet b: int = 1\nreturn a > b")
+            .unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        w().run("let a: int = 2\nlet b: int = 2\nreturn a <= b")
+            .unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        w().run("let a: int = 2\nlet b: int = 2\nreturn a >= b")
+            .unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        w().run("let a: int = 1\nlet b: int = 1\nreturn a == b")
+            .unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        w().run("let a: int = 1\nlet b: int = 2\nreturn a != b")
+            .unwrap(),
+        Value::Bool(true)
+    );
 }
 
 #[test]
@@ -1485,7 +1506,10 @@ fn test_logical_ops_typed() {
 
 #[test]
 fn test_negate_typed() {
-    assert_eq!(w().run("let x: int = 5\nreturn -x").unwrap(), Value::I32(-5));
+    assert_eq!(
+        w().run("let x: int = 5\nreturn -x").unwrap(),
+        Value::I32(-5)
+    );
 }
 
 #[test]
@@ -1552,15 +1576,30 @@ fn test_undefined_function() {
 
 #[test]
 fn test_var_mutable_reassign() {
-    assert_eq!(w().run("var x: int = 1\nx = 2\nreturn x").unwrap(), Value::I32(2));
+    assert_eq!(
+        w().run("var x: int = 1\nx = 2\nreturn x").unwrap(),
+        Value::I32(2)
+    );
 }
 
 #[test]
 fn test_compound_assign_ok() {
-    assert_eq!(w().run("var x: int = 10\nx -= 3\nreturn x").unwrap(), Value::I32(7));
-    assert_eq!(w().run("var x: int = 5\nx *= 2\nreturn x").unwrap(), Value::I32(10));
-    assert_eq!(w().run("var x: int = 10\nx /= 2\nreturn x").unwrap(), Value::I32(5));
-    assert_eq!(w().run("var x: int = 10\nx %= 3\nreturn x").unwrap(), Value::I32(1));
+    assert_eq!(
+        w().run("var x: int = 10\nx -= 3\nreturn x").unwrap(),
+        Value::I32(7)
+    );
+    assert_eq!(
+        w().run("var x: int = 5\nx *= 2\nreturn x").unwrap(),
+        Value::I32(10)
+    );
+    assert_eq!(
+        w().run("var x: int = 10\nx /= 2\nreturn x").unwrap(),
+        Value::I32(5)
+    );
+    assert_eq!(
+        w().run("var x: int = 10\nx %= 3\nreturn x").unwrap(),
+        Value::I32(1)
+    );
 }
 
 // ── Phase 4B: Deep type checker coverage ─────────────────────────────────────
@@ -1712,7 +1751,11 @@ fn test_when_result_exhaustive_both_arms() {
         Err(WritError::Type(e)) => e.message.contains("exhaustive"),
         _ => false,
     };
-    assert!(!is_type_error, "should not report non-exhaustive: {:?}", result);
+    assert!(
+        !is_type_error,
+        "should not report non-exhaustive: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -1753,7 +1796,11 @@ fn test_when_result_with_else_ok() {
         Err(WritError::Type(e)) => e.message.contains("exhaustive"),
         _ => false,
     };
-    assert!(!is_type_error, "should not report non-exhaustive: {:?}", result);
+    assert!(
+        !is_type_error,
+        "should not report non-exhaustive: {:?}",
+        result
+    );
 }
 
 // ── Trait default method body errors ─────────────────────────────────────────
@@ -1822,7 +1869,11 @@ fn test_lambda_expr_body_typed() {
         "let f = (n: int) => n * 2\n\
          return f(5)",
     );
-    assert!(result.is_ok(), "lambda with typed params failed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "lambda with typed params failed: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -1838,10 +1889,7 @@ fn test_lambda_block_body_typed() {
 
 #[test]
 fn test_non_callable_type_error() {
-    assert_type_error(
-        &w().run("let x: int = 42\nreturn x()"),
-        "not callable",
-    );
+    assert_type_error(&w().run("let x: int = 42\nreturn x()"), "not callable");
 }
 
 // ── When with enum: exhaustive happy path ────────────────────────────────────
@@ -1872,18 +1920,12 @@ fn test_function_returns_wrong_type_detailed() {
 
 #[test]
 fn test_if_non_bool_condition_detailed() {
-    assert_type_error(
-        &w().run("if 42 { return 1 }\nreturn 0"),
-        "bool",
-    );
+    assert_type_error(&w().run("if 42 { return 1 }\nreturn 0"), "bool");
 }
 
 #[test]
 fn test_while_non_bool_condition_detailed() {
-    assert_type_error(
-        &w().run("while \"yes\" { break }\nreturn 0"),
-        "bool",
-    );
+    assert_type_error(&w().run("while \"yes\" { break }\nreturn 0"), "bool");
 }
 
 // ── Class constructor validation ─────────────────────────────────────────────
@@ -1961,7 +2003,11 @@ fn test_error_propagate_happy_path() {
     );
     // ErrorPropagate is not compiled yet, but should pass type checking
     let is_type_error = matches!(&result, Err(WritError::Type(_)));
-    assert!(!is_type_error, "should not produce a type error: {:?}", result);
+    assert!(
+        !is_type_error,
+        "should not produce a type error: {:?}",
+        result
+    );
 }
 
 // ── String concat type ──────────────────────────────────────────────────────

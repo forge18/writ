@@ -1,7 +1,11 @@
 use super::*;
 
 impl TypeChecker {
-    pub(super) fn check_func_decl(&mut self, func: &FuncDecl, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_func_decl(
+        &mut self,
+        func: &FuncDecl,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         let return_type = match &func.return_type {
             Some(type_expr) => self.resolve_type_expr(type_expr, span)?,
             None => Type::Void,
@@ -80,7 +84,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn check_return(&mut self, value: Option<&Expr>, span: &Span) -> Result<(), TypeError> {
+    pub(super) fn check_return(
+        &mut self,
+        value: Option<&Expr>,
+        span: &Span,
+    ) -> Result<(), TypeError> {
         // At top level (outside any function), current_return_type is None.
         // Allow any return value there.
         let Some(expected) = self.current_return_type.clone() else {
@@ -301,5 +309,4 @@ impl TypeChecker {
     }
 
     // ── Phase 7: Class, Trait, Enum checking (pass 2) ─────────────────
-
 }
