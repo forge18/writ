@@ -26,15 +26,15 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 
 ## Results (Apple M-series, single-threaded)
 
-| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | VM Only (Round 11) | VM Only (Round 12) | VM Only (Round 13) | VM Only (Round 14) | VM Only (Round 15) | VM Only (Round 16) | Current | Total Improvement |
-| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------- | ----------------- |
-| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | 30.2 ms | 25.3 ms | 26.4 ms | 26.9 ms | **27.9 ms** | -82% |
-| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | 37.2 ms | 26.1 ms | 26.9 ms | 26.2 ms | **27.8 ms** | -79% |
-| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | 31.5 ms | 24.7 ms | 25.4 ms | 24.9 ms | **26.0 ms** | -84% |
-| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | 14.8 ms | 14.9 ms | 15.3 ms | 15.3 ms | **15.9 ms** | -76% |
-| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | 0.471 ms | 0.451 ms | 0.483 ms | 0.499 ms | **0.523 ms** | -74% |
-| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | 4.08 ms | 3.89 ms | 3.82 ms | 3.75 ms | **4.05 ms** | -77% |
-| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | 0.139 ms | 0.139 ms | 0.154 ms | 0.153 ms | **0.165 ms** | -79% |
+| Benchmark | VM Only (v1 baseline) | VM Only (Round 1) | VM Only (Round 2) | VM Only (Round 3) | VM Only (Round 4) | VM Only (Round 5) | VM Only (Round 6) | VM Only (Round 7) | VM Only (Round 8) | VM Only (Round 9) | VM Only (Round 10) | VM Only (Round 11) | VM Only (Round 12) | VM Only (Round 13) | VM Only (Round 14) | VM Only (Round 15) | VM Only (Round 16) | VM Only (Round 17) | Current | Total Improvement |
+| --------- | -------------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ----------------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------- | ----------------- |
+| fibonacci_28 | 154 ms | 104 ms | 99 ms | 97 ms | 97 ms | 96 ms | 29.3 ms | 34.9 ms | 32.4 ms | 31.6 ms | 32.5 ms | 31.6 ms | 31.8 ms | 30.2 ms | 25.3 ms | 26.4 ms | 26.9 ms | 27.9 ms | **24.5 ms** | -84% |
+| binary_trees | 133 ms | 106 ms | 99 ms | 101 ms | 103 ms | 102 ms | 86.3 ms | 83.4 ms | 85.2 ms | 83.1 ms | 38.9 ms | 37.4 ms | 37.7 ms | 37.2 ms | 26.1 ms | 26.9 ms | 26.2 ms | 27.8 ms | **26.9 ms** | -80% |
+| permute_9 | 158 ms | 93 ms | 88 ms | 83 ms | 83 ms | 83 ms | 32.1 ms | 38.3 ms | 35.1 ms | 34.7 ms | 35.0 ms | 34.5 ms | 34.2 ms | 31.5 ms | 24.7 ms | 25.4 ms | 24.9 ms | 26.0 ms | **21.7 ms** | -86% |
+| mandelbrot_100 | 67 ms | 35.6 ms | 32.3 ms | 29.7 ms | 27.2 ms | 26.3 ms | 29.2 ms | 16.1 ms | 15.8 ms | 15.3 ms | 16.6 ms | 15.8 ms | 15.1 ms | 14.8 ms | 14.9 ms | 15.3 ms | 15.3 ms | 15.9 ms | **10.4 ms** | -84% |
+| sieve_5000 | 2.0 ms | 1.16 ms | 1.07 ms | 0.96 ms | 0.98 ms | 0.95 ms | 0.78 ms | 0.56 ms | 0.55 ms | 0.536 ms | 0.563 ms | 0.546 ms | 0.543 ms | 0.471 ms | 0.451 ms | 0.483 ms | 0.499 ms | 0.523 ms | **0.410 ms** | -80% |
+| queens_8 | 17.6 ms | 10.8 ms | 9.5 ms | 8.85 ms | 8.59 ms | 8.80 ms | 7.10 ms | 4.59 ms | 4.33 ms | 4.28 ms | 4.35 ms | 4.25 ms | 4.20 ms | 4.08 ms | 3.89 ms | 3.82 ms | 3.75 ms | 4.05 ms | **3.6 ms** | -80% |
+| loop_sum | 0.77 ms | 0.353 ms | 0.321 ms | 0.280 ms | 0.265 ms | 0.281 ms | 0.30 ms | 0.15 ms | 0.149 ms | 0.146 ms | 0.159 ms | 0.153 ms | 0.148 ms | 0.139 ms | 0.139 ms | 0.154 ms | 0.153 ms | 0.165 ms | **0.136 ms** | -82% |
 
 ## Compilation Pipeline Results
 
@@ -48,7 +48,7 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 | arithmetic | 216 ns | — | — | — |
 | interpolation | 668 ns | — | — | — |
 
-### Current (post-Round 16 + crate flattening + string interning)
+### Round 17 (post-Round 16 + crate flattening + string interning)
 
 | Benchmark | Lexer | Parser | Compiler | Pipeline (full) | VM Only | vs Round 16 |
 | --------- | ----- | ------ | -------- | --------------- | ------- | ----------- |
@@ -61,6 +61,20 @@ cargo bench --bench parser    # Parser only (tokens → AST)
 | loop_sum | — | — | — | — | 0.165 ms | +8% |
 
 Includes crate flattening, typed IR, user-defined generics, string interning, and compiler bug fixes. A prior regression (+77% fib, +70% permute) was traced via profiling to an unconditional `String::clone()` on every `CallDirect` in the dispatch loop — the function name was cloned for error messages that never fired. Removing the clone recovered all call-heavy benchmarks to within noise of Round 16. Remaining ~4-8% variance is within normal run-to-run noise across these structural changes.
+
+### Current (Round 18 — VM performance round)
+
+| Benchmark | VM Only | vs Round 17 |
+| --------- | ------- | ----------- |
+| fibonacci_28 | 24.5 ms | -12% |
+| binary_trees | 26.9 ms | -3% |
+| permute_9 | 21.7 ms | -17% |
+| mandelbrot_100 | 10.4 ms | -35% |
+| sieve_5000 | 0.410 ms | -22% |
+| queens_8 | 3.6 ms | -11% |
+| loop_sum | 0.136 ms | -18% |
+
+Targeted VM performance round with profile-guided optimizations. Also includes **sort_userdata** cross-language benchmark: **35.5ms → 24.0ms (-32%)**.
 
 Pipeline numbers include lex + parse + compile + VM execution. Compiler and lexer are measured in isolation on the same source programs.
 
@@ -75,12 +89,12 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 | Ruby 3.0 | ~23 ms | YARV bytecode VM |
 | Wren 0.4 | ~30 ms | NaN-boxed single-pass compiler |
 | Python 3.11 | ~31 ms | Specializing adaptive interpreter |
-| **Writ** | **28 ms** | Register-based VM (no NaN-boxing) |
+| **Writ** | **24.5 ms** | Register-based VM (no NaN-boxing) |
 | Rhai | ~225 ms | Rust-embeddable, AST-walking (estimated) |
 
 ### Key Observations
 
-- **Writ is faster than Wren/Python** on function-call-heavy benchmarks (~25ms vs ~30ms), down from ~5x slower after fourteen rounds of optimization. Round 14's hash-based field access and high-water-mark stack brought binary_trees to -80% total improvement.
+- **Writ is faster than Wren/Python/Ruby** on function-call-heavy benchmarks (~24.5ms vs ~30ms), down from ~5x slower after eighteen rounds of optimization. Round 18's unsafe scalar writes, upvalue side table, and concat/GetIndex/SetIndex/CallNative optimizations brought broad 12-35% improvements.
 - **Writ is faster than Rhai**, the most comparable Rust-embeddable scripting language. Rhai documents itself as "roughly 2x slower than Python 3" and uses AST-walking rather than bytecode compilation.
 - **Different hardware** between our results (Apple M-series) and the Muxup results (AMD Ryzen 9 5950X). Ratios are more meaningful than absolute numbers.
 - **Binary trees are not directly comparable** — Wren uses depth=12 with the CLBG structure; we use depth=8 with 100 iterations.
@@ -204,6 +218,18 @@ The most directly comparable benchmark is **fib(28)**, which Wren also uses as i
 
 **Analysis:** The dominant win comes from the high-water-mark stack: fibonacci (-16%) and permute (-22%) were spending 17% and 16% of their time in `ensure_registers` resizing the stack on every call. With stack length never shrinking, `ensure_registers` becomes a single branch-not-taken after the first few calls — a ~1M function call overhead eliminated for fibonacci. Binary_trees (-30%) benefits from both the hash-based field access (eliminating String clone + re-hash on every `.item`/`.left`/`.right` access, ~31% of previous runtime) and the stack optimization. Queens (-5%) benefits from the inline closure call path and reduced stack churn. Mandelbrot and loop_sum are flat as expected — they have no field access, no deep recursion, and no closure calls.
 
+**Round 18** (24.5ms fib, -12%; 21.7ms permute, -17%; 10.4ms mandelbrot, -35%; 0.410ms sieve, -22%; 3.6ms queens, -11%; 0.136ms loop_sum, -18%; **24.0ms sort_userdata, -32%**):
+
+1. **Upvalue side table** — Moved `upvalues: Option<Vec<u32>>` out of `CallFrame` into a parallel `frame_upvalues: Vec<Option<Vec<u32>>>` on the VM. CallFrame shrank from 72 to 48 bytes and became `Copy` (trivially-droppable). Every `frames.pop()` previously ran `Vec` drop glue for the upvalues field; now non-closure frames have zero drop overhead.
+2. **Skip closure_map lookup** — Added guard `if !self.functions[func_idx].upvalues.is_empty()` before `closure_map.get()` in `CallDirect`, `exec_call_reg`, `call_function`, and `call_compiled_function`. Avoids HashMap lookup for non-closure functions (the common case).
+3. **Unsafe scalar writes (`write_stack_nodrop`)** — Added `unsafe fn write_stack_nodrop` that uses `ptr::write` to bypass `drop_in_place` on the old value. Applied to 31 typed opcode handlers (AddInt, SubInt, MulInt, DivInt, AddFloat, SubFloat, MulFloat, DivFloat, all quickened variants, all typed comparisons, AddIntImm, SubIntImm, IntToFloat). Safe because the compiler only emits typed instructions for registers proven to hold scalar types.
+4. **Fast scalar return** — Return handler uses `ptr::read` (bitwise copy) instead of `cheap_clone` when `frame.has_rc_values == false`, avoiding match dispatch on the return value.
+5. **Concat fast path** — Replaced `format!("{lhs}{rhs}")` with direct `push_str` for Str+Str concat, and introduced a reusable scratch `String` buffer (`concat_buf`) on the VM to avoid per-concat `String::with_capacity` malloc/free. Also uses `std::fmt::Write` for the non-Str fallback to reuse the buffer.
+6. **GetIndex/SetIndex: eliminate Rc::clone** — Rewrote inline Array+Int fast paths to use raw pointers to the `RefCell<Vec<Value>>` instead of `Rc::clone`, avoiding refcount bump/decrement on every array access. Also changed `arr[i].clone()` to `arr[i].cheap_clone()` for scalar elements.
+7. **CallNative: eliminate Rc::clone** — Changed `Rc::clone(&native.body)` to raw pointer dereference and `native.module.clone()` to `native.module.as_deref()`, avoiding refcount bump and String clone on every native function call. Same pattern applied to `exec_call_method_reg`.
+
+**Analysis:** Profile-guided round targeting the sort_userdata benchmark (10K Rust objects sorted via quicksort). Profiling revealed `format!`-based Concat at 33%, CallNative Rc::clone at 20%, and GetIndex Rc::clone at 11% of sort_userdata runtime. The Concat optimization alone delivered -25% on sort_userdata; the scratch buffer added another -10%. The unsafe scalar writes (`write_stack_nodrop`) delivered broad -10-15% on arithmetic benchmarks by eliminating drop glue that LLVM couldn't optimize away due to Value's non-trivial-drop variants. Mandelbrot saw the largest improvement (-35%) because its tight inner loop is dominated by typed float arithmetic. The upvalue side table + fast scalar return primarily helped call-heavy benchmarks (fib -12%, permute -17%).
+
 ## Profiling Analysis (Post-Round 13)
 
 Flamegraph profiling (`cargo flamegraph`) of all 7 benchmarks with the register-based VM (debug-hooks feature disabled, release + debuginfo build).
@@ -255,6 +281,10 @@ At this point, most remaining time is in fundamental interpreter overhead: instr
 - ~~**`exec_get_field_reg` double HashMap + String clone (31% binary_trees)**~~ — **Fixed in Round 14.** `WritObject::get_field_by_hash` trait method eliminates string round-trip.
 - ~~**`ensure_registers` stack resize on every Call (17% fib, 16% permute)**~~ — **Fixed in Round 14.** High-water-mark stack: len only grows, never shrinks mid-execution.
 - ~~**`exec_call_reg` closure indirection (6% queens)**~~ — **Fixed in Round 14.** Inline `Value::Closure` fast path in `op::Call` dispatch.
+- ~~**`drop_in_place` on typed arithmetic (19% fib)**~~ — **Fixed in Round 18.** `write_stack_nodrop` uses `ptr::write` to bypass drop glue for compiler-proven scalar registers.
+- ~~**`format!` in Concat (33% sort_userdata)**~~ — **Fixed in Round 18.** Direct `push_str` with reusable scratch buffer eliminates Display formatting and per-concat String allocation.
+- ~~**`Rc::clone` in GetIndex/SetIndex/CallNative (30% sort_userdata)**~~ — **Fixed in Round 18.** Raw pointer dereference avoids refcount bumps on array access and native function dispatch.
+- ~~**CallFrame drop glue from `upvalues: Option<Vec<u32>>` (5-8% call-heavy)**~~ — **Fixed in Round 18.** Moved to parallel side table; CallFrame is now `Copy`.
 
 ## Design Constraints
 

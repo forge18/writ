@@ -1191,3 +1191,374 @@ fn test_typed_struct_method_typed() {
     );
     assert_eq!(result.unwrap(), Value::I32(11));
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 2: Additional type checker coverage tests
+// ══════════════════════════════════════════════════════════════════════
+
+// ── 2A: Binary op errors ──────────────────────────────────────────────
+
+#[test]
+fn test_arith_left_non_numeric() {
+    assert_type_error(&w().run(r#""hello" + 1"#), "left operand");
+}
+
+#[test]
+fn test_arith_right_non_numeric() {
+    assert_type_error(&w().run(r#"1 + "hello""#), "right operand");
+}
+
+#[test]
+fn test_arith_mismatched_types() {
+    assert_type_error(
+        &w().run("let a: int = 1\nlet b: float = 2.0\nreturn a + b"),
+        "arithmetic operands must be the same type",
+    );
+}
+
+#[test]
+fn test_comparison_mismatched_types() {
+    assert_type_error(
+        &w().run("let a: int = 1\nlet b: float = 2.0\nreturn a < b"),
+        "comparison operands must be the same type",
+    );
+}
+
+#[test]
+fn test_logical_left_non_bool() {
+    assert_type_error(
+        &w().run("let a: int = 1\nreturn a && true"),
+        "left operand of logical",
+    );
+}
+
+#[test]
+fn test_logical_right_non_bool() {
+    assert_type_error(
+        &w().run("return true && 1"),
+        "right operand of logical",
+    );
+}
+
+// ── 2B: Assignment errors ──────────────────────────────────────────────
+
+#[test]
+fn test_assign_to_let() {
+    assert_type_error(
+        &w().run("let x: int = 1\nx = 2\nreturn x"),
+        "immutable",
+    );
+}
+
+#[test]
+fn test_assign_to_const() {
+    assert_type_error(
+        &w().run("const X = 1\nX = 2\nreturn X"),
+        "constant",
+    );
+}
+
+#[test]
+fn test_compound_assign_non_numeric() {
+    assert_type_error(
+        &w().run("var s: string = \"hello\"\ns += \"world\"\nreturn s"),
+        "arithmetic assignment on non-numeric",
+    );
+}
+
+#[test]
+fn test_compound_assign_type_mismatch() {
+    assert_type_error(
+        &w().run("var x: int = 1\nx += 2.0\nreturn x"),
+        "compound assignment",
+    );
+}
+
+// ── 2C: Unary op errors ──────────────────────────────────────────────
+
+#[test]
+fn test_negate_non_numeric() {
+    assert_type_error(&w().run("return -true"), "cannot negate non-numeric");
+}
+
+#[test]
+fn test_not_non_bool() {
+    assert_type_error(&w().run("return !42"), "cannot apply '!'");
+}
+
+// ── 2D: Return type errors ────────────────────────────────────────────
+
+#[test]
+fn test_return_value_in_void_function() {
+    assert_type_error(
+        &w().run("func f() { return 42 }\nreturn f()"),
+        "cannot return a value from a void function",
+    );
+}
+
+#[test]
+fn test_return_wrong_type() {
+    assert_type_error(
+        &w().run(r#"func f() -> int { return "oops" }"#),
+        "return type mismatch",
+    );
+}
+
+#[test]
+fn test_return_nothing_from_non_void() {
+    assert_type_error(
+        &w().run("func f() -> int { return }\nreturn f()"),
+        "missing return value",
+    );
+}
+
+// ── 2E: Ternary errors ───────────────────────────────────────────────
+
+#[test]
+fn test_ternary_non_bool_condition() {
+    assert_type_error(
+        &w().run("return 1 ? 10 : 20"),
+        "ternary condition must be bool",
+    );
+}
+
+#[test]
+fn test_ternary_mismatched_branches() {
+    assert_type_error(
+        &w().run(r#"return true ? 1 : "x""#),
+        "ternary branches must have the same type",
+    );
+}
+
+#[test]
+fn test_ternary_ok() {
+    assert_eq!(w().run("return true ? 1 : 2").unwrap(), Value::I32(1));
+    assert_eq!(w().run("return false ? 1 : 2").unwrap(), Value::I32(2));
+}
+
+// ── 2F: Struct constructor validation ─────────────────────────────────
+
+#[test]
+fn test_struct_constructor_too_few_args() {
+    assert_type_error(
+        &w().run("struct Point { public x: int\npublic y: int }\nreturn Point(1)"),
+        "expects 2",
+    );
+}
+
+#[test]
+fn test_struct_constructor_too_many_args() {
+    assert_type_error(
+        &w().run("struct Point { public x: int\npublic y: int }\nreturn Point(1, 2, 3)"),
+        "expects 2",
+    );
+}
+
+#[test]
+fn test_struct_constructor_wrong_type() {
+    assert_type_error(
+        &w().run("struct Point { public x: int\npublic y: int }\nreturn Point(\"a\", 2)"),
+        "mismatch",
+    );
+}
+
+// ── 2G: When exhaustiveness ──────────────────────────────────────────
+
+#[test]
+fn test_when_expression_ok() {
+    // when with int values — doesn't need enum runtime
+    let result = w().run(
+        "let x = 1\n\
+         let r = when x {\n\
+             1 => 10\n\
+             2 => 20\n\
+             else => 0\n\
+         }\n\
+         return r",
+    );
+    assert_eq!(result.unwrap(), Value::I32(10));
+}
+
+// ── 2H: Trait validation ─────────────────────────────────────────────
+
+#[test]
+fn test_trait_missing_method() {
+    assert_type_error(
+        &w().run(
+            "trait Greetable {\n\
+                 func greet() -> string\n\
+             }\n\
+             class Dog with Greetable {\n\
+             }\n\
+             return 1",
+        ),
+        "does not implement",
+    );
+}
+
+#[test]
+fn test_trait_unknown_name() {
+    assert_type_error(
+        &w().run(
+            "class Dog with NonexistentTrait {\n\
+             }\n\
+             return 1",
+        ),
+        "unknown trait",
+    );
+}
+
+// ── 2J: Null coalesce ────────────────────────────────────────────────
+
+#[test]
+fn test_null_coalesce_on_non_optional() {
+    assert_type_error(
+        &w().run("let x: int = 1\nreturn x ?? 2"),
+        "requires Optional<T> or Result<T>",
+    );
+}
+
+// ── 2K: Let destructure errors ───────────────────────────────────────
+
+#[test]
+fn test_destructure_non_tuple() {
+    assert_type_error(
+        &w().run("let (a, b) = 42"),
+        "cannot destructure non-tuple",
+    );
+}
+
+// ── 2L: Array literal errors ─────────────────────────────────────────
+
+#[test]
+fn test_array_mismatched_element_types() {
+    assert_type_error(
+        &w().run(r#"let a: Array<int> = [1, "two"]"#),
+        "mismatch",
+    );
+}
+
+// ── Additional typed happy paths ─────────────────────────────────────
+
+#[test]
+fn test_ternary_with_typed_vars() {
+    let result = w().run("let x: int = 10\nlet y: int = 20\nreturn x > 5 ? x : y");
+    assert_eq!(result.unwrap(), Value::I32(10));
+}
+
+#[test]
+fn test_modulo_op_typed() {
+    assert_eq!(w().run("let a: int = 10\nlet b: int = 3\nreturn a % b").unwrap(), Value::I32(1));
+}
+
+#[test]
+fn test_subtract_op_typed() {
+    assert_eq!(w().run("let a: int = 10\nlet b: int = 3\nreturn a - b").unwrap(), Value::I32(7));
+}
+
+#[test]
+fn test_multiply_op_typed() {
+    assert_eq!(w().run("let a: int = 4\nlet b: int = 3\nreturn a * b").unwrap(), Value::I32(12));
+}
+
+#[test]
+fn test_divide_op_typed() {
+    let r = w().run("let a: float = 10.0\nlet b: float = 4.0\nreturn a / b").unwrap();
+    assert!((r.as_f64() - 2.5).abs() < 0.001);
+}
+
+#[test]
+fn test_comparison_ops_typed() {
+    assert_eq!(w().run("let a: int = 1\nlet b: int = 2\nreturn a < b").unwrap(), Value::Bool(true));
+    assert_eq!(w().run("let a: int = 2\nlet b: int = 1\nreturn a > b").unwrap(), Value::Bool(true));
+    assert_eq!(w().run("let a: int = 2\nlet b: int = 2\nreturn a <= b").unwrap(), Value::Bool(true));
+    assert_eq!(w().run("let a: int = 2\nlet b: int = 2\nreturn a >= b").unwrap(), Value::Bool(true));
+    assert_eq!(w().run("let a: int = 1\nlet b: int = 1\nreturn a == b").unwrap(), Value::Bool(true));
+    assert_eq!(w().run("let a: int = 1\nlet b: int = 2\nreturn a != b").unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_logical_ops_typed() {
+    assert_eq!(w().run("return true && true").unwrap(), Value::Bool(true));
+    assert_eq!(w().run("return true || false").unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_negate_typed() {
+    assert_eq!(w().run("let x: int = 5\nreturn -x").unwrap(), Value::I32(-5));
+}
+
+#[test]
+fn test_not_typed() {
+    assert_eq!(w().run("return !false").unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_assignment_type_mismatch() {
+    assert_type_error(&w().run("var x: int = 1\nx = \"oops\""), "type mismatch");
+}
+
+#[test]
+fn test_while_condition_must_be_bool() {
+    assert_type_error(&w().run("while 1 { }"), "bool");
+}
+
+#[test]
+fn test_if_condition_must_be_bool() {
+    assert_type_error(&w().run("if 1 { }"), "bool");
+}
+
+#[test]
+fn test_class_inherits_from_unknown_parent() {
+    assert_type_error(
+        &w().run("class Child extends NonexistentParent {\n}\nreturn 1"),
+        "unknown",
+    );
+}
+
+#[test]
+fn test_for_loop_not_supported_type_error() {
+    assert_type_error(
+        &w().run("var sum: int = 0\nfor i in 0..5 { sum += i }\nreturn sum"),
+        "for-in loops are not supported",
+    );
+}
+
+#[test]
+fn test_function_wrong_arg_type() {
+    assert_type_error(
+        &w().run("func add(a: int, b: int) -> int { return a + b }\nreturn add(1, \"two\")"),
+        "mismatch",
+    );
+}
+
+#[test]
+fn test_function_wrong_arg_count() {
+    assert_type_error(
+        &w().run("func add(a: int, b: int) -> int { return a + b }\nreturn add(1)"),
+        "expected",
+    );
+}
+
+#[test]
+fn test_undefined_variable() {
+    assert_type_error(&w().run("return xyz"), "undefined");
+}
+
+#[test]
+fn test_undefined_function() {
+    assert_type_error(&w().run("return nonexistent()"), "undefined");
+}
+
+#[test]
+fn test_var_mutable_reassign() {
+    assert_eq!(w().run("var x: int = 1\nx = 2\nreturn x").unwrap(), Value::I32(2));
+}
+
+#[test]
+fn test_compound_assign_ok() {
+    assert_eq!(w().run("var x: int = 10\nx -= 3\nreturn x").unwrap(), Value::I32(7));
+    assert_eq!(w().run("var x: int = 5\nx *= 2\nreturn x").unwrap(), Value::I32(10));
+    assert_eq!(w().run("var x: int = 10\nx /= 2\nreturn x").unwrap(), Value::I32(5));
+    assert_eq!(w().run("var x: int = 10\nx %= 3\nreturn x").unwrap(), Value::I32(1));
+}
