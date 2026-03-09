@@ -162,6 +162,16 @@ impl Parser {
 
         let (name, _) = self.expect_identifier()?;
 
+        // Check for namespace-qualified type: `enemy::Enemy`
+        if self.peek() == &TokenKind::ColonColon {
+            self.advance(); // consume `::`
+            let (member, _) = self.expect_identifier()?;
+            return Ok(TypeExpr::Qualified {
+                namespace: name,
+                name: member,
+            });
+        }
+
         // Check for generic arguments: `<T>`, `<K, V>`
         if self.peek() == &TokenKind::Less {
             self.advance(); // consume `<`
@@ -2106,5 +2116,52 @@ fn token_to_binary_op(kind: &TokenKind) -> BinaryOp {
         TokenKind::AmpAmp => BinaryOp::And,
         TokenKind::PipePipe => BinaryOp::Or,
         _ => unreachable!("not a binary operator: {kind:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::lexer::Lexer;
+
+    use super::*;
+
+    #[test]
+    fn parse_qualified_type_in_param() {
+        let tokens = Lexer::new("func attack(target: enemy::Enemy) {}")
+            .tokenize()
+            .unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program().unwrap();
+        if let StmtKind::Func(decl) = &stmts[0].kind {
+            assert_eq!(
+                decl.params[0].type_annotation,
+                TypeExpr::Qualified {
+                    namespace: "enemy".to_string(),
+                    name: "Enemy".to_string(),
+                }
+            );
+        } else {
+            panic!("expected func decl");
+        }
+    }
+
+    #[test]
+    fn parse_qualified_type_in_return_type() {
+        let tokens = Lexer::new("func get() -> enemy::Enemy {}")
+            .tokenize()
+            .unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program().unwrap();
+        if let StmtKind::Func(decl) = &stmts[0].kind {
+            assert_eq!(
+                decl.return_type,
+                Some(TypeExpr::Qualified {
+                    namespace: "enemy".to_string(),
+                    name: "Enemy".to_string(),
+                })
+            );
+        } else {
+            panic!("expected func decl");
+        }
     }
 }

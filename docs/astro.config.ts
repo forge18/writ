@@ -12,6 +12,7 @@ export default defineConfig({
   integrations: [
     starlight({
       expressiveCode: {
+        themes: ['dark-plus', 'light-plus'],
         shiki: {
           langs: [
             {

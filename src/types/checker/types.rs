@@ -85,6 +85,20 @@ impl TypeChecker {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Type::Tuple(resolved))
             }
+            TypeExpr::Qualified { namespace, name } => {
+                let module_path = self.namespace_aliases.get(namespace).ok_or_else(|| {
+                    TypeError::simple(format!("unknown namespace '{namespace}'"), span.clone())
+                })?;
+                self.module_registry
+                    .get_export(module_path, name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        TypeError::simple(
+                            format!("namespace '{namespace}' has no member '{name}'"),
+                            span.clone(),
+                        )
+                    })
+            }
         }
     }
 
@@ -126,6 +140,10 @@ impl TypeChecker {
                     .map(|t| Self::substitute_type_expr(t, bindings))
                     .collect(),
             ),
+            TypeExpr::Qualified { namespace, name } => TypeExpr::Qualified {
+                namespace: namespace.clone(),
+                name: name.clone(),
+            },
         }
     }
 

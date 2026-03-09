@@ -13,6 +13,9 @@ pub enum TypeExpr {
 
     /// Tuple type: `(float, float)`.
     Tuple(Vec<TypeExpr>),
+
+    /// Namespace-qualified type: `enemy::Enemy` for wildcard imports.
+    Qualified { namespace: String, name: String },
 }
 
 // --- Shared Types ---

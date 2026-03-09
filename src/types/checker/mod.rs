@@ -738,4 +738,53 @@ struct Point {
             "Point should be registered even when method signatures reference it"
         );
     }
+
+    #[test]
+    fn resolve_qualified_type_from_namespace() {
+        use crate::parser::{Decl, DeclKind, WildcardImportDecl};
+        use std::collections::HashMap;
+
+        let mut checker = TypeChecker::new();
+        let span = test_span();
+
+        // Register a module with an Enemy class export.
+        let mut exports = HashMap::new();
+        exports.insert("Enemy".to_string(), Type::Class("Enemy".to_string()));
+        checker.register_module("entities/enemy", exports);
+
+        // Process `import * as enemy from "entities/enemy"`.
+        checker
+            .check_decl(&Decl {
+                kind: DeclKind::WildcardImport(WildcardImportDecl {
+                    alias: "enemy".to_string(),
+                    from: "entities/enemy".to_string(),
+                }),
+                span: span.clone(),
+            })
+            .unwrap();
+
+        let result = checker.resolve_type_expr(
+            &TypeExpr::Qualified {
+                namespace: "enemy".to_string(),
+                name: "Enemy".to_string(),
+            },
+            &span,
+        );
+        assert_eq!(result.unwrap(), Type::Class("Enemy".to_string()));
+    }
+
+    #[test]
+    fn resolve_qualified_type_unknown_namespace_errors() {
+        let mut checker = TypeChecker::new();
+        let span = test_span();
+        let result = checker.resolve_type_expr(
+            &TypeExpr::Qualified {
+                namespace: "unknown".to_string(),
+                name: "Foo".to_string(),
+            },
+            &span,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("unknown namespace"));
+    }
 }

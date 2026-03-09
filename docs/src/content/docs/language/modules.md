@@ -55,7 +55,19 @@ let s = weapons::createSword(damage: 20.0)
 let blade: weapons::Sword = s
 ```
 
-Use `::` for namespace access on wildcard imports.
+Use `::` for namespace access on wildcard imports — valid in **both expression and type positions**:
+
+```writ
+import * as weapons from "weapons/sword"
+
+// Expression position
+let s = weapons::createSword(damage: 20.0)
+
+// Type annotation position
+let blade: weapons::Sword = s
+
+func equip(item: weapons::Sword) -> weapons::Sword { ... }
+```
 
 ## Rules
 

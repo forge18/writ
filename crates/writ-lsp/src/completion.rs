@@ -47,6 +47,14 @@ pub fn handle_completion(
                 complete_dot_access(&doc.source, offset, &[], &fixed_checker, &mut items);
             }
         }
+        Some(b':') => {
+            // `::` trigger: complete namespace members.
+            if offset >= 2 && doc.source.as_bytes().get(offset - 2) == Some(&b':') {
+                if let Some(checker) = &doc.type_checker {
+                    complete_namespace_access(&doc.source, offset, checker, &mut items);
+                }
+            }
+        }
         _ => {
             // Identifier prefix or general completion.
             let prefix = extract_identifier_prefix(&doc.source, offset);
@@ -142,6 +150,44 @@ fn complete_dot_access(
             }
         }
         _ => {}
+    }
+}
+
+/// Completes after `::` — resolves the namespace alias before `::` and lists module exports.
+fn complete_namespace_access(
+    source: &str,
+    offset: usize,
+    checker: &writ::types::TypeChecker,
+    items: &mut Vec<CompletionItem>,
+) {
+    // Walk back past `::` (2 bytes) to find the namespace identifier.
+    let ns_end = offset - 2;
+    let ns = extract_identifier_at(source, if ns_end > 0 { ns_end - 1 } else { 0 });
+    if ns.is_empty() {
+        return;
+    }
+
+    let Some(module_path) = checker.namespace_aliases().get(&ns) else {
+        return;
+    };
+    let Some(exports) = checker.module_registry().get_module(module_path) else {
+        return;
+    };
+
+    for (name, ty) in exports {
+        let kind = match ty {
+            writ::types::Type::Class(_) => CompletionItemKind::CLASS,
+            writ::types::Type::Function { .. } => CompletionItemKind::FUNCTION,
+            writ::types::Type::Enum(_) => CompletionItemKind::ENUM,
+            writ::types::Type::Struct(_) => CompletionItemKind::STRUCT,
+            _ => CompletionItemKind::VALUE,
+        };
+        items.push(CompletionItem {
+            label: name.clone(),
+            kind: Some(kind),
+            detail: Some(ty.to_string()),
+            ..Default::default()
+        });
     }
 }
 
