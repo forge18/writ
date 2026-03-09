@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use lsp_types::Diagnostic;
 use writ::lexer::Lexer;
-use writ::parser::{Parser, Stmt, StmtKind};
+use writ::parser::{Parser, Stmt};
+use writ::resolver::{collect_import_paths, extract_exports};
 use writ::types::{Type, TypeChecker};
 
 use crate::diagnostics::{
@@ -85,31 +86,6 @@ pub fn analyze(source: &str, file_path: &str) -> AnalysisResult {
     }
 }
 
-/// Collects all unique import module paths from a parsed AST.
-fn collect_import_paths(stmts: &[Stmt]) -> Vec<String> {
-    let mut paths = HashSet::new();
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Import(import) => {
-                paths.insert(import.from.clone());
-            }
-            StmtKind::WildcardImport(import) => {
-                paths.insert(import.from.clone());
-            }
-            StmtKind::Export(inner) => {
-                // Exports can wrap imports (re-exports).
-                if let StmtKind::Import(import) = &inner.kind {
-                    paths.insert(import.from.clone());
-                } else if let StmtKind::WildcardImport(import) = &inner.kind {
-                    paths.insert(import.from.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-    paths.into_iter().collect()
-}
-
 /// Resolves a module path to disk, analyzes it, and returns its exports.
 ///
 /// The module path (e.g. `"items/weapon"`) is resolved relative to `base_dir`
@@ -142,63 +118,4 @@ fn resolve_module_from_disk(
     } else {
         Some(exports)
     }
-}
-
-/// Extracts exported names and their resolved types from an analyzed file.
-///
-/// Walks the AST looking for `export` wrappers and maps the declared name
-/// to the type computed by the type checker.
-fn extract_exports(stmts: &[Stmt], checker: &TypeChecker) -> HashMap<String, Type> {
-    let mut exports = HashMap::new();
-    let env = checker.env();
-    let registry = checker.registry();
-
-    for stmt in stmts {
-        if let StmtKind::Export(inner) = &stmt.kind {
-            match &inner.kind {
-                StmtKind::Func(func) => {
-                    if let Some(info) = env.lookup(&func.name) {
-                        exports.insert(func.name.clone(), info.ty.clone());
-                    }
-                }
-                StmtKind::Class(class) => {
-                    // Exported class — register as a Class type so importers
-                    // can instantiate it and access its members.
-                    if registry.get_class(&class.name).is_some() {
-                        exports.insert(class.name.clone(), Type::Class(class.name.clone()));
-                    }
-                }
-                StmtKind::Trait(trait_decl) => {
-                    if registry.get_trait(&trait_decl.name).is_some() {
-                        exports.insert(
-                            trait_decl.name.clone(),
-                            Type::Trait(trait_decl.name.clone()),
-                        );
-                    }
-                }
-                StmtKind::Enum(enum_decl) => {
-                    if registry.get_enum(&enum_decl.name).is_some() {
-                        exports.insert(enum_decl.name.clone(), Type::Enum(enum_decl.name.clone()));
-                    }
-                }
-                StmtKind::Struct(struct_decl) => {
-                    if registry.get_struct(&struct_decl.name).is_some() {
-                        exports.insert(
-                            struct_decl.name.clone(),
-                            Type::Struct(struct_decl.name.clone()),
-                        );
-                    }
-                }
-                StmtKind::Let { name, .. }
-                | StmtKind::Var { name, .. }
-                | StmtKind::Const { name, .. } => {
-                    if let Some(info) = env.lookup(name) {
-                        exports.insert(name.clone(), info.ty.clone());
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    exports
 }

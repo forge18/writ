@@ -972,6 +972,7 @@ dependencies = [
  "glam",
  "rand",
  "regex",
+ "tempfile",
 ]
 
 [[package]]

@@ -130,7 +130,8 @@ vm.register_global("VERSION", writ::Value::Str("1.0".into()));
 ## Loading and calling
 
 ```rust
-// Load a file — top-level runs once, functions persist
+// Load a file — top-level runs once, functions persist.
+// Any `import` statements are resolved automatically from disk.
 vm.load("scripts/combat.writ").unwrap();
 
 // Call a named function
@@ -138,6 +139,14 @@ let result = vm.call("calculateDamage", &[
     Value::F32(50.0),  // attacker power
     Value::F32(10.0),  // defender armor
 ]).unwrap();
+```
+
+By default, import paths resolve relative to the loaded file's directory. To set a project root instead:
+
+```rust
+vm.set_root_dir("scripts/");
+vm.load("scripts/combat.writ").unwrap();
+// import "utils/math" now resolves to scripts/utils/math.writ
 ```
 
 ## Error handling

@@ -441,6 +441,8 @@ func attack(target: enemy::Enemy) {
 - Named exports only — no default exports
 - Host/engine types always globally available, never imported
 - `::` for namespace access on wildcard imports
+- Imports resolve automatically — the runtime finds and loads `.writ` files relative to the importing file's directory (or the configured root directory)
+- Export visibility is enforced at compile time by the type checker (Rust model) — no runtime isolation
 
 ---
 

@@ -15,11 +15,13 @@
 //! ```
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
 pub mod codegen;
 pub mod compiler;
 pub mod lexer;
 pub mod parser;
+pub mod resolver;
 pub mod stdlib;
 pub mod types;
 pub mod vm;
@@ -27,6 +29,7 @@ pub mod vm;
 use compiler::Compiler;
 use lexer::Lexer;
 use parser::Parser;
+use resolver::ModuleResolver;
 use types::TypeChecker;
 use vm::VM;
 
@@ -128,6 +131,7 @@ pub struct Writ {
     vm: VM,
     type_checker: TypeChecker,
     type_check_enabled: bool,
+    resolver: ModuleResolver,
 }
 
 impl Default for Writ {
@@ -145,6 +149,7 @@ impl Writ {
             vm,
             type_checker: TypeChecker::new(),
             type_check_enabled: true,
+            resolver: ModuleResolver::new(),
         }
     }
 
@@ -192,6 +197,16 @@ impl Writ {
 
         let mut parser = Parser::new(tokens);
         let stmts = parser.parse_program()?;
+
+        // Resolve imports recursively before type-checking.
+        let file_path = Path::new(path);
+        self.resolver.resolve_imports(
+            file_path,
+            &stmts,
+            &mut self.type_checker,
+            &mut self.vm,
+            self.type_check_enabled,
+        )?;
 
         let mut compiler = Compiler::new();
         compiler.set_native_index(self.vm.native_fn_index_map().clone());
@@ -391,6 +406,16 @@ impl Writ {
         let mut parser = Parser::new(tokens);
         let stmts = parser.parse_program()?;
 
+        // Resolve imports recursively before type-checking.
+        let file_path = Path::new(file);
+        self.resolver.resolve_imports(
+            file_path,
+            &stmts,
+            &mut self.type_checker,
+            &mut self.vm,
+            self.type_check_enabled,
+        )?;
+
         let mut compiler = Compiler::new();
         compiler.set_native_index(self.vm.native_fn_index_map().clone());
         compiler.pre_register_classes(&stmts);
@@ -432,6 +457,16 @@ impl Writ {
         self
     }
 
+    /// Sets the root directory for import path resolution.
+    ///
+    /// When set, all `import` paths resolve relative to this directory.
+    /// When unset, paths resolve relative to the importing file's parent
+    /// directory.
+    pub fn set_root_dir(&mut self, path: impl Into<PathBuf>) -> &mut Self {
+        self.resolver.set_root_dir(path);
+        self
+    }
+
     /// Disables type checking for subsequent [`run`](Writ::run) and
     /// [`load`](Writ::load) calls.
     ///
@@ -463,6 +498,7 @@ impl Writ {
     /// accumulated definitions should not be visible.
     pub fn reset_script_types(&mut self) -> &mut Self {
         self.type_checker = TypeChecker::new();
+        self.resolver = ModuleResolver::new();
         self
     }
 

@@ -73,6 +73,7 @@ let vm = VM::new()
     .disable_module("io")
     .instruction_limit(1_000_000)
 
+// Imports in player.writ are resolved automatically from disk.
 vm.load("entities/player.writ")?;
 vm.call("on_update", &[delta])?;
 ```

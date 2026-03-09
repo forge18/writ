@@ -141,18 +141,15 @@ impl Compiler {
             StmtKind::Class(decl) => {
                 self.compile_class_decl(decl, &stmt.span)?;
             }
+            StmtKind::Export(inner) => {
+                // Export is a visibility marker — compile the inner declaration.
+                self.compile_stmt(inner)?;
+            }
             StmtKind::Trait(_)
             | StmtKind::Enum(_)
             | StmtKind::Import(_)
             | StmtKind::WildcardImport(_) => {
                 // Type-checker-only constructs; no bytecode emitted.
-            }
-            other => {
-                return Err(CompileError {
-                    annotation: None,
-                    message: format!("unsupported statement: {other:?}"),
-                    span: stmt.span.clone(),
-                });
             }
         }
         Ok(())
