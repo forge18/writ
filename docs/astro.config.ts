@@ -19,7 +19,6 @@ export default defineConfig({
                 fs.readFileSync(path.resolve(__dirname, '../extensions/vscode-writ/syntaxes/writ.tmLanguage.json'), 'utf-8')
               ),
               name: 'writ',
-              aliases: ['writ'],
             },
           ],
         },
