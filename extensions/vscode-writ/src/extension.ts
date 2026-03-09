@@ -36,7 +36,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  void client.start();
+  client.start().catch((err: unknown) => {
+    output.appendLine(`[writ] LSP start error: ${String(err)}`);
+    output.show();
+  });
 }
 
 export async function deactivate(): Promise<void> {

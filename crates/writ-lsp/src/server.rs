@@ -19,7 +19,9 @@ use crate::rename::handle_rename;
 
 /// Runs the LSP server on stdin/stdout.
 pub fn run_server() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    eprintln!("[writ-lsp] starting, pid={}", std::process::id());
     let (connection, io_threads) = Connection::stdio();
+    eprintln!("[writ-lsp] stdio connected");
 
     let server_capabilities = serde_json::to_value(ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
@@ -34,9 +36,12 @@ pub fn run_server() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         ..Default::default()
     })?;
 
+    eprintln!("[writ-lsp] waiting for initialize handshake");
     let init_params = connection.initialize(server_capabilities)?;
+    eprintln!("[writ-lsp] initialize complete");
     let _init_params: InitializeParams = serde_json::from_value(init_params)?;
 
+    eprintln!("[writ-lsp] entering main loop");
     main_loop(&connection, _init_params)?;
 
     io_threads.join()?;
