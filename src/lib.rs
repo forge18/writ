@@ -220,8 +220,44 @@ impl Writ {
     }
 
     /// Advances the coroutine scheduler by `delta` seconds.
+    ///
+    /// When a tick source is registered via [`set_tick_source`](Self::set_tick_source),
+    /// coroutines advance automatically and this method is not needed.
     pub fn tick(&mut self, delta: f64) -> Result<(), WritError> {
         Ok(self.vm.tick(delta)?)
+    }
+
+    /// Registers a tick source for automatic coroutine advancement.
+    ///
+    /// When set, coroutines advance automatically at the start of each
+    /// [`call`](Self::call) or [`load`](Self::load) invocation. The callback
+    /// should return the elapsed time in seconds since the last call.
+    ///
+    /// For manual control, leave unset and call [`tick`](Self::tick) directly.
+    pub fn set_tick_source<F: Fn() -> f64 + 'static>(&mut self, source: F) -> &mut Self {
+        self.vm.set_tick_source(source);
+        self
+    }
+
+    /// Convenience: use wall-clock time as the tick source.
+    ///
+    /// Equivalent to registering a tick source that tracks elapsed time
+    /// via `std::time::Instant`. Suitable for non-game applications or
+    /// prototyping where real-time progression is acceptable.
+    pub fn use_wall_clock(&mut self) -> &mut Self {
+        let last = std::cell::Cell::new(std::time::Instant::now());
+        self.set_tick_source(move || {
+            let now = std::time::Instant::now();
+            let delta = now.duration_since(last.get()).as_secs_f64();
+            last.set(now);
+            delta
+        })
+    }
+
+    /// Removes the tick source, reverting to manual [`tick`](Self::tick) mode.
+    pub fn clear_tick_source(&mut self) -> &mut Self {
+        self.vm.clear_tick_source();
+        self
     }
 
     /// Registers a host function that scripts can call.

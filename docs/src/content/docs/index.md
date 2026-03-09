@@ -55,9 +55,9 @@ class Player extends Entity {
 use writ::Writ;
 
 let mut vm = Writ::new();
+vm.set_tick_source(|| engine.delta_time()); // coroutines just work
 vm.load("scripts/game.writ").unwrap();
 vm.call("onStart", &[]).unwrap();
-vm.tick(delta).unwrap(); // drive coroutines each frame
 ```
 
 <CardGrid>

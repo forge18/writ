@@ -5,6 +5,8 @@ description: Async-style scripting with yield and structured lifetime management
 
 Coroutines let scripts do work across multiple frames without blocking the host. Any function that contains `yield` is implicitly a coroutine — no special declaration or wrapping needed.
 
+The host application sets up a tick source once during initialization — after that, coroutines advance automatically. If you're embedding Writ yourself, see [Runtime & Memory](/writ/advanced/runtime/) for the one-time setup.
+
 ## Starting a coroutine
 
 Use `start` to launch a coroutine in the background. Execution returns to the caller immediately:
@@ -83,24 +85,6 @@ class Door extends Entity {
 ```
 
 If the `Door` entity is destroyed while `openSequence` is waiting, the coroutine is cancelled cleanly. No callbacks, no manual cleanup.
-
-On the Rust side, signal the cancellation when destroying an entity:
-
-```rust
-vm.cancel_coroutines_for_owner(door_entity_id);
-```
-
-## Driving the scheduler
-
-The host must tick the coroutine scheduler each frame, passing the elapsed time:
-
-```rust
-fn update(vm: &mut Writ, delta: f64) {
-    vm.tick(delta).unwrap();
-}
-```
-
-Without ticking, `yield waitForSeconds(...)` and `yield waitUntil(...)` will never advance.
 
 ## Common patterns
 

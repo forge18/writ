@@ -140,24 +140,6 @@ let result = vm.call("calculateDamage", &[
 ]).unwrap();
 ```
 
-## Coroutine scheduler
-
-If scripts use coroutines (`yield`, `start`), call `tick` every frame with the elapsed time:
-
-```rust
-fn update(vm: &mut Writ, delta_seconds: f64) {
-    vm.tick(delta_seconds).unwrap();
-}
-```
-
-When a game object is destroyed, cancel its coroutines to avoid dangling execution:
-
-```rust
-fn on_destroy(vm: &mut Writ, entity_id: u64) {
-    vm.cancel_coroutines_for_owner(entity_id);
-}
-```
-
 ## Error handling
 
 All pipeline stages return `WritError`, which wraps each stage's specific error type:

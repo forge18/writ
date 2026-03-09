@@ -111,6 +111,8 @@ pub struct VM {
     interner: super::intern::StringInterner,
     /// Reusable scratch buffer for string concatenation (avoids malloc/free per Concat).
     concat_buf: String,
+    /// When set, coroutines auto-tick at the start of `call_function` and `load_module`.
+    tick_source: Option<Box<dyn Fn() -> f64>>,
 }
 
 mod arithmetic;
@@ -163,6 +165,7 @@ impl VM {
             func_ip_cache: Vec::new(),
             interner: super::intern::StringInterner::new(),
             concat_buf: String::with_capacity(256),
+            tick_source: None,
         }
     }
 
@@ -363,6 +366,33 @@ impl VM {
         self
     }
 
+    // --- Tick source API ---
+
+    /// Registers a tick source for automatic coroutine advancement.
+    ///
+    /// When set, coroutines advance automatically at the start of each
+    /// `call_function` or `load_module` invocation. The callback should
+    /// return the elapsed time in seconds since the last call.
+    pub fn set_tick_source<F: Fn() -> f64 + 'static>(&mut self, source: F) {
+        self.tick_source = Some(Box::new(source));
+    }
+
+    /// Removes the tick source, reverting to manual `tick()` mode.
+    pub fn clear_tick_source(&mut self) {
+        self.tick_source = None;
+    }
+
+    /// Auto-tick if a tick source is registered and coroutines exist.
+    fn auto_tick(&mut self) -> Result<(), RuntimeError> {
+        if !self.coroutines.is_empty()
+            && let Some(ref source) = self.tick_source
+        {
+            let delta = source();
+            self.tick(delta)?;
+        }
+        Ok(())
+    }
+
     // --- Debug API ---
 
     /// Registers a breakpoint at the given file and line.
@@ -559,6 +589,8 @@ impl VM {
         struct_metas: &[StructMeta],
         class_metas: &[ClassMeta],
     ) -> Result<Value, RuntimeError> {
+        self.auto_tick()?;
+
         for func in functions {
             let idx = self.functions.len();
             self.function_map.insert(func.name.clone(), idx);
@@ -628,6 +660,8 @@ impl VM {
     /// Used for hot reload testing, host-to-script function calls, and
     /// callback methods like `map`/`filter`/`reduce`.
     pub fn call_function(&mut self, name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+        self.auto_tick()?;
+
         let func_idx = *self
             .function_map
             .get(name)

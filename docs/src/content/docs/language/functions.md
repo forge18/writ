@@ -87,3 +87,19 @@ var handler = (amount: float) => {
 ```
 
 `return` inside a lambda returns from the lambda only, never the enclosing function.
+
+### Closures
+
+Lambdas capture variables from their enclosing scope by reference. Mutations are shared:
+
+```writ
+var count = 0
+let increment = () => { count += 1 }
+let getCount = () => count
+
+increment()
+increment()
+print(getCount())  // 2
+```
+
+Multiple closures over the same variable see each other's changes.

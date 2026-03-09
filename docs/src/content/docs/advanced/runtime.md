@@ -89,3 +89,52 @@ impl std::ops::DerefMut for Player {
 ### Traits
 
 Script traits compile to Rust traits. Default implementations are preserved.
+
+---
+
+## Coroutine scheduler
+
+If scripts use coroutines (`yield`, `start`), register a tick source so the VM knows how to measure time. Coroutines then advance automatically whenever you call into the VM.
+
+### Tick source (recommended)
+
+Register once during setup:
+
+```rust
+// Game engine — use your engine's delta time
+vm.set_tick_source(|| engine.delta_time());
+```
+
+After this, every `call()` or `load()` auto-ticks coroutines before executing. No per-frame tick call needed.
+
+The callback controls what "time" means to coroutines:
+
+- Return `0.0` to freeze coroutines (pause)
+- Return `delta * 0.5` for slow motion
+- Return a fixed value for deterministic playback
+
+For non-game applications, use wall-clock time:
+
+```rust
+vm.use_wall_clock();
+```
+
+### Manual tick (advanced)
+
+For direct control over timing, skip `set_tick_source` and call `tick()` explicitly each frame:
+
+```rust
+vm.tick(delta_seconds).unwrap();
+```
+
+### Structured lifetime
+
+When a game object is destroyed, cancel its coroutines to avoid dangling execution:
+
+```rust
+fn on_destroy(vm: &mut Writ, entity_id: u64) {
+    vm.cancel_coroutines_for_owner(entity_id);
+}
+```
+
+Cancellation propagates to child coroutines automatically. See [Coroutines](/writ/language/coroutines/) for the script-side API.

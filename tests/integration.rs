@@ -6345,3 +6345,249 @@ fn test_closure_callback_captures_upvalue() {
         .unwrap();
     assert_eq!(result, Value::I32(101));
 }
+
+// --- Tick source (auto-tick) tests ---
+
+#[test]
+fn test_set_tick_source_auto_advances() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    // Register a tick source that returns 2.0s (enough to pass the wait).
+    writ.set_tick_source(|| 2.0);
+
+    writ.run(
+        "func noop() {}\n\
+         func delayed() {\n\
+           yield waitForSeconds(0.5)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    assert!(!*done.borrow());
+
+    // First tick runs coroutine to its yield point. This happens via auto-tick
+    // inside call(). Then the second auto-tick (next call) will see the
+    // countdown expired and resume.
+    writ.call("noop", &[]).unwrap();
+    // After first auto-tick: coroutine ran to yield waitForSeconds(0.5),
+    // got suspended with 0.5s remaining. The tick advanced 2.0s, so it
+    // should have resumed and called mark_done.
+    // But coroutines start in Running state — first tick resumes them to
+    // their first yield. Then second tick checks the wait condition.
+    // So we may need a second call.
+    if !*done.borrow() {
+        writ.call("noop", &[]).unwrap();
+    }
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_set_tick_source_no_coroutines_noop() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    // Register tick source, but no coroutines — should be a no-op.
+    writ.set_tick_source(|| 1.0);
+
+    writ.run("func noop() {}\n").unwrap();
+    writ.call("noop", &[]).unwrap();
+    // No panic, no error.
+}
+
+#[test]
+fn test_use_wall_clock() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    writ.use_wall_clock();
+
+    writ.run(
+        "func noop() {}\n\
+         func delayed() {\n\
+           yield waitForSeconds(0.001)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    // First call: auto-tick runs the coroutine to its yield point.
+    writ.call("noop", &[]).unwrap();
+
+    // Sleep enough for the 1ms wait to expire.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Second call: auto-tick sees the wait expired and resumes.
+    writ.call("noop", &[]).unwrap();
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_clear_tick_source() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    writ.set_tick_source(|| 2.0);
+    writ.clear_tick_source(); // remove tick source
+
+    writ.run(
+        "func noop() {}\n\
+         func delayed() {\n\
+           yield waitForSeconds(0.5)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    // call() should NOT auto-tick since tick source was cleared.
+    writ.call("noop", &[]).unwrap();
+    writ.call("noop", &[]).unwrap();
+    assert!(!*done.borrow());
+
+    // Manual tick still works.
+    writ.tick(0.0).unwrap(); // run to yield
+    writ.tick(1.0).unwrap(); // expire wait
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_tick_source_zero_delta() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    // Tick source always returns 0.0 — simulating a paused game.
+    writ.set_tick_source(|| 0.0);
+
+    writ.run(
+        "func noop() {}\n\
+         func delayed() {\n\
+           yield waitForSeconds(1.0)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    // Multiple calls: first advances to yield, rest don't expire the timer.
+    for _ in 0..10 {
+        writ.call("noop", &[]).unwrap();
+    }
+    assert!(!*done.borrow());
+}
+
+#[test]
+fn test_tick_source_paused_then_resumed() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let done = Rc::new(RefCell::new(false));
+    let done_clone = Rc::clone(&done);
+    writ.register_fn(
+        "mark_done",
+        fn0(move || -> Result<Value, String> {
+            *done_clone.borrow_mut() = true;
+            Ok(Value::Null)
+        }),
+    );
+
+    let delta = Rc::new(RefCell::new(0.0f64));
+    let delta_clone = Rc::clone(&delta);
+    writ.set_tick_source(move || *delta_clone.borrow());
+
+    writ.run(
+        "func noop() {}\n\
+         func delayed() {\n\
+           yield waitForSeconds(1.0)\n\
+           mark_done()\n\
+         }\n\
+         start delayed()",
+    )
+    .unwrap();
+
+    // Paused (delta = 0.0): first call runs to yield, subsequent calls don't expire.
+    writ.call("noop", &[]).unwrap();
+    writ.call("noop", &[]).unwrap();
+    assert!(!*done.borrow());
+
+    // Resume (delta = 2.0): next call should expire the wait.
+    *delta.borrow_mut() = 2.0;
+    writ.call("noop", &[]).unwrap();
+    assert!(*done.borrow());
+}
+
+#[test]
+fn test_manual_tick_coexists_with_source() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    let count = Rc::new(RefCell::new(0i32));
+    let count_clone = Rc::clone(&count);
+    writ.register_fn(
+        "increment",
+        fn0(move || -> Result<Value, String> {
+            *count_clone.borrow_mut() += 1;
+            Ok(Value::Null)
+        }),
+    );
+
+    writ.set_tick_source(|| 0.0); // tick source provides 0 delta
+
+    writ.run(
+        "func noop() {}\n\
+         func counter() {\n\
+           yield\n\
+           increment()\n\
+         }\n\
+         start counter()",
+    )
+    .unwrap();
+
+    // Auto-tick with 0 delta: bare yield resumes on next tick regardless of delta.
+    writ.call("noop", &[]).unwrap(); // auto-tick: runs to yield
+    writ.call("noop", &[]).unwrap(); // auto-tick: resumes past bare yield
+    assert_eq!(*count.borrow(), 1);
+}

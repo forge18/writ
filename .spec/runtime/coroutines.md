@@ -115,12 +115,33 @@ The scheduler lives inside the VM and runs once per frame. It maintains a list o
 
 2. Completed coroutines are removed from the list
 
-The scheduler is driven by the host calling `vm.tick(delta)` once per frame.
+### Tick Source (recommended)
+
+Register a tick source once during setup. The VM auto-ticks coroutines at the start of each `call()` or `load()` invocation — no per-frame tick call needed.
 
 ```rust
-// Host game loop
+// Game engine — use engine delta
+vm.set_tick_source(|| engine.delta_time());
+
+// Non-game — wall clock fallback
+vm.use_wall_clock();
+```
+
+The callback returns elapsed seconds. The host controls what "time" means to coroutines:
+
+- Return `0.0` to freeze coroutines (pause)
+- Return `delta * 0.5` for slow motion
+- Return a fixed value for deterministic playback
+
+### Manual Tick (advanced)
+
+For direct control, call `tick(delta)` explicitly instead of registering a tick source.
+
+```rust
 vm.tick(delta_seconds);
 ```
+
+Without either a tick source or manual `tick()` calls, time-based yields never advance.
 
 ---
 
@@ -151,4 +172,5 @@ vm.tick(delta_seconds);
 
 | Date       | Change        |
 |------------|---------------|
+| 2026-03-09 | Add `set_tick_source` / `use_wall_clock` auto-tick API |
 | 2026-03-02 | Initial draft |
