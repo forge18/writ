@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
@@ -6,6 +7,15 @@ export default defineConfig({
   base: '/writ',
   integrations: [
     starlight({
+      expressiveCode: {
+        shiki: {
+          langs: [
+            JSON.parse(
+              fs.readFileSync('../extensions/vscode-writ/syntaxes/writ.tmLanguage.json', 'utf-8')
+            ),
+          ],
+        },
+      },
       title: 'Writ',
       description: 'A statically typed scripting language designed for game developers. Embeds directly into Rust with near-zero interop cost — no marshalling, no runtime overhead.',
       social: [

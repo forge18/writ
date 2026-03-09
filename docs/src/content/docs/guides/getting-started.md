@@ -1,83 +1,121 @@
 ---
 title: Getting Started
-description: Install Writ and run your first script in minutes.
+description: Add Writ to your Rust project and run your first script.
 ---
 
-Writ is an embedded scripting language for Rust. You add it as a dependency, create a `Writ` instance, and run scripts from within your application.
+Writ is an embedded scripting language for Rust. Add it as a dependency, write a `.writ` script, and load it from your application.
 
-## Installation
-
-Add Writ to your `Cargo.toml`:
+## Install
 
 ```toml
 [dependencies]
 writ = "0.1"
 ```
 
-## Your first script
+## Write a script
+
+Create `scripts/hello.writ`:
+
+```writ
+func greet(name: string) -> string {
+    return "Hello, " + name + "!"
+}
+
+print(greet("World"))
+```
+
+## Create a VM
+
+Every Writ program runs inside a `Writ` instance. Create one — the standard library is loaded automatically:
 
 ```rust
 use writ::Writ;
 
-fn main() {
-    let mut vm = Writ::new();
-    vm.run(r#"print("Hello from Writ!")"#).unwrap();
+let mut vm = Writ::new();
+```
+
+## Load and run it
+
+`load()` compiles the file, executes top-level code, and makes functions available for `call()`:
+
+```rust
+vm.load("scripts/hello.writ").unwrap();
+
+// Call a script function from Rust.
+let result = vm.call("greet", &[writ::Value::Str("Rust".into())]).unwrap();
+println!("{result}"); // Hello, Rust!
+```
+
+## Give scripts access to your application
+
+Register Rust functions so scripts can call back into your code:
+
+```rust
+use writ::{Type, fn2};
+
+vm.register_host_fn(
+    "damage",
+    vec![Type::Float, Type::Float],
+    Type::Float,
+    fn2(|hp: f64, amount: f64| -> Result<f64, String> {
+        Ok((hp - amount).max(0.0))
+    }),
+);
+```
+
+Now scripts can call `damage()` as if it were a built-in:
+
+```writ
+let remaining = damage(100.0, 35.0)
+print(remaining)   // 65.0
+```
+
+The type checker validates calls at compile time — wrong argument types or counts produce errors before the script runs.
+
+## Build something real
+
+Here's a more complete example — a script with a class, and Rust code that loads and drives it:
+
+```writ
+// scripts/combat.writ
+
+class Fighter {
+    public name: string
+    public health: float = 100.0
+
+    public func takeDamage(amount: float) {
+        health -= amount
+        if health <= 0 {
+            print(name + " was defeated!")
+        }
+    }
+
+    public func isAlive() -> bool {
+        return health > 0
+    }
+}
+
+func createFighter(name: string) -> Fighter {
+    return Fighter(name: name)
 }
 ```
 
-That's it. `Writ::new()` starts a VM with the standard library already loaded.
-
-## Running a calculation
-
-Scripts can return values back to Rust:
-
 ```rust
-let mut vm = Writ::new();
-let result = vm.run("return 2 + 2").unwrap();
-println!("{result}"); // 4
-```
+use writ::{Value, Writ};
 
-## Defining and calling functions
+fn main() {
+    let mut vm = Writ::new();
+    vm.load("scripts/combat.writ").unwrap();
 
-Functions defined in one `run` call are available in subsequent calls:
-
-```rust
-vm.run("func double(n: int) -> int { return n * 2 }").unwrap();
-
-let result = vm.call("double", &[writ::Value::I32(21)]).unwrap();
-println!("{result}"); // 42
-```
-
-## Loading a file
-
-For larger scripts, load from a file. Top-level code executes immediately; functions become callable:
-
-```rust
-vm.load("scripts/game.writ").unwrap();
-vm.call("onStart", &[]).unwrap();
-```
-
-## Exposing Rust functions to scripts
-
-Use `register_host_fn` to make Rust functions callable from scripts. This registers the function in both the VM and the type checker so scripts get proper type errors:
-
-```rust
-use writ::{Type, Value, fn3};
-
-vm.register_host_fn(
-    "clamp",
-    vec![Type::Float, Type::Float, Type::Float],
-    Type::Float,
-    fn3(|value: f64, min: f64, max: f64| -> Result<f64, String> {
-        Ok(value.clamp(min, max))
-    }),
-);
-
-vm.run("let hp = clamp(150.0, 0.0, 100.0)").unwrap();
+    let fighter = vm.call("createFighter", &[Value::Str("Hero".into())]).unwrap();
+    println!("{fighter}"); // Fighter { name: "Hero", health: 100.0 }
+}
 ```
 
 ## Next steps
 
-- **[Language Fundamentals](/writ/language/fundamentals/)** — variables, operators, strings
-- **[Embedding Guide](/writ/advanced/embedding/)** — host types, sandboxing, hot reload, coroutines
-- **[Standard Library](/writ/stdlib/core/)** — what's available to scripts out of the box
+- **[Language Fundamentals](/writ/language/fundamentals/)** — variables, types, operators, strings
+- **[Classes & Structs](/writ/language/classes-and-structs/)** — custom types, inheritance, traits
+- **[Modules](/writ/language/modules/)** — split scripts across files with import/export
+- **[Embedding Guide](/writ/advanced/embedding/)** — host types, sandboxing, hot reload
+- **[Standard Library](/writ/stdlib/core/)** — what's available out of the box
