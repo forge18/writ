@@ -12,6 +12,11 @@ Global functions always available.
 | `print`  | `(value: any)`                       | Print to the host console   |
 | `assert` | `(condition: bool, msg: string)`     | Error if condition is false |
 
+```writ
+print("Hello from Writ!")
+assert(health > 0, "Player should be alive")
+```
+
 ---
 
 ## Reflection
@@ -29,3 +34,11 @@ Module name: `"reflect"`
 | `methods`    | `(value: any) -> Array<string>`                      | All method names         |
 | `hasMethod`  | `(value: any, method: string) -> bool`               | Check if a method exists |
 | `invoke`     | `(value: any, method: string, ...args: any) -> any`  | Call a method by name    |
+
+```writ
+typeof(42)                      // "int"
+instanceof(player, "Player")   // true
+hasField(player, "health")     // true
+getField(player, "health")     // 100.0
+fields(player)                 // ["health", "name", ...]
+```
