@@ -9,7 +9,7 @@ hero:
       link: /writ/guides/getting-started/
       icon: right-arrow
     - text: Embedding Guide
-      link: /writ/guides/embedding/
+      link: /writ/advanced/embedding/
       icon: document
       variant: minimal
     - text: GitHub

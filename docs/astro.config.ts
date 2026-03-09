@@ -13,27 +13,44 @@ export default defineConfig({
       ],
       sidebar: [
         { label: 'Home', slug: 'index' },
-        {
-          label: 'Guides',
-          items: [
-            { label: 'Getting Started', slug: 'guides/getting-started' },
-            { label: 'Embedding in Rust', slug: 'guides/embedding' },
-          ],
-        },
+        { label: 'Getting Started', slug: 'guides/getting-started' },
         {
           label: 'Language',
           items: [
-            { label: 'Basics', slug: 'language/basics' },
+            { label: 'Fundamentals', slug: 'language/fundamentals' },
+            { label: 'Functions', slug: 'language/functions' },
+            { label: 'Control Flow', slug: 'language/control-flow' },
             { label: 'Types', slug: 'language/types' },
+            { label: 'Error Handling', slug: 'language/error-handling' },
+            { label: 'Collections', slug: 'language/collections' },
             { label: 'Coroutines', slug: 'language/coroutines' },
             { label: 'Modules', slug: 'language/modules' },
           ],
         },
         {
-          label: 'Reference',
+          label: 'Standard Library',
           items: [
-            { label: 'Standard Library', slug: 'reference/stdlib' },
-            { label: 'Language Spec', slug: 'reference/language-spec' },
+            { label: 'Core', slug: 'stdlib/core' },
+            { label: 'Math', slug: 'stdlib/math' },
+            { label: 'Data', slug: 'stdlib/data' },
+            { label: 'Game', slug: 'stdlib/game' },
+            { label: 'System', slug: 'stdlib/system' },
+          ],
+        },
+        {
+          label: 'Advanced',
+          items: [
+            { label: 'Embedding in Rust', slug: 'advanced/embedding' },
+            { label: 'Runtime & Memory', slug: 'advanced/runtime' },
+            { label: 'Sandboxing & Security', slug: 'advanced/sandboxing' },
+            { label: 'Debugging', slug: 'advanced/debugging' },
+          ],
+        },
+        {
+          label: 'Examples',
+          items: [
+            { label: 'Patterns', slug: 'examples/patterns' },
+            { label: 'Projects', slug: 'examples/projects' },
           ],
         },
       ],

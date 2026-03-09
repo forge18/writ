@@ -78,6 +78,6 @@ vm.run("let hp = clamp(150.0, 0.0, 100.0)").unwrap();
 
 ## Next steps
 
-- **[Language Basics](/writ/language/basics)** — variables, functions, control flow
-- **[Embedding Guide](/writ/guides/embedding)** — host types, sandboxing, hot reload, coroutines
-- **[Standard Library](/writ/reference/stdlib)** — what's available to scripts out of the box
+- **[Language Fundamentals](/writ/language/fundamentals/)** — variables, operators, strings
+- **[Embedding Guide](/writ/advanced/embedding/)** — host types, sandboxing, hot reload, coroutines
+- **[Standard Library](/writ/stdlib/core/)** — what's available to scripts out of the box

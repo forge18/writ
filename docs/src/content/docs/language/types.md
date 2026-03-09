@@ -1,6 +1,6 @@
 ---
 title: Types
-description: Structs, classes, traits, enums, generics, optionals, and results.
+description: Structs, classes, traits, enums, generics, and type casting.
 ---
 
 ## Structs
@@ -96,7 +96,7 @@ public health: float = 100.0
 
 ### Inheritance
 
-Single inheritance via `extends`. `self` is implicit inside methods.
+Single inheritance via `extends`.
 
 ```writ
 class Boss extends Enemy {
@@ -105,6 +105,17 @@ class Boss extends Enemy {
     public func takeDamage(amount: float) {
         health -= amount * 0.5   // bosses take half damage
     }
+}
+```
+
+### self
+
+`self` is available implicitly inside instance methods:
+
+```writ
+func takeDamage(amount: float) {
+    self.health -= amount  // self optional but available
+    health -= amount       // also valid
 }
 ```
 
@@ -225,108 +236,6 @@ Dictionary<string, int>
 Optional<Player>
 Result<float>
 Array<Dictionary<string, Player>>
-```
-
----
-
-## Optionals
-
-Types are non-nullable by default. Wrap in `Optional<T>` to allow absence.
-
-```writ
-let target: Optional<Player>   // may be absent
-
-// Check before using
-if target.hasValue {
-    target.takeDamage(10.0)
-}
-
-// Safe member access — short-circuits to null if absent
-let hp = target?.health
-
-// Null coalescing — use fallback if absent
-let hp = target?.health ?? 0.0
-
-// Unwrap with fallback
-let name = target?.name ?? "Nobody"
-```
-
----
-
-## Results
-
-Functions that can fail return `Result<T>`. Errors are always string messages.
-
-```writ
-func divide(a: float, b: float) -> Result<float> {
-    if b == 0.0 {
-        return Error("Division by zero")
-    }
-    return Success(a / b)
-}
-```
-
-Handle results with `when`:
-
-```writ
-when divide(10.0, 2.0) {
-    is Success(value) => print(value)
-    is Error(msg)     => print("Failed: " .. msg)
-}
-```
-
-Propagate errors up with `?`:
-
-```writ
-func calculate(a: float, b: float) -> Result<float> {
-    let quotient = divide(a, b)?   // returns early on error
-    return Success(quotient * 2.0)
-}
-```
-
-Use `??` for a fallback value instead of propagating:
-
-```writ
-let result = divide(10.0, 0.0) ?? 0.0
-```
-
----
-
-## Tuples
-
-Rust-style, with destructuring:
-
-```writ
-let point = (10.0, 20.0)
-let (x, y) = point
-
-func getPosition() -> (float, float) {
-    return (self.x, self.y)
-}
-
-let (px, py) = player.getPosition()
-```
-
----
-
-## Collections
-
-```writ
-// Arrays — ordered, typed
-let items: Array<string> = ["sword", "shield", "potion"]
-let grid: Array<Array<int>>
-
-items.push("dagger")
-let first = items[0]
-
-// Dictionaries — key-value, typed
-let scores: Dictionary<string, int> = {"alice": 100, "bob": 95}
-scores["carol"] = 88
-let aliceScore = scores["alice"]
-
-// Spread
-let combined = [...items1, ...items2]
-let merged   = {...dict1, ...dict2}
 ```
 
 ---

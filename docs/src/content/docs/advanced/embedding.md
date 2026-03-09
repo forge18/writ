@@ -140,16 +140,6 @@ let result = vm.call("calculateDamage", &[
 ]).unwrap();
 ```
 
-## Hot reload
-
-Reload a file during development without losing VM state. Only function bytecode is swapped — globals, live objects, and running coroutines are preserved.
-
-```rust
-vm.reload("scripts/combat.writ").unwrap();
-```
-
-Call this in response to a file watcher event. Scripts are fully re-type-checked on reload.
-
 ## Coroutine scheduler
 
 If scripts use coroutines (`yield`, `start`), call `tick` every frame with the elapsed time:
@@ -166,55 +156,6 @@ When a game object is destroyed, cancel its coroutines to avoid dangling executi
 fn on_destroy(vm: &mut Writ, entity_id: u64) {
     vm.cancel_coroutines_for_owner(entity_id);
 }
-```
-
-## Sandboxing
-
-Scripts start with no external access beyond what you register. Additional controls:
-
-```rust
-// Cap execution time — protects against infinite loops in mod scripts
-vm.set_instruction_limit(1_000_000);
-
-// Remove entire stdlib modules from this instance
-vm.disable_module("io");
-vm.disable_module("noise");
-
-// Isolate type state for untrusted one-off scripts
-vm.reset_script_types();
-```
-
-## Type checking
-
-Type checking is on by default. You can toggle it:
-
-```rust
-vm.disable_type_checking(); // skip type checking
-vm.enable_type_checking();  // re-enable
-```
-
-Disabling is useful when running scripts that call host functions registered without type info. All other behavior is unchanged.
-
-## Debug hooks
-
-Enable via the `debug-hooks` feature in `Cargo.toml`:
-
-```toml
-writ = { version = "0.1", features = ["debug-hooks"] }
-```
-
-Then register callbacks:
-
-```rust
-vm.set_breakpoint("scripts/combat.writ", 42);
-vm.on_breakpoint(|ctx| {
-    println!("Hit breakpoint at {}:{}", ctx.file, ctx.line);
-    writ::BreakpointAction::Continue
-});
-
-vm.on_line(|file, line| { /* called before each new source line */ });
-vm.on_call(|file, fn_name, line| { /* called on function entry */ });
-vm.on_return(|file, fn_name, line| { /* called on function return */ });
 ```
 
 ## Error handling
