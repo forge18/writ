@@ -9,7 +9,7 @@ Writ produces Rust-style error messages — precise, plain English, actionable. 
 
 ### Type mismatch
 
-```
+```text
 Error: Type mismatch
   --> entities/player.writ:34:12
    |
@@ -19,7 +19,7 @@ Error: Type mismatch
 
 ### Unknown field with suggestion
 
-```
+```text
 Error: Unknown field 'hp'
   --> entities/player.writ:34:12
    |
@@ -44,7 +44,7 @@ Error: Unknown field 'hp'
 
 All runtime errors include a full stack trace with file name, line number, and function name:
 
-```
+```text
 Error: Division by zero
   at divide (math/utils.writ:12)
   at calculateDamage (combat/damage.writ:34)

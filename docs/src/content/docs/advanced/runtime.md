@@ -9,7 +9,7 @@ Writ is a **bytecode VM** — scripts are compiled to bytecode at load time and 
 
 ### Pipeline
 
-```
+```text
 Source → Lexer → Parser → AST → Type Checker → Bytecode → VM
 ```
 

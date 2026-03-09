@@ -336,10 +336,15 @@ impl TypeChecker {
                 );
 
                 // Define struct fields as accessible variables (unqualified access).
-                let struct_info = self
-                    .registry
-                    .get_struct(struct_name)
-                    .expect("struct should be registered in pass 1");
+                let Some(struct_info) = self.registry.get_struct(struct_name) else {
+                    self.env.pop_scope();
+                    return Err(TypeError::simple(
+                        format!(
+                            "struct '{struct_name}' could not be registered (check field type annotations)"
+                        ),
+                        span.clone(),
+                    ));
+                };
                 for field in &struct_info.fields {
                     self.env.define(
                         &field.name,

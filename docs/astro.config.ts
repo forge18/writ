@@ -1,6 +1,10 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   site: 'https://forge18.github.io',
@@ -11,7 +15,7 @@ export default defineConfig({
         shiki: {
           langs: [
             JSON.parse(
-              fs.readFileSync('../extensions/vscode-writ/syntaxes/writ.tmLanguage.json', 'utf-8')
+              fs.readFileSync(path.resolve(__dirname, '../extensions/vscode-writ/syntaxes/writ.tmLanguage.json'), 'utf-8')
             ),
           ],
         },

@@ -710,4 +710,32 @@ mod tests {
                 .contains("arithmetic assignment")
         );
     }
+
+    #[test]
+    fn struct_self_referential_method_does_not_panic() {
+        // A struct whose method takes itself as a parameter or returns itself
+        // must not panic during type registration.
+        let src = r#"
+struct Point {
+    public x: float = 0.0
+    public y: float = 0.0
+
+    func add(other: Point) -> Point {
+        return Point(self.x + other.x, self.y + other.y)
+    }
+}
+"#;
+        let mut lexer = crate::lexer::Lexer::new(src);
+        let tokens = lexer.tokenize().expect("lex");
+        let mut parser = crate::parser::Parser::new(tokens);
+        let stmts = parser.parse_program().expect("parse");
+        let mut checker = TypeChecker::new();
+        // Must not panic; errors are acceptable (e.g. unresolved Point constructor)
+        let _ = checker.check_program_collecting(&stmts);
+        // Point must be in the registry after registration.
+        assert!(
+            checker.registry().get_struct("Point").is_some(),
+            "Point should be registered even when method signatures reference it"
+        );
+    }
 }

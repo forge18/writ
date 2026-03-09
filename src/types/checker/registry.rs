@@ -104,6 +104,16 @@ impl TypeChecker {
             });
         }
 
+        // Register with empty methods first so self-referential method signatures
+        // can resolve the class type.
+        self.registry.register_class(ClassInfo {
+            name: decl.name.clone(),
+            fields: fields.clone(),
+            methods: Vec::new(),
+            parent: decl.extends.clone(),
+            traits: decl.traits.clone(),
+        });
+
         let mut methods = Vec::new();
         for method in &decl.methods {
             let return_type = match &method.return_type {
@@ -124,6 +134,7 @@ impl TypeChecker {
             });
         }
 
+        // Update with resolved methods.
         self.registry.register_class(ClassInfo {
             name: decl.name.clone(),
             fields: fields.clone(),
@@ -171,6 +182,14 @@ impl TypeChecker {
             });
         }
 
+        // Register with empty methods first so self-referential method signatures
+        // (e.g. `func add(other: Point) -> Point`) can resolve the struct type.
+        self.registry.register_struct(StructInfo {
+            name: decl.name.clone(),
+            fields: fields.clone(),
+            methods: Vec::new(),
+        });
+
         let mut methods = Vec::new();
         for method in &decl.methods {
             let return_type = match &method.return_type {
@@ -191,6 +210,7 @@ impl TypeChecker {
             });
         }
 
+        // Update with resolved methods.
         self.registry.register_struct(StructInfo {
             name: decl.name.clone(),
             fields: fields.clone(),
