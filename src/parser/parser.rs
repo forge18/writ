@@ -850,6 +850,44 @@ impl Parser {
                     span,
                 })
             }
+            TokenKind::Public | TokenKind::Private
+                if matches!(
+                    self.peek_ahead(1),
+                    TokenKind::Class
+                        | TokenKind::Trait
+                        | TokenKind::Enum
+                        | TokenKind::Struct
+                        | TokenKind::Func
+                ) =>
+            {
+                let _vis = self.parse_visibility();
+                match self.peek().clone() {
+                    TokenKind::Class => Ok(Stmt {
+                        kind: StmtKind::Class(self.parse_class_decl()?),
+                        span,
+                    }),
+                    TokenKind::Trait => Ok(Stmt {
+                        kind: StmtKind::Trait(self.parse_trait_decl()?),
+                        span,
+                    }),
+                    TokenKind::Enum => Ok(Stmt {
+                        kind: StmtKind::Enum(self.parse_enum_decl()?),
+                        span,
+                    }),
+                    TokenKind::Struct => Ok(Stmt {
+                        kind: StmtKind::Struct(self.parse_struct_decl()?),
+                        span,
+                    }),
+                    TokenKind::Func => {
+                        let func = self.parse_func_decl(false, _vis)?;
+                        Ok(Stmt {
+                            kind: StmtKind::Func(func),
+                            span,
+                        })
+                    }
+                    _ => unreachable!(),
+                }
+            }
             TokenKind::Class => {
                 let class = self.parse_class_decl()?;
                 Ok(Stmt {

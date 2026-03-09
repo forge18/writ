@@ -180,38 +180,43 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(class)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "(?:\\b(public|private|static)\\s+)*\\b(class)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "storage.type.writ" },
-            "2": { "name": "entity.name.type.class.writ" }
+            "1": { "name": "storage.modifier.writ" },
+            "2": { "name": "storage.type.writ" },
+            "3": { "name": "entity.name.type.class.writ" }
           }
         },
         {
-          "match": "\\b(trait)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "(?:\\b(public|private|static)\\s+)*\\b(trait)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "storage.type.writ" },
-            "2": { "name": "entity.name.type.trait.writ" }
+            "1": { "name": "storage.modifier.writ" },
+            "2": { "name": "storage.type.writ" },
+            "3": { "name": "entity.name.type.trait.writ" }
           }
         },
         {
-          "match": "\\b(enum)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "(?:\\b(public|private|static)\\s+)*\\b(enum)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "storage.type.writ" },
-            "2": { "name": "entity.name.type.enum.writ" }
+            "1": { "name": "storage.modifier.writ" },
+            "2": { "name": "storage.type.writ" },
+            "3": { "name": "entity.name.type.enum.writ" }
           }
         },
         {
-          "match": "\\b(struct)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "(?:\\b(public|private|static)\\s+)*\\b(struct)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "storage.type.writ" },
-            "2": { "name": "entity.name.type.struct.writ" }
+            "1": { "name": "storage.modifier.writ" },
+            "2": { "name": "storage.type.writ" },
+            "3": { "name": "entity.name.type.struct.writ" }
           }
         },
         {
-          "match": "\\b(func)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "match": "(?:\\b(public|private|static)\\s+)*\\b(func)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "storage.type.writ" },
-            "2": { "name": "entity.name.function.writ" }
+            "1": { "name": "storage.modifier.writ" },
+            "2": { "name": "storage.type.writ" },
+            "3": { "name": "entity.name.function.writ" }
           }
         }
       ]

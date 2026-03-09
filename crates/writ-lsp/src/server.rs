@@ -238,7 +238,10 @@ fn send_response<T: serde::Serialize>(
     id: RequestId,
     result: Option<T>,
 ) -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
-    let result = result.map(|r| serde_json::to_value(r).unwrap());
+    let result = Some(match result {
+        Some(r) => serde_json::to_value(r).unwrap(),
+        None => Value::Null,
+    });
     let resp = Response {
         id,
         result,
