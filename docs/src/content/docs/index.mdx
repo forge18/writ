@@ -3,7 +3,7 @@ title: Writ
 description: Writ is a statically typed scripting language designed for game developers. It embeds directly into Rust with near-zero interop cost — no marshalling, no runtime overhead, no fighting the borrow checker.
 template: splash
 hero:
-  tagline: Native speed. Familiar syntax. Built for games.
+  tagline: Native speed. Familiar syntax. Scripting for games.
   actions:
     - text: Get Started
       link: /writ/guides/getting-started/
@@ -20,6 +20,27 @@ hero:
 
 import { Card, CardGrid, Code } from '@astrojs/starlight/components';
 
+<CardGrid>
+  <Card title="Statically typed" icon="approve-check">
+    Catch mistakes at compile time, not during a play session. No runtime type errors.
+  </Card>
+  <Card title="Clean Rust interop" icon="puzzle">
+    Derive `WritObject` on any Rust struct. Pass it straight into scripts — no wrappers, no copying.
+  </Card>
+  <Card title="Sandboxed by default" icon="shield">
+    Scripts get zero access until you register it. File I/O, networking, syscalls — all opt-in.
+  </Card>
+  <Card title="Hot reload" icon="rocket">
+    Swap script bytecode mid-session without restarting. VM state and live coroutines survive.
+  </Card>
+  <Card title="Coroutines" icon="random">
+    `yield` suspends a function and resumes it next tick — no threads, no callbacks, no state machines.
+  </Card>
+  <Card title="Familiar syntax" icon="pencil">
+    Classes, structs, traits, enums, and `when` — if you know C# or GDScript, you'll feel at home in minutes.
+  </Card>
+</CardGrid>
+
 ## What Writ looks like
 
 ```writ
@@ -28,7 +49,7 @@ struct Vec2 {
     y: float
 
     func length() -> float {
-        return (x * x + y * y).sqrt()
+        return sqrt(x * x + y * y)
     }
 }
 
@@ -54,29 +75,8 @@ class Player extends Entity {
 ```rust
 use writ::Writ;
 
-let mut vm = Writ::new();
-vm.set_tick_source(|| engine.delta_time()); // coroutines just work
-vm.load("scripts/game.writ").unwrap();
-vm.call("onStart", &[]).unwrap();
+let mut vm = Writ::new();                           // create a sandboxed VM
+vm.set_tick_source(|| engine.delta_time());         // drive coroutine timers from your engine
+vm.load("scripts/game.writ").unwrap();              // compile and load a script
+vm.call("onStart", &[]).unwrap();                   // call any top-level function by name
 ```
-
-<CardGrid>
-  <Card title="Statically typed" icon="approve-check">
-    All types checked before execution. No runtime surprises, no dynamic dispatch overhead.
-  </Card>
-  <Card title="Sandboxed by default" icon="shield">
-    Scripts start with zero access. You register exactly what they can call — nothing more.
-  </Card>
-  <Card title="Hot reload" icon="rocket">
-    Swap function bytecode at runtime without restarting. VM state is preserved across reloads.
-  </Card>
-  <Card title="Coroutines" icon="random">
-    GDScript-style `yield` with structured lifetimes. Coroutines cancel automatically when their owner is destroyed.
-  </Card>
-  <Card title="Clean Rust interop" icon="puzzle">
-    Implement `WritObject` on any Rust struct. No wrappers, no marshalling — your types map directly.
-  </Card>
-  <Card title="Full standard library" icon="list-format">
-    Math, strings, arrays, dicts, regex, noise, tweening, timers — all disableable per instance.
-  </Card>
-</CardGrid>

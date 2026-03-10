@@ -102,6 +102,34 @@ btn.press()  // "Start was pressed!"
 
 ---
 
+## Event bus
+
+```writ
+class EventBus {
+    private handlers: Dictionary<string, Array<() => void>> = {}
+
+    public func subscribe(event: string, handler: () => void) {
+        if handlers[event] == null { handlers[event] = [] }
+        handlers[event].push(handler)
+    }
+
+    public func emit(event: string) {
+        for handler in handlers[event] ?? [] {
+            handler()
+        }
+    }
+}
+
+var bus = EventBus()
+
+bus.subscribe("playerDied", () => { showDeathScreen() })
+bus.subscribe("playerDied", () => { stopMusic() })
+
+bus.emit("playerDied")  // both handlers run in order
+```
+
+---
+
 ## Optional chaining
 
 ```writ

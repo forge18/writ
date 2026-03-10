@@ -109,7 +109,7 @@ while health > 0 {
 }
 ```
 
-### for over a collection
+### For over a collection
 
 ```writ
 for item in inventory {
@@ -117,7 +117,7 @@ for item in inventory {
 }
 ```
 
-### for over a range
+### For over a range
 
 ```writ
 for i in 0..10 {
