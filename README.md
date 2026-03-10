@@ -1,29 +1,71 @@
 # Writ
 
-Native speed. Familiar syntax. Built for games.
+[![CI](https://github.com/forge18/writ/actions/workflows/ci.yml/badge.svg)](https://github.com/forge18/writ/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/forge18/writ/branch/main/graph/badge.svg)](https://codecov.io/gh/forge18/writ)
+[![alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/forge18/writ)
 
-Writ is a statically typed scripting language designed for game developers. It embeds directly into Rust with near-zero interop cost — no marshalling, no runtime overhead, no fighting the borrow checker. Familiar to anyone who has written GDScript, C#, or TypeScript. Fast enough to run in a real-time game loop. Write game logic in Writ. Let Rust handle the rest.
+Native speed. Familiar syntax. Scripting for games.
+
+Writ is a statically typed scripting language designed for game developers. It embeds directly into Rust with near-zero interop cost — no marshalling, no runtime overhead, no fighting the borrow checker. Familiar to anyone who has written GDScript or C#. Fast enough to run in a real-time game loop. Write game logic in Writ. Let Rust handle the rest.
+
+---
+
+## What it looks like
 
 ```writ
-func greet(name: string) -> string {
-    return "Hello, " .. name .. "!"
+struct Vec2 {
+    x: float
+    y: float
+
+    func length() -> float {
+        return sqrt(x * x + y * y)
+    }
 }
+
+class Player extends Entity {
+    public health: float = 100.0
+        set(value) { field = clamp(value, 0.0, 100.0) }
+
+    public func takeDamage(amount: float) {
+        health -= amount
+        if health <= 0 { die() }
+    }
+
+    func respawn() {
+        yield seconds(3.0)   // wait without blocking the host
+        health = 100.0
+        setActive(true)
+    }
+}
+```
+
+---
+
+## Embedding
+
+```rust
+use writ::Writ;
+
+let mut vm = Writ::new();                           // create a sandboxed VM
+vm.set_tick_source(|| engine.delta_time());         // drive coroutine timers from your engine
+vm.load("scripts/game.writ").unwrap();              // compile and load a script
+vm.call("onStart", &[]).unwrap();                   // call any top-level function by name
 ```
 
 ---
 
 ## Features
 
-- **Static typing** — all types checked before execution, no runtime surprises
-- **Clean Rust interop** — host types map directly to Rust memory; no wrapper overhead
-- **Hot reload** — swap function bytecode at runtime without losing VM state
-- **Capability-based sandboxing** — VM starts with zero access; you register exactly what scripts can call
-- **Coroutines** — GDScript-style `yield` with structured lifetime management
-- **Standard library** — math, string, array, dict, regex, noise, tweening, and more
+- **Statically typed** — catch mistakes at compile time, not during a play session
+- **Clean Rust interop** — derive `WritObject` on any Rust struct; no wrappers, no copying
+- **Sandboxed by default** — scripts start with zero access; register exactly what they can call
+- **Hot reload** — swap bytecode mid-session without restarting; VM state and coroutines survive
+- **Coroutines** — `yield` suspends a function and resumes it next tick; no threads, no callbacks
+- **Standard library** — math, strings, collections, regex, noise, tweening, timers; each module toggleable per VM
 
 ---
 
-## Installation
+## Quick Start
 
 Add to your `Cargo.toml`:
 
@@ -38,10 +80,6 @@ Or from git:
 [dependencies]
 writ = { git = "https://github.com/forge18/writ" }
 ```
-
----
-
-## Quick Start
 
 ```rust
 use writ::Writ;
@@ -59,7 +97,7 @@ fn main() {
         vec![writ::Type::Float, writ::Type::Float],
         writ::Type::Float,
         writ::fn2(|hp: f64, amount: f64| -> Result<f64, String> {
-            Ok((hp - amount).max(0.0))
+            Ok(max(hp - amount, 0.0))
         }),
     );
 
@@ -72,7 +110,125 @@ fn main() {
 
 ---
 
-## Embedding
+## Language
+
+### Variables
+
+```writ
+const MAX_HEALTH = 100.0   // compile-time constant
+let name = "Hero"          // immutable at runtime
+var health = 100.0         // mutable
+```
+
+### Functions
+
+```writ
+func takeDamage(amount: float) -> float {
+    return max(health - amount, 0.0)
+}
+
+// Lambda
+let double = (x: int) => x * 2
+```
+
+### Structs
+
+Value types, copied on assignment.
+
+```writ
+struct Vec2 {
+    x: float
+    y: float
+
+    func length() -> float {
+        return sqrt(x * x + y * y)
+    }
+}
+
+let v = Vec2(x: 3.0, y: 4.0)
+print(v.length()) // 5.0
+```
+
+### Classes
+
+Reference types with single inheritance and multiple traits.
+
+```writ
+class Entity {
+    public id: int
+    public name: string
+}
+
+class Player extends Entity {
+    public health: float = 100.0
+        set(value) { field = clamp(value, 0.0, 100.0) }
+
+    public func takeDamage(amount: float) {
+        health -= amount
+    }
+}
+```
+
+### Control flow
+
+```writ
+// if / else
+if health <= 0 {
+    die()
+} else if health < 20 {
+    playLowHealthSound()
+}
+
+// for loop
+for item in inventory {
+    print(item.name)
+}
+
+// while
+while health > 0 {
+    tick()
+}
+
+// Pattern matching
+when result {
+    is Success(value) => print(value)
+    is Error(msg)     => print("Error: " .. msg)
+}
+```
+
+### Optionals and Results
+
+```writ
+let target: Optional<Player>  // may be absent
+
+// Safe access
+let hp = target?.health ?? 0.0
+
+// Result propagation
+func load(path: string) -> Result<Data> {
+    let raw = readFile(path)?   // propagates error
+    return Success(parse(raw))
+}
+```
+
+### Coroutines
+
+```writ
+func countdown(from: int) {
+    var n = from
+    while n > 0 {
+        print(n)
+        yield seconds(1.0)
+        n -= 1
+    }
+}
+
+start countdown(from: 3)  // non-blocking, runs across ticks
+```
+
+---
+
+## Embedding (detailed)
 
 ### Registering host types
 
@@ -159,124 +315,6 @@ vm.set_instruction_limit(1_000_000);
 // Block entire stdlib modules
 vm.disable_module("io");
 vm.disable_module("noise");
-```
-
----
-
-## Language
-
-### Variables
-
-```writ
-const MAX_HEALTH = 100.0   // compile-time constant
-let name = "Hero"          // immutable at runtime
-var health = 100.0         // mutable
-```
-
-### Functions
-
-```writ
-func takeDamage(amount: float) -> float {
-    return (health - amount).max(0.0)
-}
-
-// Lambda
-let double = (x: int) => x * 2
-```
-
-### Structs
-
-Value types, copied on assignment.
-
-```writ
-struct Vec2 {
-    x: float
-    y: float
-
-    func length() -> float {
-        return (x * x + y * y).sqrt()
-    }
-}
-
-let v = Vec2(x: 3.0, y: 4.0)
-print(v.length()) // 5.0
-```
-
-### Classes
-
-Reference types with single inheritance and multiple traits.
-
-```writ
-class Entity {
-    public id: int
-    public name: string
-}
-
-class Player extends Entity {
-    public health: float = 100.0
-        set(value) { field = clamp(value, 0.0, 100.0) }
-
-    public func takeDamage(amount: float) {
-        health -= amount
-    }
-}
-```
-
-### Control flow
-
-```writ
-// if / else
-if health <= 0 {
-    die()
-} else if health < 20 {
-    playLowHealthSound()
-}
-
-// for loop
-for item in inventory {
-    print(item.name)
-}
-
-// while
-while health > 0 {
-    tick()
-}
-
-// Pattern matching
-when result {
-    is Success(value) => print(value)
-    is Error(msg)     => print("Error: " .. msg)
-}
-```
-
-### Optionals and Results
-
-```writ
-let target: Optional<Player>  // may be absent
-
-// Safe access
-let hp = target?.health ?? 0.0
-
-// Result propagation
-func load(path: string) -> Result<Data> {
-    let raw = readFile(path)?   // propagates error
-    return Success(parse(raw))
-}
-```
-
-### Coroutines
-
-```writ
-func countdown(from: int) {
-    var n = from
-    while n > 0 {
-        print(n)
-        yield seconds(1.0)
-        n -= 1
-    }
-}
-
-start countdown(from: 3)  // non-blocking, runs across ticks
 ```
 
 ---
