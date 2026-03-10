@@ -15,6 +15,19 @@ if health <= 0 {
 }
 ```
 
+### Type checking with `is`
+
+Use `expr is TypeName` as a boolean condition:
+
+```writ
+if entity is Player {
+    entity.takeDamage(10.0)
+}
+
+let isEnemy = obj is Enemy
+let either = a is Player || a is NPC
+```
+
 ---
 
 ## Ternary

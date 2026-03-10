@@ -106,6 +106,13 @@ pub enum ExprKind {
         target_type: TypeExpr,
     },
 
+    /// Type check: `expr is Type` — evaluates to `bool`.
+    /// Type may be simple (`Player`) or namespace-qualified (`enemy::Enemy`).
+    TypeCheck {
+        expr: Box<Expr>,
+        target_type: TypeExpr,
+    },
+
     /// String interpolation: sequence of literal and expression segments.
     StringInterpolation(Vec<InterpolationSegment>),
 

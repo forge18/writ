@@ -484,6 +484,7 @@ func attack(target: enemy::Enemy) {
 | `..`     | String concatenation |
 | `...`    | Spread               |
 | `as`     | Type casting         |
+| `is`     | Type check → `bool`  |
 | `? :`    | Ternary              |
 
 ### Ranges
@@ -525,11 +526,29 @@ The method is dispatched at runtime. If no matching method is found, a runtime e
 
 ---
 
-## 16. Type Casting
+## 16. Type Casting and Type Checking
+
+### Casting (`as`)
 
 ```writ
 let x = someValue as float
 let n = health as int
+```
+
+### Type checking (`is`)
+
+`expr is TypeName` evaluates to `bool`. Valid in any expression position, including `if` conditions:
+
+```writ
+if entity is Player {
+    entity.takeDamage(10.0)
+}
+
+let isEnemy = obj is Enemy
+let either = a is Player || a is NPC
+
+// Namespace-qualified types are supported
+let check = obj is enemy::Enemy
 ```
 
 ---

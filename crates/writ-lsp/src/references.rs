@@ -280,7 +280,9 @@ fn collect_from_expr(
                 }
             }
         }
-        ExprKind::ErrorPropagate(inner) | ExprKind::Cast { expr: inner, .. } => {
+        ExprKind::ErrorPropagate(inner)
+        | ExprKind::Cast { expr: inner, .. }
+        | ExprKind::TypeCheck { expr: inner, .. } => {
             collect_from_expr(inner, name, uri, locations);
         }
         ExprKind::StringInterpolation(segments) => {

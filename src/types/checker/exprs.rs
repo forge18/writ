@@ -121,6 +121,15 @@ impl TypeChecker {
                 }
             }
 
+            ExprKind::TypeCheck {
+                expr: inner,
+                target_type,
+            } => {
+                self.infer_expr(inner)?;
+                self.resolve_type_expr(target_type, &expr.span)?;
+                Ok(Type::Bool)
+            }
+
             ExprKind::Call { callee, args } => self.infer_call(callee, args, &expr.span),
 
             ExprKind::Lambda { params, body } => self.infer_lambda(params, body, &expr.span),

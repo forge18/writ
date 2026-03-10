@@ -42,7 +42,7 @@ fn infix_precedence(kind: &TokenKind) -> Option<Precedence> {
         TokenKind::QuestionQuestion => Some(Precedence::NullCoalesce),
         TokenKind::Plus | TokenKind::Minus => Some(Precedence::Addition),
         TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Some(Precedence::Multiplication),
-        TokenKind::As => Some(Precedence::Cast),
+        TokenKind::As | TokenKind::Is => Some(Precedence::Cast),
         TokenKind::Dot
         | TokenKind::QuestionDot
         | TokenKind::LeftParen
@@ -307,6 +307,34 @@ impl Parser {
             };
 
             if prec <= min_prec {
+                break;
+            }
+
+            left = self.parse_infix(left, prec)?;
+        }
+
+        Ok(left)
+    }
+
+    /// Like `parse_expr` but does not cross newline boundaries.
+    /// Used for single-expression `when` arm bodies to prevent the Pratt loop
+    /// from consuming the `is` keyword of the next arm as an infix type-check.
+    fn parse_expr_line(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_prefix()?;
+
+        loop {
+            if matches!(
+                self.peek(),
+                TokenKind::Newline | TokenKind::Semicolon | TokenKind::Eof | TokenKind::RightBrace
+            ) {
+                break;
+            }
+
+            let Some(prec) = infix_precedence(self.peek()) else {
+                break;
+            };
+
+            if prec <= Precedence::Lowest {
                 break;
             }
 
@@ -609,6 +637,18 @@ impl Parser {
                 let target_type = self.parse_type_expr()?;
                 Ok(Expr {
                     kind: ExprKind::Cast {
+                        expr: Box::new(left),
+                        target_type,
+                    },
+                    span,
+                })
+            }
+
+            // Type check: expr is Type
+            TokenKind::Is => {
+                let target_type = self.parse_type_expr()?;
+                Ok(Expr {
+                    kind: ExprKind::TypeCheck {
                         expr: Box::new(left),
                         target_type,
                     },
@@ -1251,7 +1291,7 @@ impl Parser {
         let body = if self.peek() == &TokenKind::LeftBrace {
             WhenBody::Block(self.parse_block()?)
         } else {
-            WhenBody::Expr(self.parse_expr()?)
+            WhenBody::Expr(self.parse_expr_line()?)
         };
 
         self.consume_stmt_terminator();
@@ -2162,6 +2202,76 @@ mod tests {
             );
         } else {
             panic!("expected func decl");
+        }
+    }
+
+    #[test]
+    fn parse_is_expression_simple() {
+        let tokens = Lexer::new("let x = obj is Player").tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program().unwrap();
+        if let StmtKind::Let { initializer, .. } = &stmts[0].kind {
+            assert!(matches!(
+                &initializer.kind,
+                ExprKind::TypeCheck {
+                    target_type: TypeExpr::Simple(name),
+                    ..
+                } if name == "Player"
+            ));
+        } else {
+            panic!("expected let stmt");
+        }
+    }
+
+    #[test]
+    fn parse_is_expression_qualified() {
+        let tokens = Lexer::new("let x = obj is enemy::Enemy")
+            .tokenize()
+            .unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program().unwrap();
+        if let StmtKind::Let { initializer, .. } = &stmts[0].kind {
+            assert!(matches!(
+                &initializer.kind,
+                ExprKind::TypeCheck {
+                    target_type: TypeExpr::Qualified { namespace, name },
+                    ..
+                } if namespace == "enemy" && name == "Enemy"
+            ));
+        } else {
+            panic!("expected let stmt");
+        }
+    }
+
+    #[test]
+    fn when_type_match_two_arms_no_infix_consumed() {
+        let src = "when result {\n    is Success(v) => print(v)\n    is Error(e) => print(e)\n}";
+        let tokens = Lexer::new(src).tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program().unwrap();
+        if let StmtKind::When { arms, .. } = &stmts[0].kind {
+            assert_eq!(arms.len(), 2);
+            // Second arm must be a TypeMatch, not consumed by first arm's body expression
+            assert!(
+                matches!(arms[1].pattern, WhenPattern::TypeMatch { .. }),
+                "second arm pattern was {:?}, expected TypeMatch",
+                arms[1].pattern
+            );
+        } else {
+            panic!("expected when stmt");
+        }
+    }
+
+    #[test]
+    fn type_check_expr_is_still_valid() {
+        // `obj is Player` must still parse as a TypeCheck expression (not broken by the fix)
+        let tokens = Lexer::new("let x = obj is Player").tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse_program().unwrap();
+        if let StmtKind::Let { initializer, .. } = &stmts[0].kind {
+            assert!(matches!(initializer.kind, ExprKind::TypeCheck { .. }));
+        } else {
+            panic!("expected let stmt");
         }
     }
 }
