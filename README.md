@@ -4,6 +4,8 @@
 [![codecov](https://codecov.io/gh/forge18/writ/branch/main/graph/badge.svg)](https://codecov.io/gh/forge18/writ)
 [![alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/forge18/writ)
 
+> **⚠ Alpha:** Writ is not production-ready. APIs will change, features are incomplete, and there are known bugs. Use at your own risk.
+
 Native speed. Familiar syntax. Scripting for games.
 
 Writ is a statically typed scripting language designed for game developers. It embeds directly into Rust with near-zero interop cost — no marshalling, no runtime overhead, no fighting the borrow checker. Familiar to anyone who has written GDScript or C#. Fast enough to run in a real-time game loop. Write game logic in Writ. Let Rust handle the rest.
