@@ -3,6 +3,7 @@
 [![CI](https://github.com/forge18/writ/actions/workflows/ci.yml/badge.svg)](https://github.com/forge18/writ/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/forge18/writ/branch/main/graph/badge.svg)](https://codecov.io/gh/forge18/writ)
 [![alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/forge18/writ)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 > **⚠ Alpha:** Writ is not production-ready. APIs will change, features are incomplete, and there are known bugs. Use at your own risk.
 
