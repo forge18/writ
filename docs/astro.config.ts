@@ -60,6 +60,7 @@ export default defineConfig({
         {
           label: 'Advanced',
           items: [
+            { label: 'IDE Extensions', slug: 'advanced/ide-extensions' },
             { label: 'Embedding in Rust', slug: 'advanced/embedding' },
             { label: 'Runtime & Memory', slug: 'advanced/runtime' },
             { label: 'Sandboxing & Security', slug: 'advanced/sandboxing' },
