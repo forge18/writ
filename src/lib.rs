@@ -176,11 +176,11 @@ impl Writ {
                 compiler.compile_stmt(stmt)?;
             }
         }
-        let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
+        let (chunk, functions, struct_metas, class_metas, enum_metas) = compiler.into_parts();
 
         Ok(self
             .vm
-            .execute_program(&chunk, &functions, &struct_metas, &class_metas)?)
+            .execute_program(&chunk, &functions, &struct_metas, &class_metas, &enum_metas)?)
     }
 
     /// Compiles and loads a file's functions into the VM without clearing
@@ -221,10 +221,10 @@ impl Writ {
                 compiler.compile_stmt(stmt)?;
             }
         }
-        let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
+        let (chunk, functions, struct_metas, class_metas, enum_metas) = compiler.into_parts();
 
         self.vm
-            .load_module(&chunk, &functions, &struct_metas, &class_metas)?;
+            .load_module(&chunk, &functions, &struct_metas, &class_metas, &enum_metas)?;
         Ok(())
     }
 
@@ -429,10 +429,17 @@ impl Writ {
                 compiler.compile_stmt(stmt)?;
             }
         }
-        let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
+        let (chunk, functions, struct_metas, class_metas, enum_metas) = compiler.into_parts();
 
         self.vm
-            .reload_compiled(file, &chunk, &functions, &struct_metas, &class_metas)
+            .reload_compiled(
+                file,
+                &chunk,
+                &functions,
+                &struct_metas,
+                &class_metas,
+                &enum_metas,
+            )
             .map_err(WritError::from)
     }
 

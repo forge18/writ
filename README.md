@@ -77,6 +77,12 @@ writ = { git = "https://github.com/forge18/writ" }
 
 ---
 
+## Editor Support
+
+Extensions for **[VS Code](extensions/vscode-writ)**, **[Vim / Neovim](extensions/vim-writ)**, and **[JetBrains IDEs](extensions/jetbrains-writ)** — syntax highlighting, LSP diagnostics & completions, and hot reload.
+
+---
+
 ## Documentation
 
 **[forge18.github.io/writ](https://forge18.github.io/writ)** — language reference, embedding guide, examples, and stdlib docs.

@@ -1,0 +1,20 @@
+{
+  "name": "writ",
+  "contributes": {
+    "languages": [
+      {
+        "id": "writ",
+        "aliases": ["Writ"],
+        "extensions": [".writ"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "writ",
+        "scopeName": "source.writ",
+        "path": "./writ.tmLanguage.json"
+      }
+    ]
+  }
+}

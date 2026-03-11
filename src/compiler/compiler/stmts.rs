@@ -145,10 +145,10 @@ impl Compiler {
                 // Export is a visibility marker — compile the inner declaration.
                 self.compile_stmt(inner)?;
             }
-            StmtKind::Trait(_)
-            | StmtKind::Enum(_)
-            | StmtKind::Import(_)
-            | StmtKind::WildcardImport(_) => {
+            StmtKind::Enum(decl) => {
+                self.compile_enum_decl(decl, &stmt.span)?;
+            }
+            StmtKind::Trait(_) | StmtKind::Import(_) | StmtKind::WildcardImport(_) => {
                 // Type-checker-only constructs; no bytecode emitted.
             }
         }

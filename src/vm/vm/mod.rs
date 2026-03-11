@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::compiler::opcode::{INSTR_WORDS, op};
-use crate::compiler::{Chunk, ClassMeta, CompiledFunction, StructMeta, string_hash};
+use crate::compiler::{Chunk, ClassMeta, CompiledFunction, EnumMeta, StructMeta, string_hash};
 
 use super::coroutine::{Coroutine, CoroutineId, WaitCondition};
 #[cfg(feature = "debug-hooks")]
@@ -495,7 +495,8 @@ impl VM {
         for stmt in &stmts {
             compiler.compile_stmt(stmt).map_err(|e| format!("{e}"))?;
         }
-        let (_new_main, new_functions, new_struct_metas, new_class_metas) = compiler.into_parts();
+        let (_new_main, new_functions, new_struct_metas, new_class_metas, new_enum_metas) =
+            compiler.into_parts();
 
         for meta in new_struct_metas {
             self.struct_metas.insert(meta.name.clone(), meta);
@@ -504,6 +505,8 @@ impl VM {
         for meta in new_class_metas {
             self.class_metas.insert(meta.name.clone(), meta);
         }
+
+        self.build_enum_globals(&new_enum_metas);
 
         for mut new_func in new_functions {
             new_func.chunk.set_file(file);
@@ -544,6 +547,7 @@ impl VM {
         functions: &[CompiledFunction],
         struct_metas: &[StructMeta],
         class_metas: &[ClassMeta],
+        enum_metas: &[EnumMeta],
     ) -> Result<(), RuntimeError> {
         for meta in struct_metas {
             self.struct_metas.insert(meta.name.clone(), meta.clone());
@@ -552,6 +556,8 @@ impl VM {
         for meta in class_metas {
             self.class_metas.insert(meta.name.clone(), meta.clone());
         }
+
+        self.build_enum_globals(enum_metas);
 
         for mut new_func in functions.iter().cloned() {
             new_func.chunk.set_file(file);
@@ -588,6 +594,7 @@ impl VM {
         functions: &[CompiledFunction],
         struct_metas: &[StructMeta],
         class_metas: &[ClassMeta],
+        enum_metas: &[EnumMeta],
     ) -> Result<Value, RuntimeError> {
         self.auto_tick()?;
 
@@ -622,6 +629,7 @@ impl VM {
         }
 
         self.build_layouts();
+        self.build_enum_globals(enum_metas);
 
         self.stack.clear();
         self.frames.clear();
@@ -757,7 +765,7 @@ impl VM {
 
     /// Executes a chunk as the top-level script (no functions).
     pub fn execute(&mut self, chunk: &Chunk) -> Result<Value, RuntimeError> {
-        self.execute_program(chunk, &[], &[], &[])
+        self.execute_program(chunk, &[], &[], &[], &[])
     }
 
     /// Executes a compiled program (main chunk + function table).
@@ -767,6 +775,7 @@ impl VM {
         functions: &[CompiledFunction],
         struct_metas: &[StructMeta],
         class_metas: &[ClassMeta],
+        enum_metas: &[EnumMeta],
     ) -> Result<Value, RuntimeError> {
         // Reset per-execution state (preserves registrations and coroutines)
         self.stack.clear();
@@ -804,6 +813,7 @@ impl VM {
         self.intern_chunk_strings();
         self.build_field_names();
         self.build_layouts();
+        self.build_enum_globals(enum_metas);
         self.rebuild_ip_cache();
 
         // The compiler doesn't track max_registers for the main chunk (it's always the script body).
@@ -868,6 +878,72 @@ impl VM {
                 meta.public_methods.clone(),
             ));
             self.class_layouts.insert(name.clone(), layout);
+        }
+    }
+
+    /// Builds enum globals from enum metadata.
+    ///
+    /// Each enum becomes a global `WritStruct` namespace whose fields are the
+    /// variant instances. Each variant is itself a `WritStruct` with `__variant`
+    /// (name), `__ordinal` (index), and any declared enum fields.
+    fn build_enum_globals(&mut self, enum_metas: &[EnumMeta]) {
+        use super::field_layout::FieldLayout;
+        use super::writ_struct::WritStruct;
+
+        for meta in enum_metas {
+            // Build the variant layout: [__variant, __ordinal, ...field_names]
+            let mut variant_field_names = vec!["__variant".to_string(), "__ordinal".to_string()];
+            variant_field_names.extend(meta.field_names.clone());
+            let variant_public: HashSet<String> = variant_field_names.iter().cloned().collect();
+            let variant_layout = Rc::new(FieldLayout::new(
+                meta.name.clone(), // type_name = enum name (so typeof() works)
+                variant_field_names,
+                variant_public,
+                HashSet::new(), // methods resolved via function_map lookup
+            ));
+
+            // Build each variant instance
+            let mut namespace_variant_values: Vec<Value> = Vec::new();
+            for (i, variant_name) in meta.variant_names.iter().enumerate() {
+                let mut fields: Vec<Value> = vec![
+                    Value::Str(Rc::from(variant_name.as_str())), // __variant
+                    Value::I32(i as i32),                        // __ordinal
+                ];
+                // If enum has fields, the variant value initializes the first field
+                if !meta.field_names.is_empty() {
+                    let v = meta.variant_values[i];
+                    let val = if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
+                        Value::I32(v as i32)
+                    } else {
+                        Value::I64(v)
+                    };
+                    fields.push(val);
+                    // Remaining fields default to Null
+                    for _ in 1..meta.field_names.len() {
+                        fields.push(Value::Null);
+                    }
+                }
+                let variant_struct = WritStruct {
+                    layout: variant_layout.clone(),
+                    fields,
+                };
+                namespace_variant_values.push(Value::Struct(Box::new(variant_struct)));
+            }
+
+            // Build the namespace struct: Direction.North, Direction.South, etc.
+            let ns_field_names = meta.variant_names.clone();
+            let ns_public: HashSet<String> = ns_field_names.iter().cloned().collect();
+            let ns_layout = Rc::new(FieldLayout::new(
+                meta.name.clone(),
+                ns_field_names,
+                ns_public,
+                HashSet::new(),
+            ));
+            let ns_struct = WritStruct {
+                layout: ns_layout,
+                fields: namespace_variant_values,
+            };
+            self.register_global(&meta.name, Value::Struct(Box::new(ns_struct)));
         }
     }
 

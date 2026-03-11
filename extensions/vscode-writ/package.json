@@ -46,10 +46,14 @@
       {
         "type": "writ",
         "label": "Writ Debug",
-        "languages": ["writ"],
+        "languages": [
+          "writ"
+        ],
         "configurationAttributes": {
           "launch": {
-            "required": ["program"],
+            "required": [
+              "program"
+            ],
             "properties": {
               "program": {
                 "type": "string",
@@ -108,7 +112,11 @@
         "writ.hotReload.mechanism": {
           "type": "string",
           "default": "socket",
-          "enum": ["socket", "pipe", "file"],
+          "enum": [
+            "socket",
+            "pipe",
+            "file"
+          ],
           "enumDescriptions": [
             "Send reload requests via TCP socket",
             "Send reload requests via named pipe",
@@ -131,19 +139,17 @@
     "build-lsp": "bash scripts/build-lsp.sh",
     "watch": "node esbuild.js --watch",
     "lint": "tsc --noEmit",
-    "test": "node out/test/suite/index.js",
+    "test": "vitest run",
     "prepackage": "npm run build-lsp && npm run build",
     "package": "vsce package"
   },
   "devDependencies": {
-    "@types/mocha": "^10.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
-    "@vscode/test-electron": "^2.3.0",
     "@vscode/vsce": "^2.22.0",
     "esbuild": "^0.19.0",
-    "mocha": "^10.2.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.18"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

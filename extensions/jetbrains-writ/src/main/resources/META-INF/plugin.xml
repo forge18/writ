@@ -2,9 +2,11 @@
     <id>com.writ.plugin</id>
     <name>Writ</name>
     <vendor>writ-lang</vendor>
-    <description>Language support for the Writ scripting language — syntax highlighting, LSP, debugging, and hot reload.</description>
+    <description>Language support for the Writ scripting language — syntax highlighting via TextMate grammar, LSP integration for diagnostics, completions, and navigation.</description>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lsp</depends>
+    <depends>org.jetbrains.plugins.textmate</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- File type registration -->
@@ -13,19 +15,20 @@
             implementationClass="com.writ.plugin.WritFileType"
             fieldName="INSTANCE"
             language="Writ"
-            extensions="wrt"/>
+            extensions="writ"/>
 
-        <!-- Language registration -->
-        <lang.parserDefinition
+        <!-- Comment toggling (Cmd+/ / Ctrl+/) -->
+        <lang.commenter
             language="Writ"
-            implementationClass="com.writ.plugin.WritParserDefinition"/>
+            implementationClass="com.writ.plugin.WritCommenter"/>
 
-        <!-- Syntax highlighting -->
-        <lang.syntaxHighlighterFactory
-            language="Writ"
-            implementationClass="com.writ.plugin.WritSyntaxHighlighterFactory"/>
+        <!-- LSP support via built-in IntelliJ LSP API (2025.3+) -->
+        <platform.lsp.serverSupportProvider
+            implementation="com.writ.plugin.WritLspServerSupportProvider"/>
+    </extensions>
 
-        <!-- LSP support (requires LSP4IJ or built-in LSP in 2024.2+) -->
-        <!-- TODO: Wire up writ-lsp via LSP4IJ or IntelliJ's built-in LSP support -->
+    <extensions defaultExtensionNs="com.intellij.textmate">
+        <!-- TextMate bundle for syntax highlighting -->
+        <bundleProvider implementation="com.writ.plugin.WritTextMateBundleProvider"/>
     </extensions>
 </idea-plugin>

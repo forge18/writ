@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use writ::compiler::{Chunk, ClassMeta, CompiledFunction, Compiler, StructMeta};
+use writ::compiler::{Chunk, ClassMeta, CompiledFunction, Compiler, EnumMeta, StructMeta};
 use writ::lexer::Lexer;
 use writ::parser::Parser;
 use writ::vm::VM;
@@ -181,6 +181,7 @@ fn compile(
     Vec<CompiledFunction>,
     Vec<StructMeta>,
     Vec<ClassMeta>,
+    Vec<EnumMeta>,
 ) {
     let tokens = Lexer::new(source).tokenize().unwrap();
     let stmts = Parser::new(tokens).parse_program().unwrap();
@@ -194,73 +195,97 @@ fn compile(
 fn bench_vm(c: &mut Criterion) {
     let mut group = c.benchmark_group("vm");
 
-    let (fib_chunk, fib_fns, fib_structs, fib_classes) = compile(FIBONACCI);
+    let (fib_chunk, fib_fns, fib_structs, fib_classes, fib_enums) = compile(FIBONACCI);
     group.bench_function("fibonacci_28", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&fib_chunk, &fib_fns, &fib_structs, &fib_classes)
+            vm.execute_program(&fib_chunk, &fib_fns, &fib_structs, &fib_classes, &fib_enums)
                 .unwrap()
         });
     });
 
-    let (bt_chunk, bt_fns, bt_structs, bt_classes) = compile(BINARY_TREES);
+    let (bt_chunk, bt_fns, bt_structs, bt_classes, bt_enums) = compile(BINARY_TREES);
     group.bench_function("binary_trees", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&bt_chunk, &bt_fns, &bt_structs, &bt_classes)
+            vm.execute_program(&bt_chunk, &bt_fns, &bt_structs, &bt_classes, &bt_enums)
                 .unwrap()
         });
     });
 
-    let (perm_chunk, perm_fns, perm_structs, perm_classes) = compile(PERMUTE);
+    let (perm_chunk, perm_fns, perm_structs, perm_classes, perm_enums) = compile(PERMUTE);
     group.bench_function("permute_9", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&perm_chunk, &perm_fns, &perm_structs, &perm_classes)
-                .unwrap()
+            vm.execute_program(
+                &perm_chunk,
+                &perm_fns,
+                &perm_structs,
+                &perm_classes,
+                &perm_enums,
+            )
+            .unwrap()
         });
     });
 
-    let (mb_chunk, mb_fns, mb_structs, mb_classes) = compile(MANDELBROT);
+    let (mb_chunk, mb_fns, mb_structs, mb_classes, mb_enums) = compile(MANDELBROT);
     group.bench_function("mandelbrot_100", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&mb_chunk, &mb_fns, &mb_structs, &mb_classes)
+            vm.execute_program(&mb_chunk, &mb_fns, &mb_structs, &mb_classes, &mb_enums)
                 .unwrap()
         });
     });
 
-    let (sieve_chunk, sieve_fns, sieve_structs, sieve_classes) = compile(SIEVE);
+    let (sieve_chunk, sieve_fns, sieve_structs, sieve_classes, sieve_enums) = compile(SIEVE);
     group.bench_function("sieve_5000", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&sieve_chunk, &sieve_fns, &sieve_structs, &sieve_classes)
-                .unwrap()
+            vm.execute_program(
+                &sieve_chunk,
+                &sieve_fns,
+                &sieve_structs,
+                &sieve_classes,
+                &sieve_enums,
+            )
+            .unwrap()
         });
     });
 
-    let (queens_chunk, queens_fns, queens_structs, queens_classes) = compile(QUEENS);
+    let (queens_chunk, queens_fns, queens_structs, queens_classes, queens_enums) = compile(QUEENS);
     group.bench_function("queens_8", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&queens_chunk, &queens_fns, &queens_structs, &queens_classes)
-                .unwrap()
+            vm.execute_program(
+                &queens_chunk,
+                &queens_fns,
+                &queens_structs,
+                &queens_classes,
+                &queens_enums,
+            )
+            .unwrap()
         });
     });
 
-    let (loop_chunk, loop_fns, loop_structs, loop_classes) = compile(LOOP_SUM);
+    let (loop_chunk, loop_fns, loop_structs, loop_classes, loop_enums) = compile(LOOP_SUM);
     group.bench_function("loop_sum", |b| {
         b.iter(|| {
             let mut vm = VM::new();
             writ::stdlib::register_all(&mut vm);
-            vm.execute_program(&loop_chunk, &loop_fns, &loop_structs, &loop_classes)
-                .unwrap()
+            vm.execute_program(
+                &loop_chunk,
+                &loop_fns,
+                &loop_structs,
+                &loop_classes,
+                &loop_enums,
+            )
+            .unwrap()
         });
     });
 

@@ -30,18 +30,20 @@ node_modules/
 # VSCode extension
 extensions/vscode-writ/node_modules/
 extensions/vscode-writ/out/
+extensions/vscode-writ/bin/
 *.vsix
 
 # JetBrains extension
 extensions/jetbrains-writ/build/
 extensions/jetbrains-writ/.gradle/
+extensions/jetbrains-writ/.intellijPlatform/
 
 # Docs (Astro Starlight)
 docs/dist/
 docs/.astro/
 
 # Testing / Coverage
-tarpaulin-report.html
+tarpaulin-report.*
 *.profraw
 lcov.info
 flamegraphs/

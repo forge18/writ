@@ -11,7 +11,7 @@ mod peephole;
 mod upvalue;
 
 pub use chunk::Chunk;
-pub use compiler::{ClassMeta, CompiledFunction, Compiler, StructMeta, string_hash};
+pub use compiler::{ClassMeta, CompiledFunction, Compiler, EnumMeta, StructMeta, string_hash};
 pub use error::CompileError;
 pub use instruction::{CmpOp, Instruction};
 pub use local::Local;

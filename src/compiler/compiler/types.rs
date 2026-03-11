@@ -420,4 +420,43 @@ impl Compiler {
         }
         Ok(base)
     }
+
+    // --- Enum compilation ---
+
+    pub(super) fn compile_enum_decl(
+        &mut self,
+        decl: &EnumDecl,
+        span: &Span,
+    ) -> Result<(), CompileError> {
+        let mut variant_names = Vec::new();
+        let mut variant_values = Vec::new();
+        for (i, variant) in decl.variants.iter().enumerate() {
+            variant_names.push(variant.name.clone());
+            let value = if let Some(val_expr) = &variant.value {
+                match &val_expr.kind {
+                    ExprKind::Literal(Literal::Int(v)) => *v,
+                    _ => i as i64,
+                }
+            } else {
+                i as i64
+            };
+            variant_values.push(value);
+        }
+
+        // Compile enum methods
+        for method in &decl.methods {
+            let qualified = format!("{}::{}", decl.name, method.name);
+            self.compile_method_body(&qualified, &method.params, &method.body, span, true)?;
+        }
+
+        let field_names: Vec<String> = decl.fields.iter().map(|f| f.name.clone()).collect();
+
+        self.enum_metas.push(super::EnumMeta {
+            name: decl.name.clone(),
+            variant_names,
+            variant_values,
+            field_names,
+        });
+        Ok(())
+    }
 }

@@ -151,8 +151,8 @@ impl ModuleResolver {
                 compiler.compile_stmt(stmt)?;
             }
         }
-        let (chunk, functions, struct_metas, class_metas) = compiler.into_parts();
-        vm.load_module(&chunk, &functions, &struct_metas, &class_metas)?;
+        let (chunk, functions, struct_metas, class_metas, enum_metas) = compiler.into_parts();
+        vm.load_module(&chunk, &functions, &struct_metas, &class_metas, &enum_metas)?;
 
         self.in_progress.remove(&file);
         self.loaded.insert(file);

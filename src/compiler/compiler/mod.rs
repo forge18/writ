@@ -2,9 +2,9 @@ pub(super) use crate::lexer::Span;
 pub(super) use std::collections::{HashMap, HashSet};
 
 pub(super) use crate::parser::{
-    ArrayElement, AssignOp, BinaryOp, CallArg, ClassDecl, DictElement, ElseBranch, Expr, ExprKind,
-    FuncDecl, InterpolationSegment, Literal, Stmt, StmtKind, StructDecl, UnaryOp, Visibility,
-    WhenBody, WhenPattern,
+    ArrayElement, AssignOp, BinaryOp, CallArg, ClassDecl, DictElement, ElseBranch, EnumDecl, Expr,
+    ExprKind, FuncDecl, InterpolationSegment, Literal, Stmt, StmtKind, StructDecl, UnaryOp,
+    Visibility, WhenBody, WhenPattern,
 };
 pub(super) use crate::types::TypedStmt;
 
@@ -74,6 +74,20 @@ pub struct ClassMeta {
     pub parent: Option<String>,
 }
 
+/// Metadata about an enum type, produced by the compiler for the VM.
+#[derive(Debug, Clone)]
+pub struct EnumMeta {
+    /// Enum type name (e.g., "Direction").
+    pub name: String,
+    /// Variant names in declaration order.
+    pub variant_names: Vec<String>,
+    /// Variant values — ordinal index if not explicitly specified, or the
+    /// explicit integer literal from `Variant(value)` syntax.
+    pub variant_values: Vec<i64>,
+    /// Enum field names (shared across all variants), e.g., `health: int`.
+    pub field_names: Vec<String>,
+}
+
 /// Tracks the context of a loop being compiled.
 pub(super) struct LoopContext {
     /// Instruction offset of the loop start (for continue).
@@ -139,6 +153,8 @@ pub struct Compiler {
     struct_metas: Vec<StructMeta>,
     /// Metadata for class types (consumed by the VM).
     class_metas: Vec<ClassMeta>,
+    /// Metadata for enum types (consumed by the VM).
+    enum_metas: Vec<EnumMeta>,
     /// Stack of parent function scopes for upvalue resolution.
     enclosing_scopes: Vec<EnclosingScope>,
     /// Upvalue descriptors being built for the current function.
@@ -177,6 +193,7 @@ impl Compiler {
             has_yield: false,
             struct_metas: Vec::new(),
             class_metas: Vec::new(),
+            enum_metas: Vec::new(),
             enclosing_scopes: Vec::new(),
             current_upvalues: Vec::new(),
             reg_types: Vec::new(),
@@ -200,7 +217,7 @@ impl Compiler {
     }
 
     /// Consumes the compiler and returns the main chunk, function table,
-    /// struct metadata, and class metadata.
+    /// struct metadata, class metadata, and enum metadata.
     ///
     /// Runs the peephole optimizer on all chunks before returning.
     pub fn into_parts(
@@ -210,6 +227,7 @@ impl Compiler {
         Vec<CompiledFunction>,
         Vec<StructMeta>,
         Vec<ClassMeta>,
+        Vec<EnumMeta>,
     ) {
         // Run peephole optimization on main chunk and all function chunks
         self.chunk.optimize(None);
@@ -221,6 +239,7 @@ impl Compiler {
             self.functions,
             self.struct_metas,
             self.class_metas,
+            self.enum_metas,
         )
     }
 
