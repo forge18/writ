@@ -102,6 +102,10 @@ impl WritObject for WritTransform2D {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
+    }
 }
 
 // --- Transform3D ---
@@ -192,6 +196,10 @@ impl WritObject for WritTransform3D {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
     }
 }
 

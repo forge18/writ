@@ -105,6 +105,10 @@ impl WritObject for WritVector2 {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
+    }
 }
 
 // --- Vector3 ---
@@ -213,6 +217,10 @@ impl WritObject for WritVector3 {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
+    }
 }
 
 // --- Vector4 ---
@@ -318,6 +326,10 @@ impl WritObject for WritVector4 {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
     }
 }
 

@@ -2,7 +2,7 @@ use crate::vm::{VM, Value, WritObject};
 
 use super::vector::extract_f64;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WritTimer {
     duration: f64,
     elapsed: f64,
@@ -93,6 +93,10 @@ impl WritObject for WritTimer {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
     }
 }
 

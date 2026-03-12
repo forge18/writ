@@ -163,7 +163,10 @@ impl Value {
     /// Returns an owned type name -- handles `Object` by borrowing the Rc.
     pub fn type_name_owned(&self) -> String {
         match self {
-            Value::Object(obj) => obj.borrow().type_name().to_string(),
+            Value::Object(obj) => match obj.try_borrow() {
+                Ok(o) => o.type_name().to_string(),
+                Err(_) => "object".to_string(),
+            },
             other => other.type_name().to_string(),
         }
     }
@@ -299,32 +302,36 @@ impl fmt::Display for Value {
             Value::Bool(v) => write!(f, "{v}"),
             Value::Str(v) => write!(f, "{v}"),
             Value::Null => write!(f, "null"),
-            Value::Array(v) => {
-                let items = v.borrow();
-                write!(f, "[")?;
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
+            Value::Array(v) => match v.try_borrow() {
+                Ok(items) => {
+                    write!(f, "[")?;
+                    for (i, item) in items.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{item}")?;
                     }
-                    write!(f, "{item}")?;
+                    write!(f, "]")
                 }
-                write!(f, "]")
-            }
-            Value::Dict(v) => {
-                let entries = v.borrow();
-                write!(f, "{{")?;
-                for (i, (k, val)) in entries.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
+                Err(_) => write!(f, "[<in use>]"),
+            },
+            Value::Dict(v) => match v.try_borrow() {
+                Ok(entries) => {
+                    write!(f, "{{")?;
+                    for (i, (k, val)) in entries.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{k}: {val}")?;
                     }
-                    write!(f, "{k}: {val}")?;
+                    write!(f, "}}")
                 }
-                write!(f, "}}")
-            }
-            Value::Object(obj) => {
-                let obj = obj.borrow();
-                write!(f, "<{}>", obj.type_name())
-            }
+                Err(_) => write!(f, "{{<in use>}}"),
+            },
+            Value::Object(obj) => match obj.try_borrow() {
+                Ok(o) => write!(f, "<{}>", o.type_name()),
+                Err(_) => write!(f, "<object in use>"),
+            },
             Value::Struct(s) => {
                 write!(f, "{}(", s.layout.type_name)?;
                 for (i, name) in s.layout.field_names.iter().enumerate() {

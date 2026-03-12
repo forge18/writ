@@ -116,6 +116,10 @@ impl WritObject for WritColor {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
+    }
 }
 
 // --- Helpers ---

@@ -50,6 +50,10 @@ impl WritObject for WritMatrix3 {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
+    }
 }
 
 // --- Matrix4 ---
@@ -93,6 +97,10 @@ impl WritObject for WritMatrix4 {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
     }
 }
 

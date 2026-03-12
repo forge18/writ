@@ -174,6 +174,7 @@ At runtime, the binding layer validates all type casts when a host-owned value i
 1. **Given** a Rust type is registered in one VM instance but not another, **then** scripts in the second VM cannot declare variables of that type — compile error.
 2. **Given** a registered Rust function returns `Result<T, String>`, **then** the script sees `Result<T>` and can use `?`, `is Success`, and `is Error` normally.
 3. **Given** a host destroys a Rust object while a script holds a reference to it, **then** the script's reference becomes a dangling reference. The host is responsible for ensuring object lifetimes exceed any script references.
+4. **Given** a script passes the same object as both receiver and argument (e.g., `q.dot(q)`) or two arguments to a native function are the same object, **then** the VM automatically detects the aliasing and clones the conflicting value before dispatching. No borrow panic can occur. Neither script authors nor host developers need to handle this case.
 
 ---
 

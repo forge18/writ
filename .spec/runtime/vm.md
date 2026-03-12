@@ -48,6 +48,20 @@ Heap-allocated objects — collections, script-created class instances — use r
 
 Entity-bound script objects are owned by the Rust host. Rust's ownership system manages their lifetime. When the entity is destroyed, the associated script object is freed. Zero VM overhead for host-owned objects.
 
+### 4.4 Borrow Safety
+
+The VM guarantees that no script operation or host binding can trigger a `RefCell` borrow panic. Internally, heap values are wrapped in `Rc<RefCell<T>>`. The VM handles two classes of aliasing:
+
+1. **Receiver-argument aliasing** — When a method argument is the same object as the receiver (e.g., `q.dot(q)`, `dict.merge(dict)`), the VM detects the aliasing via `Rc::ptr_eq` at dispatch and clones the conflicting argument before borrowing.
+
+2. **Pairwise argument aliasing** — When two arguments to a native function are the same object (e.g., `swap_health(player, player)`), the VM detects the aliasing via pairwise `Rc::ptr_eq` checks and clones the duplicate.
+
+Detection is zero-cost in the common (non-aliasing) case — only pointer comparisons. Cloning only occurs when aliasing is actually detected.
+
+As a safety net, all `borrow_mut()` calls at user-code dispatch sites use `try_borrow_mut()` so any missed case produces a `RuntimeError` instead of a process-terminating panic.
+
+Neither script authors nor host developers need to be aware of this mechanism. It is fully automatic.
+
 ---
 
 ## 5. Execution Model

@@ -3,6 +3,7 @@
 #[cfg(feature = "mobile-aosoa")]
 mod aosoa;
 pub mod binding;
+pub mod borrow_guard;
 pub(crate) mod class_instance;
 mod coroutine;
 mod debug;

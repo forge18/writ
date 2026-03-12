@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::vm::{VM, Value, WritObject};
 use regex::Regex;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WritRegex {
     pattern: Regex,
     source: String,
@@ -98,6 +98,10 @@ impl WritObject for WritRegex {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
     }
 }
 

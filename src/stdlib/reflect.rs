@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::vm::binding::{fn1, fn2, fn3};
+use crate::vm::borrow_guard::{dealias_args, has_receiver_aliasing, try_borrow_mut_val};
 use crate::vm::sequence::{NativeResult, Sequence, SequenceAction};
 use crate::vm::{VM, Value};
 
@@ -141,7 +142,14 @@ pub fn register(vm: &mut VM) {
 
             // Native objects: dispatch directly via WritObject::call_method
             if let Value::Object(ref obj_rc) = obj {
-                let result = obj_rc.borrow_mut().call_method(&method_name, &call_args)?;
+                // Dealias args that share the same Rc as the receiver
+                let safe_args = if has_receiver_aliasing(&obj, &call_args) {
+                    dealias_args(&obj, &call_args)
+                } else {
+                    call_args
+                };
+                let result =
+                    try_borrow_mut_val(obj_rc, "object")?.call_method(&method_name, &safe_args)?;
                 return Ok(NativeResult::Value(result));
             }
 

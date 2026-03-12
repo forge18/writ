@@ -103,6 +103,13 @@ impl WritObject for Player {
     }
 
     fn as_any(&self) -> &dyn Any { self }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(Player {
+            name: self.name.clone(),
+            health: self.health,
+        })
+    }
 }
 ```
 
@@ -166,3 +173,20 @@ match vm.run(source) {
 ```
 
 Runtime errors include a full stack trace with file, line, and function name at each frame. The stack trace is printed automatically via the `Display` implementation. Individual frames are also accessible via `e.trace.frames`.
+
+## Memory safety
+
+The VM automatically prevents borrow conflicts when the same object appears as both receiver and argument, or when two arguments to a function are the same object. You never need to worry about this — the VM handles it transparently.
+
+```writ
+// All of these are safe — no special handling required:
+let q = Quaternion(0.0, 1.0, 0.0, 0.0)
+let dot = q.dot(q)           // same object as receiver and argument
+
+let d = { "a": 1, "b": 2 }
+d.merge(d)                    // same dict as receiver and argument
+
+swap_health(player, player)   // same object passed twice to a function
+```
+
+In the common case (no aliasing), the cost is a single pointer comparison — effectively zero. When aliasing is detected, the VM clones the conflicting value before dispatching. If any borrow conflict is missed by aliasing detection, the VM produces a clean `RuntimeError` with a stack trace instead of crashing.

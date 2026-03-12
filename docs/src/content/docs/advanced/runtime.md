@@ -39,6 +39,10 @@ Three-tier model — no garbage collector, no GC pauses.
 - Predictable, no pause spikes
 - Circular references handled via weak references
 
+### Borrow safety
+
+The VM guarantees that no script operation can cause a borrow panic internally. When the same object appears as both a method receiver and an argument (e.g., `q.dot(q)`) or when two arguments to a native function are the same object (e.g., `swap(player, player)`), the VM automatically detects the aliasing via pointer comparison and clones the conflicting value before dispatching. Detection is zero-cost in the common (non-aliasing) case. All internal borrow sites use fallible borrows so any missed case produces a `RuntimeError` instead of a process crash. Neither script authors nor host developers need to handle this — it is fully automatic.
+
 ### Host ownership
 
 - Entity-bound script objects owned by Rust host

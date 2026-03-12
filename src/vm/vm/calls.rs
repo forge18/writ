@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::super::borrow_guard::{
+    dealias_args, dealias_fn_args, has_receiver_aliasing, try_borrow_mut_val,
+};
 use super::super::error::RuntimeError;
 use super::super::frame::{CallFrame, ChunkId};
 use super::super::value::Value;
@@ -202,7 +205,12 @@ impl VM {
             let arg_start = callee_abs + 1;
             let native_result = {
                 let args = &self.stack[arg_start..arg_start + n];
-                (body)(args).map_err(|msg| self.make_error(msg))?
+                // Dealias any args that share the same Rc (e.g. f(player, player))
+                if let Some(safe_args) = dealias_fn_args(args) {
+                    (body)(&safe_args).map_err(|msg| self.make_error(msg))?
+                } else {
+                    (body)(args).map_err(|msg| self.make_error(msg))?
+                }
             };
             match native_result {
                 super::super::sequence::NativeResult::Value(v) => {
@@ -246,7 +254,12 @@ impl VM {
         let arg_start = callee_abs + 1;
         let result = {
             let args = &self.stack[arg_start..arg_start + n];
-            (body)(args).map_err(|msg| self.make_error(msg))?
+            // Dealias any args that share the same Rc (e.g. f(player, player))
+            if let Some(safe_args) = dealias_fn_args(args) {
+                (body)(&safe_args).map_err(|msg| self.make_error(msg))?
+            } else {
+                (body)(args).map_err(|msg| self.make_error(msg))?
+            }
         };
         self.stack[callee_abs] = result;
         Ok(())
@@ -293,9 +306,15 @@ impl VM {
 
         // Object method dispatch
         if let Value::Object(ref obj_rc) = obj {
-            let result = obj_rc
-                .borrow_mut()
-                .call_method(&method_name, &remaining_args)
+            // Dealias args that share the same Rc as the receiver
+            let safe_args = if has_receiver_aliasing(&obj, &remaining_args) {
+                dealias_args(&obj, &remaining_args)
+            } else {
+                remaining_args
+            };
+            let result = try_borrow_mut_val(obj_rc, "object")
+                .map_err(|e| self.make_error(e))?
+                .call_method(&method_name, &safe_args)
                 .map_err(|e| self.make_error(e))?;
             self.stack[callee_abs] = result;
             return Ok(());
@@ -350,7 +369,14 @@ impl VM {
             let arg_start = receiver_abs + 1;
             let result = {
                 let args = &self.stack[arg_start..arg_start + n];
-                (unsafe { &*body })(&receiver, args).map_err(|msg| self.make_error(msg))?
+                // Dealias args that share the same Rc as the receiver (e.g. dict.merge(dict))
+                if has_receiver_aliasing(&receiver, args) {
+                    let safe_args = dealias_args(&receiver, args);
+                    (unsafe { &*body })(&receiver, &safe_args)
+                        .map_err(|msg| self.make_error(msg))?
+                } else {
+                    (unsafe { &*body })(&receiver, args).map_err(|msg| self.make_error(msg))?
+                }
             };
             self.stack[receiver_abs] = result;
             return Ok(());
@@ -380,7 +406,13 @@ impl VM {
             let arg_start = receiver_abs + 1;
             let native_result = {
                 let args = &self.stack[arg_start..arg_start + n];
-                (body)(&receiver, args).map_err(|msg| self.make_error(msg))?
+                // Dealias args that share the same Rc as the receiver
+                if has_receiver_aliasing(&receiver, args) {
+                    let safe_args = dealias_args(&receiver, args);
+                    (body)(&receiver, &safe_args).map_err(|msg| self.make_error(msg))?
+                } else {
+                    (body)(&receiver, args).map_err(|msg| self.make_error(msg))?
+                }
             };
             match native_result {
                 super::super::sequence::NativeResult::Value(v) => {
@@ -460,9 +492,15 @@ impl VM {
             let args: Vec<Value> = (0..n)
                 .map(|i| self.stack[receiver_abs + 1 + i].clone())
                 .collect();
-            let result = obj
-                .borrow_mut()
-                .call_method(&method_name, &args)
+            // Dealias args that share the same Rc as the receiver (e.g. q.dot(q))
+            let safe_args = if has_receiver_aliasing(&receiver, &args) {
+                dealias_args(&receiver, &args)
+            } else {
+                args
+            };
+            let result = try_borrow_mut_val(obj, "object")
+                .map_err(|e| self.make_error(e))?
+                .call_method(&method_name, &safe_args)
                 .map_err(|e| self.make_error(e))?;
             self.stack[receiver_abs] = result;
             return Ok(());

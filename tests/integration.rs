@@ -58,6 +58,13 @@ impl WritObject for MockPlayer {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(MockPlayer {
+            name: self.name.clone(),
+            health: self.health,
+        })
+    }
 }
 
 #[test]
@@ -2303,6 +2310,10 @@ impl WritObject for Counter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(Counter { count: self.count })
     }
 }
 
@@ -7563,4 +7574,160 @@ fn test_enum_declaration_with_fields() {
          return 1",
     );
     assert_eq!(result.unwrap(), Value::I32(1));
+}
+
+// ---------------------------------------------------------------------------
+// Borrow safety: aliasing detection tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn aliasing_dict_merge_self() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    // dict.merge(dict) — same dict as receiver and argument
+    let result = writ.run(
+        r#"let d = {"a": 1, "b": 2}
+           d.merge(d)
+           return d.len()"#,
+    );
+    // Should not panic — should produce correct result
+    assert_eq!(result.unwrap(), Value::I32(2));
+}
+
+#[test]
+fn aliasing_dict_has_self_key() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run(
+        r#"let d = {"key": "value"}
+           return d.has("key")"#,
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn aliasing_array_contains_same_array() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run(
+        r#"let a = [1, 2, 3]
+           return a.contains(a.last())"#,
+    );
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn aliasing_native_fn_same_object_args() {
+    // Test pairwise argument dealiasing for native functions.
+    // register_fn with fn2 where both args are the same object.
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    // Register a native fn that reads two objects
+    writ.register_host_fn_untyped(
+        "same_count",
+        fn2(
+            |a: Rc<RefCell<dyn WritObject>>,
+             b: Rc<RefCell<dyn WritObject>>|
+             -> Result<bool, String> {
+                let a_name = a.borrow().type_name().to_string();
+                let b_name = b.borrow().type_name().to_string();
+                Ok(a_name == b_name)
+            },
+        ),
+    );
+
+    writ.register_type("Counter", |_args| Ok(Box::new(Counter { count: 0 })));
+
+    let result = writ.run(
+        r#"let c = Counter()
+           return same_count(c, c)"#,
+    );
+    // Should not panic — both args are the same object
+    assert_eq!(result.unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn aliasing_object_method_self_arg() {
+    // Test WritObject::call_method where arg aliases receiver
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    // Register a counter type that has a method taking another counter
+    writ.register_type("Counter", |_args| Ok(Box::new(Counter { count: 0 })));
+
+    writ.register_method(
+        ValueTag::Object,
+        "addCount",
+        None,
+        mfn1(
+            |this: Rc<RefCell<dyn WritObject>>,
+             other: Rc<RefCell<dyn WritObject>>|
+             -> Result<Value, String> {
+                let this_count = match this.borrow().get_field("count")? {
+                    Value::I32(v) => v,
+                    _ => return Err("expected int".into()),
+                };
+                let other_count = match other.borrow().get_field("count")? {
+                    Value::I32(v) => v,
+                    _ => return Err("expected int".into()),
+                };
+                Ok(Value::I32(this_count + other_count))
+            },
+        ),
+    );
+
+    let result = writ.run(
+        r#"let c = Counter()
+           c.count = 5
+           return c.addCount(c)"#,
+    );
+    // c.addCount(c) — same object as receiver and arg — should not panic
+    assert_eq!(result.unwrap(), Value::I32(10));
+}
+
+#[test]
+fn aliasing_quaternion_dot_self() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+    let result = writ.run(
+        r#"let q = Quaternion_IDENTITY
+           return q.dot(q)"#,
+    );
+    // dot(identity, identity) = 1.0
+    let val = result.unwrap();
+    match val {
+        Value::F64(f) => assert!((f - 1.0).abs() < 1e-6, "expected 1.0, got {f}"),
+        other => panic!("expected F64, got {other:?}"),
+    }
+}
+
+#[test]
+fn aliasing_invoke_self_as_arg() {
+    let mut writ = Writ::new();
+    writ.disable_type_checking();
+
+    writ.register_type("Counter", |_args| Ok(Box::new(Counter { count: 0 })));
+
+    // Use invoke(obj, "increment") — no aliasing here, but tests reflect path
+    let result = writ.run(
+        r#"let c = Counter()
+           invoke(c, "increment")
+           return c.count"#,
+    );
+    assert_eq!(result.unwrap(), Value::I32(1));
+}
+
+#[test]
+fn aliasing_display_during_borrow_does_not_panic() {
+    // Verify that Display on a Value with try_borrow fallback works
+    let arr = Value::Array(Rc::new(RefCell::new(vec![Value::I32(1), Value::I32(2)])));
+    let s = format!("{arr}");
+    assert_eq!(s, "[1, 2]");
+
+    let dict = Value::Dict(Rc::new(RefCell::new(
+        [("key".to_string(), Value::I32(42))].into_iter().collect(),
+    )));
+    let s = format!("{dict}");
+    assert!(s.contains("key"));
 }

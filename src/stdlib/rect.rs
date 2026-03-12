@@ -101,6 +101,10 @@ impl WritObject for WritRectangle {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
+    }
 }
 
 // --- BoundingBox ---
@@ -199,6 +203,10 @@ impl WritObject for WritBoundingBox {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(self.clone())
     }
 }
 

@@ -34,6 +34,11 @@ pub trait WritObject: std::fmt::Debug + 'static {
 
     /// Returns self as `&dyn Any` for downcasting to concrete types.
     fn as_any(&self) -> &dyn Any;
+
+    /// Clone this object into a new `Box`. Required for aliasing safety —
+    /// the VM calls this when it detects that a method argument is the same
+    /// `Rc` as the receiver, to break the alias before borrowing.
+    fn clone_box(&self) -> Box<dyn WritObject>;
 }
 
 impl WritObject for Box<dyn WritObject> {
@@ -57,5 +62,8 @@ impl WritObject for Box<dyn WritObject> {
     }
     fn as_any(&self) -> &dyn Any {
         (**self).as_any()
+    }
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        (**self).clone_box()
     }
 }

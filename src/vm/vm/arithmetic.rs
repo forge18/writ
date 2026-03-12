@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use super::super::borrow_guard::{dealias_value, try_borrow_mut_val, values_alias};
 use super::super::error::RuntimeError;
 use super::super::value::Value;
 use super::{ArithOps, CmpOps, VM};
@@ -142,9 +143,14 @@ impl VM {
                 } else {
                     // Try native WritObject::call_method
                     if let Value::Object(obj) = &receiver {
-                        let result = obj
-                            .borrow_mut()
-                            .call_method(method_name, &[rhs])
+                        // Dealias rhs if it's the same Rc as receiver (e.g. vec.add(vec))
+                        let safe_rhs = if values_alias(&receiver, &rhs) {
+                            dealias_value(&rhs)
+                        } else {
+                            rhs
+                        };
+                        let result = try_borrow_mut_val(obj, "object")
+                            .and_then(|mut o| o.call_method(method_name, &[safe_rhs]))
                             .map_err(|e| self.make_error(e));
                         Some(result)
                     } else {

@@ -323,6 +323,11 @@ impl RustCodegen {
         // as_any()
         out.push_str("    fn as_any(&self) -> &dyn std::any::Any {\n");
         out.push_str("        self\n");
+        out.push_str("    }\n\n");
+
+        // clone_box()
+        out.push_str("    fn clone_box(&self) -> Box<dyn WritObject> {\n");
+        out.push_str("        Box::new(self.clone())\n");
         out.push_str("    }\n");
 
         out.push_str("}\n\n");

@@ -185,6 +185,20 @@ impl WritObject for WritTween {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn clone_box(&self) -> Box<dyn WritObject> {
+        Box::new(WritTween {
+            from: self.from,
+            to: self.to,
+            duration: self.duration,
+            elapsed: self.elapsed,
+            delay: self.delay,
+            loop_mode: self.loop_mode,
+            easing: self.easing.clone(),
+            finished: self.finished,
+            direction: self.direction,
+        })
+    }
 }
 
 pub fn register(vm: &mut VM) {
